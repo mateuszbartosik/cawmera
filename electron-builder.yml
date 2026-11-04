@@ -1,0 +1,31 @@
+appId: io.github.mateuszbartosik.cawmera
+productName: Cawmera
+copyright: Copyright © 2026 Mateusz Bartosik
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+asar: true
+win:
+  target:
+    - portable
+    - zip
+  icon: build/icon.png
+  # No code-signing certificate yet. Skips signing only; the icon and version info are still written.
+  signExecutable: false
+portable:
+  artifactName: ${productName}-${version}-portable.exe
+mac:
+  target: dmg
+  category: public.app-category.graphics-design
+  icon: build/icon.png
+  extendInfo:
+    NSScreenCaptureUsageDescription: Cawmera captures a window or screen so you can put it into a frame.
+linux:
+  target: AppImage
+  category: Graphics
+  icon: build/icon.png

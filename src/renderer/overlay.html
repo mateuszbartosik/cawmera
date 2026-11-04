@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cawmera countdown</title>
+  </head>
+  <body>
+    <main class="countdown">
+      <div class="bubble" role="timer" aria-live="assertive" aria-label="Capturing soon">
+        <svg class="ring" viewBox="0 0 132 132" aria-hidden="true">
+          <circle class="track" cx="66" cy="66" r="60" />
+          <circle class="progress" cx="66" cy="66" r="60" />
+        </svg>
+        <span class="number"></span>
+      </div>
+      <button class="cancel" type="button">Cancel</button>
+    </main>
+    <script type="module" src="./src/overlay/overlay.ts"></script>
+  </body>
+</html>
