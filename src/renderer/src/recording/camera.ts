@@ -23,6 +23,8 @@ function blend(from: CameraState, to: CameraState, progress: number): CameraStat
   }
 }
 
+const holdLength = (zoom: ZoomSegment) => zoom.end - zoom.start
+
 const stateOf = (zoom: ZoomSegment): CameraState => ({ depth: zoom.depth, focus: zoom.focus })
 
 function transitionsBetween(zooms: ZoomSegment[], wide: CameraState, transitionMs: number): Transition[] {
@@ -41,9 +43,10 @@ function transitionsBetween(zooms: ZoomSegment[], wide: CameraState, transitionM
       transitions.push({ from: wide, to: stateOf(b), start: b.start - transitionMs, end: b.start })
       return
     }
-    const duration = Math.max(gap, transitionMs)
-    const middle = a.end + gap / 2
-    transitions.push({ from: stateOf(a), to: stateOf(b), start: middle - duration / 2, end: middle + duration / 2 })
+    const stretch = (Math.max(gap, transitionMs) - gap) / 2
+    const reachIntoA = Math.min(stretch, holdLength(a) / 2)
+    const reachIntoB = Math.min(stretch, holdLength(b) / 2)
+    transitions.push({ from: stateOf(a), to: stateOf(b), start: a.end - reachIntoA, end: b.start + reachIntoB })
   })
   return transitions
 }

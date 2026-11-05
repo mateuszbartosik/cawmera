@@ -43,4 +43,28 @@ describe('cameraAt', () => {
     expect(cameraAt(5050, zooms, frame, 'calm').focus.x).toBeCloseTo(950, 5)
     expect(cameraAt(5450, zooms, frame, 'calm').focus.x).toBe(1500)
   })
+
+  it.each(['calm', 'quick'] as const)('stays continuous around short holds (%s)', speed => {
+    const sequences = [
+      [z(3000, 3150, 2, 400, 400), z(3150, 6000, 2, 800, 600)],
+      [z(1000, 5000, 2, 400, 400), z(5000, 5100, 1.5, 700, 500), z(5100, 9000, 2, 900, 600)],
+      [z(1000, 5000, 2, 400, 400), z(5000, 5100, 1.5, 700, 500), z(5300, 9000, 2, 900, 600)],
+      [z(3000, 3150, 2, 400, 400), z(3350, 6000, 2, 800, 600)]
+    ]
+    for (const zooms of sequences) {
+      let previous = cameraAt(0, zooms, frame, speed)
+      for (let t = 1; t <= 12_000; t++) {
+        const current = cameraAt(t, zooms, frame, speed)
+        expect(Math.abs(current.depth - previous.depth)).toBeLessThan(0.05)
+        expect(Math.hypot(current.focus.x - previous.focus.x, current.focus.y - previous.focus.y)).toBeLessThan(40)
+        previous = current
+      }
+    }
+  })
+
+  it('leaves a short hold at its midpoint and arrives a full transition later', () => {
+    const zooms = [z(3000, 3150, 2, 400, 400), z(3150, 6000, 2, 800, 600)]
+    expect(cameraAt(3075, zooms, frame, 'calm').focus.x).toBe(400)
+    expect(cameraAt(3500, zooms, frame, 'calm').focus.x).toBe(800)
+  })
 })
