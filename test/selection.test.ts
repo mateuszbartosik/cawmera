@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { backdropPlan } from '../src/renderer/src/app/backdrop'
 import { DEFAULT_DOC, type Doc } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE, HOUSE_STYLE_VERSION, loadHouseStyle, sanitizeHouseStyle, serializeHouseStyle } from '../src/renderer/src/app/house-style'
 import {
@@ -125,5 +126,41 @@ describe('light intensity', () => {
     expect(serializeHouseStyle(DEFAULT_HOUSE_STYLE).version).toBe(HOUSE_STYLE_VERSION)
     expect(loadHouseStyle(serializeHouseStyle(DEFAULT_HOUSE_STYLE))).toEqual(DEFAULT_HOUSE_STYLE)
     expect(sanitizeHouseStyle({ glowStrength: 3 }).glowStrength).toBe(1)
+  })
+})
+
+describe('house background image', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAE='
+
+  it('travels with a shared style', () => {
+    const shared = serializeHouseStyle({ ...DEFAULT_HOUSE_STYLE, backgroundImage: png })
+    expect(loadHouseStyle(JSON.parse(JSON.stringify(shared))).backgroundImage).toBe(png)
+  })
+
+  it('is dropped when it is not an image', () => {
+    for (const bad of ['javascript:alert(1)', 'data:text/html;base64,PGgxPg==', 'https://example.com/a.png', 'data:image/png;base64,<svg>', 42]) {
+      expect(sanitizeHouseStyle({ backgroundImage: bad }).backgroundImage).toBeNull()
+    }
+  })
+
+  it('is missing from styles saved before it existed', () => {
+    expect(loadHouseStyle({ version: 2, plateFrom: '#12213F', glow: '#63FFA6' }).backgroundImage).toBeNull()
+  })
+})
+
+describe('storing a picked background image', () => {
+  const MB = 1024 * 1024
+
+  it('keeps a small image as it is', () => {
+    expect(backdropPlan(1.5 * MB, { width: 2400, height: 1260 })).toEqual({ keep: true })
+  })
+
+  it('re-encodes a heavy one at the same size', () => {
+    expect(backdropPlan(3 * MB, { width: 2400, height: 1260 })).toEqual({ keep: false, size: { width: 2400, height: 1260 } })
+  })
+
+  it('scales one over 4000 px down to 4000 on its long side', () => {
+    expect(backdropPlan(1 * MB, { width: 6000, height: 3000 })).toEqual({ keep: false, size: { width: 4000, height: 2000 } })
+    expect(backdropPlan(1 * MB, { width: 3000, height: 8000 })).toEqual({ keep: false, size: { width: 1500, height: 4000 } })
   })
 })

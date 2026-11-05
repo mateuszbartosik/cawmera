@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
-import { EDGE_NAMES, exportFileName, FORMAT_LABEL, type Density, type Doc, type ExportFormat, type RedactStyle, type UiZoom } from '../app/doc'
-import { OUTPUT, type HouseStyle } from '../app/house-style'
+import { EDGE_NAMES, FORMAT_LABEL, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
+import type { HouseStyle } from '../app/house-style'
 import {
   addRedaction,
   addSpotlight,
@@ -23,18 +23,22 @@ import {
   setAngle,
   setEdge,
   setFileName,
+  setFill,
   setLightColor,
   setLightIntensity,
-  shuffleBackground,
+  setSize,
+  shuffleLook,
   startCapture
 } from '../app/actions'
 import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
 import { computeLayout } from '../render/layout'
 import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
+import { BackdropField } from './BackdropField'
 import { EdgePicker } from './EdgePicker'
 import { FileDrop } from './FileDrop'
 import { LightPad } from './LightPad'
+import { SizeField } from './SizeField'
 import { isNarrow, PANEL_GAP, PANEL_WIDTH, SHEET_SHARE } from '../canvas/view'
 
 const DELAYS: { value: CaptureDelay; label: string }[] = [
@@ -60,6 +64,10 @@ const REDACT_OPTIONS: { value: RedactStyle; label: string }[] = [
   { value: 'solid', label: 'Solid' }
 ]
 const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = (['webp', 'png'] as const).map((value) => ({ value, label: FORMAT_LABEL[value] }))
+const FILL_OPTIONS: { value: Fill; label: string }[] = [
+  { value: 'gradient', label: 'Gradient' },
+  { value: 'image', label: 'Image' }
+]
 
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const px = (value: number) => `${Math.round(value)}px`
@@ -73,7 +81,7 @@ function useSection(id: string) {
 function EdgeField({ doc, style }: { doc: Doc; style: HouseStyle }) {
   const source = getSource(doc.sourceId)
   if (!source) return null
-  const effective = computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style).edge
+  const effective = computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size).edge
   return (
     <Field
       label="Edge"
@@ -169,14 +177,17 @@ function ScreenshotSection() {
 }
 
 function BackgroundSection() {
+  const fill = useApp((s) => s.doc.fill)
   const angle = useApp((s) => s.doc.angle)
   const lightColor = useApp((s) => s.doc.lightColor)
   const intensity = useApp((s) => s.doc.lightIntensity)
   const houseColor = useApp((s) => s.style.glow)
+  const hasImage = useApp((s) => s.style.backgroundImage !== null)
+  const backdrop = useApp((s) => s.backdrop?.bitmap ?? null)
   const section = useSection('background')
   const before = useRef<Doc | null>(null)
   const color = lightColor ?? houseColor
-  const customized = lightColor !== null || intensity !== 1
+  const customized = fill !== 'gradient' || lightColor !== null || intensity !== 1
   const startDrag = () => {
     before.current ??= store.get().doc
   }
@@ -189,20 +200,49 @@ function BackgroundSection() {
       title="Background"
       testId="section-background"
       {...section}
-      actions={
-        <IconButton label="Random light direction" shortcut="R" onClick={shuffleBackground} data-testid="shuffle">
-          <Shuffle size={13} />
-        </IconButton>
-      }
       onReset={customized ? resetBackground : undefined}
-      resetLabel="House light colour and intensity"
+      resetLabel="Back to the house gradient"
     >
+      <Segmented
+        label="Fill"
+        help="Gradient is the house colours, lit from one side. Image fills the shot with the house background image."
+        value={fill}
+        options={FILL_OPTIONS}
+        onChange={setFill}
+        testId="fill"
+      />
+      {fill === 'image' ? (
+        <BackdropField hasImage={hasImage} bitmap={backdrop} />
+      ) : (
+        <LightFields angle={angle} color={color} houseColor={houseColor} intensity={intensity} onDragStart={startDrag} onDragEnd={endDrag} />
+      )}
+    </Section>
+  )
+}
+
+function LightFields({
+  angle,
+  color,
+  houseColor,
+  intensity,
+  onDragStart,
+  onDragEnd
+}: {
+  angle: number
+  color: string
+  houseColor: string
+  intensity: number
+  onDragStart: () => void
+  onDragEnd: () => void
+}) {
+  return (
+    <>
       <Field
         label="Light"
         help="Where the light comes from: drag it round the shot (Shift snaps to 15°). New shots get a random direction, so neighbouring images never match."
         value={<NumberField label="Light angle" value={angle} suffix="°" min={0} max={359} wrap compact onChange={(value) => setAngle(value)} testId="light-angle" />}
       >
-        <LightPad angle={angle} glow={color} onChange={setAngle} onDragStart={startDrag} onDragEnd={endDrag} />
+        <LightPad angle={angle} glow={color} onChange={setAngle} onDragStart={onDragStart} onDragEnd={onDragEnd} />
       </Field>
       <ColorField label="Colour" value={color} onChange={(value) => setLightColor(value === houseColor ? null : value)} />
       <Slider
@@ -214,12 +254,12 @@ function BackgroundSection() {
         step={0.05}
         format={percent}
         onChange={(value) => {
-          startDrag()
+          onDragStart()
           setLightIntensity(value, false)
         }}
-        onCommit={endDrag}
+        onCommit={onDragEnd}
       />
-    </Section>
+    </>
   )
 }
 
@@ -309,7 +349,7 @@ function HouseStyleSection() {
       />
       <Slider
         label="Design width"
-        help="How wide the image will be shown, e.g. the column of your docs or blog. At 100% zoom the captured UI appears at its real size at this width. 800 keeps Retina captures pixel-exact."
+        help="How wide a 1600 px image is shown, e.g. the column of your docs or blog. At 100% zoom the captured UI appears at its real size there, and keeps that scale in every image size. 800 keeps Retina captures pixel-exact."
         value={style.designWidth}
         min={480}
         max={1000}
@@ -341,6 +381,7 @@ function HouseStyleSection() {
 }
 
 function ExportSection() {
+  const size = useApp((s) => s.doc.size)
   const fileName = useApp((s) => s.doc.fileName)
   const format = useApp((s) => s.format)
   const index = useApp((s) => s.shots.findIndex((record) => record.id === s.activeId))
@@ -348,6 +389,7 @@ function ExportSection() {
   const fallback = `whats-new-shot-${index + 1}`
   return (
     <Section title="Export" testId="section-export" {...section}>
+      <SizeField size={size} onChange={setSize} />
       <TextField
         label="File name"
         help="Name it after the page and the feature, like billing-cost-breakdown."
@@ -366,9 +408,6 @@ function ExportSection() {
         onChange={(value) => store.set({ format: value })}
         testId="format"
       />
-      <p className="-mt-1 text-[11px] leading-4 text-(--tc-value)" data-testid="export-spec" title={exportFileName(fileName, format, fallback)}>
-        {OUTPUT.width} × {OUTPUT.height} px · 16:10 · lossless
-      </p>
     </Section>
   )
 }
@@ -394,6 +433,9 @@ export function Panel() {
     >
       <header className="flex h-9 shrink-0 items-center gap-0.5 pr-1.5 pl-3">
         <h1 className="flex-1 text-[13px] leading-[18px] font-medium">Cawmera</h1>
+        <IconButton label="Shuffle the look" shortcut="R" side="bottom" onClick={shuffleLook} data-testid="shuffle">
+          <Shuffle size={13} />
+        </IconButton>
         {hasSource && (
           <IconButton label="Reset this shot" side="bottom" onClick={resetAll}>
             <ArrowCounterClockwise size={13} />

@@ -1,4 +1,5 @@
-import type { Rect } from '../render/geometry'
+import type { Rect, Size } from '../render/geometry'
+import { DEFAULT_SIZE } from './size'
 
 /** Pixel density a screenshot was taken at (OS display scaling). */
 export type Density = 1 | 1.25 | 1.5 | 2
@@ -55,9 +56,14 @@ export interface Spotlight {
   outline: boolean
 }
 
+/** What fills the background: the house gradient lit by the shot's light, or the house image. */
+export type Fill = 'gradient' | 'image'
+
 /** Everything that shapes one exported image. One snapshot = one undo step. */
 export interface Doc {
   sourceId: string | null
+  /** The exported image, px. The screenshot keeps its scale in every size; a smaller image shows less of it. */
+  size: Size
   capturedAt: Density
   zoom: UiZoom
   /**
@@ -77,6 +83,7 @@ export interface Doc {
   lightColor: string | null
   /** Light intensity; 1 = the house strength. */
   lightIntensity: number
+  fill: Fill
   fileName: string
 }
 
@@ -84,6 +91,7 @@ export const DEFAULT_SPOTLIGHT: Spotlight = { on: false, rect: null, dim: 0.55, 
 
 export const DEFAULT_DOC: Doc = {
   sourceId: null,
+  size: DEFAULT_SIZE,
   capturedAt: 1,
   zoom: 1,
   crop: null,
@@ -94,6 +102,7 @@ export const DEFAULT_DOC: Doc = {
   angle: 315,
   lightColor: null,
   lightIntensity: 1,
+  fill: 'gradient',
   fileName: ''
 }
 

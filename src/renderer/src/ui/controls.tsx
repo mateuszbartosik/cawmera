@@ -10,7 +10,7 @@ import {
   type ReactNode
 } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowCounterClockwise, CaretDown, Question } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, CaretDown, Check, Question } from '@phosphor-icons/react'
 
 export const cn = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ')
 
@@ -514,16 +514,20 @@ export function ColorField({ label, value, onChange }: { label: string; value: s
 export function NumberField({
   label,
   value,
+  prefix,
   suffix,
   min,
   max,
   wrap = false,
   compact = false,
+  grow = false,
   onChange,
   testId
 }: {
   label: string
   value: number
+  /** A short name in front of the number, e.g. W. */
+  prefix?: string
   suffix?: string
   min: number
   max: number
@@ -531,6 +535,8 @@ export function NumberField({
   wrap?: boolean
   /** Small enough to sit in a field's label row. */
   compact?: boolean
+  /** Shares a row with others instead of hugging the number. */
+  grow?: boolean
   onChange: (value: number) => void
   testId?: string
 }) {
@@ -556,16 +562,26 @@ export function NumberField({
     <div
       className={cn(
         'flex items-center border border-(--tc-line) bg-(--tc-control) transition-colors focus-within:border-(--tc-accent)',
-        compact ? 'h-6 w-14 rounded-md' : 'h-7 w-16 rounded-lg'
+        grow ? 'h-7 min-w-0 flex-1 rounded-lg' : compact ? 'h-6 w-14 rounded-md' : 'h-7 w-16 rounded-lg'
       )}
     >
+      {prefix && (
+        <span className="pl-2 text-xs text-(--tc-value) select-none" aria-hidden>
+          {prefix}
+        </span>
+      )}
       <input
         aria-label={label}
         data-testid={testId}
         inputMode="numeric"
         // As wide as the number, so the unit sits right after it ("68°").
-        style={{ width: `calc(${Math.max(1, draft.length)}ch + 10px)` }}
-        className={cn('h-full min-w-0 bg-transparent pl-2 text-(--tc-fg) tabular-nums outline-none', compact ? 'text-xs' : 'text-[13px]')}
+        style={grow ? undefined : { width: `calc(${Math.max(1, draft.length)}ch + 10px)` }}
+        className={cn(
+          'h-full min-w-0 bg-transparent text-(--tc-fg) tabular-nums outline-none',
+          prefix ? 'pl-1.5' : 'pl-2',
+          grow && 'flex-1 pr-2',
+          compact ? 'text-xs' : 'text-[13px]'
+        )}
         value={draft}
         spellCheck={false}
         autoComplete="off"
@@ -585,5 +601,162 @@ export function NumberField({
       />
       {suffix && <span className={cn('flex-1 pr-2 text-(--tc-value)', compact ? 'text-xs' : 'text-[13px]')}>{suffix}</span>}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Select: a button that opens a list, portalled like the tooltip so the panel never clips it.
+
+export interface SelectOption<T> {
+  value: T
+  label: string
+  /** Muted, on the right, e.g. a size. */
+  detail?: string
+}
+
+export function Select<T extends string | number>({
+  label,
+  value,
+  options,
+  placeholder,
+  detail,
+  onChange,
+  testId
+}: {
+  label: string
+  /** null: none of the options, shown as `placeholder` with `detail`. */
+  value: T | null
+  options: SelectOption<T>[]
+  placeholder: string
+  detail?: string
+  onChange: (value: T) => void
+  testId?: string
+}) {
+  const id = useId()
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null)
+  const selectedIndex = options.findIndex((option) => option.value === value)
+  const current = selectedIndex >= 0 ? options[selectedIndex] : null
+
+  const show = () => {
+    setHighlight(Math.max(0, selectedIndex))
+    setOpen(true)
+  }
+  const close = (refocus = true) => {
+    setOpen(false)
+    if (refocus) buttonRef.current?.focus()
+  }
+  const choose = (index: number) => {
+    onChange(options[index].value)
+    close()
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const place = () => {
+      const anchor = buttonRef.current?.getBoundingClientRect()
+      if (!anchor) return
+      const height = listRef.current?.offsetHeight ?? 0
+      const below = anchor.bottom + 4
+      const top = below + height > window.innerHeight - 8 ? Math.max(8, anchor.top - 4 - height) : below
+      setPosition({ left: anchor.left, top, width: anchor.width })
+    }
+    place()
+    listRef.current?.focus()
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (!listRef.current?.contains(target) && !buttonRef.current?.contains(target)) close(false)
+    }
+    const onScroll = (event: Event) => {
+      if (!listRef.current?.contains(event.target as Node)) close(false)
+    }
+    window.addEventListener('resize', place)
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [open])
+
+  const onButtonKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      show()
+    }
+  }
+  const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0
+    if (step) {
+      event.preventDefault()
+      setHighlight((index) => (index + step + options.length) % options.length)
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      choose(highlight)
+    } else if (event.key === 'Escape') {
+      event.preventDefault()
+      close()
+    } else if (event.key === 'Tab') {
+      close(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        data-testid={testId}
+        onClick={() => (open ? close() : show())}
+        onKeyDown={onButtonKeyDown}
+        className={cn(
+          'flex h-7 w-full items-center gap-2 rounded-lg border bg-(--tc-control) pr-1.5 pl-2 text-[13px] text-(--tc-fg) transition-colors outline-none hover:bg-(--tc-control-hover) focus-visible:border-(--tc-accent)',
+          open ? 'border-(--tc-accent)' : 'border-(--tc-line)'
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate text-left">{current?.label ?? placeholder}</span>
+        <span className="shrink-0 text-(--tc-value) tabular-nums">{current?.detail ?? detail}</span>
+        <CaretDown size={12} className="shrink-0 text-(--tc-label)" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={listRef}
+            id={id}
+            role="listbox"
+            tabIndex={-1}
+            aria-label={label}
+            aria-activedescendant={`${id}-${highlight}`}
+            onKeyDown={onListKeyDown}
+            className="fixed z-50 rounded-lg border border-(--tc-line) bg-(--tc-panel-solid) p-1 text-(--tc-fg) shadow-[var(--tc-panel-shadow)] outline-none"
+            style={{ left: position?.left ?? -9999, top: position?.top ?? -9999, width: position?.width }}
+          >
+            {options.map((option, index) => (
+              <div
+                key={String(option.value)}
+                id={`${id}-${index}`}
+                role="option"
+                aria-selected={index === selectedIndex}
+                onPointerEnter={() => setHighlight(index)}
+                onClick={() => choose(index)}
+                className={cn('relative flex h-7 cursor-default items-center gap-2 rounded-md pr-2 pl-6 text-[13px]', index === highlight && 'bg-(--tc-control-hover)')}
+              >
+                {index === selectedIndex && <Check size={12} weight="bold" className="absolute left-1.5" />}
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {option.detail && <span className="shrink-0 text-(--tc-value) tabular-nums">{option.detail}</span>}
+              </div>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
   )
 }

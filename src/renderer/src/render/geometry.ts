@@ -10,6 +10,11 @@ export interface Point {
   y: number
 }
 
+export interface Size {
+  width: number
+  height: number
+}
+
 export const rect = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h })
 
 export function intersect(a: Rect, b: Rect): Rect | null {

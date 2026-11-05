@@ -1,6 +1,6 @@
-import { OUTPUT } from '../app/house-style'
-import { FIT_ALL, getSource, store, type AppState, type Camera } from '../app/store'
-import type { Rect } from '../render/geometry'
+import { EXPORT_DENSITY } from '../app/house-style'
+import { FIT_ALL, getSource, liveShots, store, type AppState, type Camera } from '../app/store'
+import type { Point, Rect, Size } from '../render/geometry'
 
 export const PANEL_WIDTH = 300
 export const PANEL_GAP = 10
@@ -40,14 +40,39 @@ export interface WorkspaceGeometry {
   originY: number
 }
 
-/** World rect of shot `index` on the shots canvas (export px). */
-export function shotRect(index: number): Rect {
-  return { x: index * (OUTPUT.width + SHOT_GAP), y: 0, w: OUTPUT.width, h: OUTPUT.height }
+/** World rects of the shots on the shots canvas (export px): a row, top-aligned, each at its own size. */
+export function shotRects(sizes: Size[]): Rect[] {
+  let x = 0
+  return sizes.map(({ width, height }) => {
+    const r = { x, y: 0, w: width, h: height }
+    x += width + SHOT_GAP
+    return r
+  })
 }
 
-function shotsBounds(count: number): Rect {
-  const n = Math.max(1, count)
-  return { x: 0, y: 0, w: n * OUTPUT.width + (n - 1) * SHOT_GAP, h: OUTPUT.height }
+/** The sizes of all shots, the active one live. */
+export const shotSizes = (s: AppState): Size[] => liveShots(s).map((record) => record.doc.size)
+
+/** World rect of shot `index` (export px). */
+export const shotRect = (s: AppState, index: number): Rect => shotRects(shotSizes(s))[index] ?? { x: 0, y: 0, w: s.doc.size.width, h: s.doc.size.height }
+
+function shotsBounds(rects: Rect[]): Rect {
+  const last = rects.at(-1)
+  if (!last) return { x: 0, y: 0, w: 0, h: 0 }
+  return { x: 0, y: 0, w: last.x + last.w, h: Math.max(...rects.map((r) => r.h)) }
+}
+
+/** Where a shot dragged by its name lands: the number of shots whose middle is left of `x`. */
+export function slotAt(rects: Rect[], x: number): number {
+  return rects.filter((r) => r.x + r.w / 2 < x).length
+}
+
+/** World x of the line drawn between shots for a reorder slot. */
+export function slotX(rects: Rect[], slot: number): number {
+  if (rects.length === 0) return 0
+  if (slot < rects.length) return rects[slot].x - SHOT_GAP / 2
+  const last = rects[rects.length - 1]
+  return last.x + last.w + SHOT_GAP / 2
 }
 
 export function activeIndex(s: Pick<AppState, 'shots' | 'activeId'>): number {
@@ -73,7 +98,12 @@ function resolveCamera(s: AppState, cropping: boolean, area: WorkspaceGeometry['
   const camera = cropping ? s.cropView : s.view
   if (!camera.fit) return { zoom: camera.zoom, cx: camera.cx, cy: camera.cy }
   const source = getSource(s.doc.sourceId)
-  const target = cropping && source ? { x: 0, y: 0, w: source.width, h: source.height } : camera.fit === 'active' ? shotRect(activeIndex(s)) : shotsBounds(s.shots.length)
+  const target =
+    cropping && source
+      ? { x: 0, y: 0, w: source.width, h: source.height }
+      : camera.fit === 'active'
+        ? shotRect(s, activeIndex(s))
+        : shotsBounds(shotRects(shotSizes(s)))
   const narrow = isNarrow(s)
   const padX = narrow ? 16 : FIT_PADDING_X
   const padY = narrow ? 12 : FIT_PADDING_Y
@@ -89,7 +119,7 @@ export function workspaceGeometry(s: AppState): WorkspaceGeometry {
   const source = getSource(s.doc.sourceId)
   const cropping = s.mode === 'crop' && source !== null
   const area = areaOf(s, cropping)
-  const density = cropping ? s.doc.capturedAt : OUTPUT.scale
+  const density = cropping ? s.doc.capturedAt : EXPORT_DENSITY
   const camera = resolveCamera(s, cropping, area, density)
   const k = camera.zoom / density
   return {
@@ -114,11 +144,8 @@ export function toWorld(g: WorkspaceGeometry, x: number, y: number) {
 }
 
 /** Index of the shot under a world point, or -1. */
-export function shotAt(count: number, p: { x: number; y: number }): number {
-  if (p.y < 0 || p.y > OUTPUT.height || p.x < 0) return -1
-  const index = Math.floor(p.x / (OUTPUT.width + SHOT_GAP))
-  const local = p.x - index * (OUTPUT.width + SHOT_GAP)
-  return index < count && local <= OUTPUT.width ? index : -1
+export function shotAt(sizes: Size[], p: Point): number {
+  return shotRects(sizes).findIndex((r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)
 }
 
 function setCamera(camera: Camera) {
@@ -172,7 +199,8 @@ export function revealActive() {
   const s = store.get()
   if (s.mode === 'crop' || s.view.fit === 'all') return
   const g = workspaceGeometry(s)
-  const r = toScreen(g, shotRect(activeIndex(s)))
+  const target = shotRect(s, activeIndex(s))
+  const r = toScreen(g, target)
   const inside =
     r.left >= g.area.x && r.top - LABEL_SPACE >= g.area.y && r.left + r.width <= g.area.x + g.area.width && r.top + r.height <= g.area.y + g.area.height
   if (inside) return
@@ -181,6 +209,5 @@ export function revealActive() {
     zoomToActive()
     return
   }
-  const target = shotRect(activeIndex(s))
   store.set({ view: { fit: null, zoom: g.zoom, cx: target.x + target.w / 2, cy: target.y + target.h / 2 - LABEL_SPACE / 2 / g.k } })
 }

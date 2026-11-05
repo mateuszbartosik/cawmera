@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ImageSquare, Trash, X } from '@phosphor-icons/react'
-import { OUTPUT, type HouseStyle } from '../app/house-style'
+import type { HouseStyle } from '../app/house-style'
 import type { Doc } from '../app/doc'
 import { deleteShot, enterCrop, leaveCrop, removeSelected, shotFileName } from '../app/actions'
 import {
@@ -53,7 +53,7 @@ import {
   type Size
 } from '../render/layout'
 import { cn } from '../ui/controls'
-import { activeIndex, panBy, SHOT_GAP, shotAt, shotRect, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
+import { activeIndex, panBy, shotAt, shotRects, slotAt, slotX, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
 
 const HANDLE_PX = 8
 const MIN_ITEM = 6
@@ -127,7 +127,7 @@ function setItemRects(targets: BoxRef[], rects: Rect[]) {
 function capFor(doc: Doc): Size {
   const style = store.get().style
   const scale = scaleFor(doc.capturedAt, doc.zoom, style)
-  return capacity(scale, style, doc.edge ?? null)
+  return capacity(scale, style, doc.edge ?? null, doc.size)
 }
 
 /** The selection crop mode shows: what the frame actually shows. */
@@ -136,8 +136,8 @@ function selectionFor(doc: Doc): Rect | null {
   if (!source) return null
   const style = store.get().style
   const scale = scaleFor(doc.capturedAt, doc.zoom, style)
-  const edge = resolveEdge(doc.edge, doc.crop, source, scale, style)
-  return effectiveSelection(doc.crop, source, capacity(scale, style, edge), edge)
+  const edge = resolveEdge(doc.edge, doc.crop, source, scale, style, doc.size)
+  return effectiveSelection(doc.crop, source, capacity(scale, style, edge, doc.size), edge)
 }
 
 /** Dot grid that moves and scales with the canvas, like a design tool's. */
@@ -159,6 +159,7 @@ function dotBackground(g: WorkspaceGeometry) {
 const ShotCanvas = memo(function ShotCanvas({
   doc,
   style,
+  backdrop,
   box,
   active,
   outlined,
@@ -166,6 +167,7 @@ const ShotCanvas = memo(function ShotCanvas({
 }: {
   doc: Doc
   style: HouseStyle
+  backdrop: ImageBitmap | null
   box: { left: number; top: number; width: number; height: number }
   active: boolean
   outlined: boolean
@@ -177,7 +179,7 @@ const ShotCanvas = memo(function ShotCanvas({
   useLayoutEffect(() => {
     const canvas = ref.current
     if (!canvas) return
-    const backingHeight = Math.max(1, Math.round((backingWidth * OUTPUT.height) / OUTPUT.width))
+    const backingHeight = Math.max(1, Math.round((backingWidth * doc.size.height) / doc.size.width))
     if (canvas.width !== backingWidth) canvas.width = backingWidth
     if (canvas.height !== backingHeight) canvas.height = backingHeight
     const ctx = canvas.getContext('2d')
@@ -185,8 +187,9 @@ const ShotCanvas = memo(function ShotCanvas({
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, backingWidth, backingHeight)
     const source = getSource(doc.sourceId)
-    drawScene(ctx, { source: source ? { image: source.bitmap, width: source.width, height: source.height } : null, doc, style }, backingWidth / OUTPUT.width)
-  }, [doc, style, backingWidth])
+    const scene = { source: source ? { image: source.bitmap, width: source.width, height: source.height } : null, doc, style, backdrop }
+    drawScene(ctx, scene, backingWidth / doc.size.width)
+  }, [doc, style, backdrop, backingWidth])
   const empty = doc.sourceId === null
   return (
     <div
@@ -224,13 +227,16 @@ export function Workspace() {
 
   const state = useApp((s) => s)
   const shots = selectLiveShots(state)
+  const sizes = shots.map((record) => record.doc.size)
+  const rects = shotRects(sizes)
   const { doc, mode, selection, style } = state
+  const backdrop = state.backdrop?.bitmap ?? null
   const source = getSource(doc.sourceId)
   const g = workspaceGeometry(state)
   const active = activeIndex(state)
-  const layout = source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style) : null
+  const layout = source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size) : null
   const cropping = g.cropping && source !== null
-  const activeBox = toScreen(g, shotRect(active))
+  const activeBox = toScreen(g, rects[active])
 
   // Track the viewport size.
   useLayoutEffect(() => {
@@ -296,7 +302,7 @@ export function Workspace() {
     return toWorld(g, p.x, p.y)
   }
   /** Export px inside the active shot. */
-  const inActive = (p: Point): Point => ({ x: p.x - shotRect(active).x, y: p.y })
+  const inActive = (p: Point): Point => ({ x: p.x - rects[active].x, y: p.y })
   const unitsPerPx = 1 / g.k
   const tolerance = (HANDLE_PX / 2 + 4) * unitsPerPx
 
@@ -327,7 +333,7 @@ export function Workspace() {
       else if (contains(full, p)) dragRef.current = { kind: 'sel-draw', start: p, before: s.doc }
       else startViewPan(event)
     } else {
-      const index = shotAt(shots.length, world)
+      const index = shotAt(sizes, world)
       // Shift or Ctrl / Cmd adds to a selection (boxes, or shots), like a design tool.
       const multi = event.shiftKey || event.ctrlKey || event.metaKey
       if (index === active && layout) {
@@ -408,7 +414,7 @@ export function Workspace() {
       const a = toWorld(g, area.x, area.y)
       const b = toWorld(g, area.x + area.w, area.y + area.h)
       const touched = rect(a.x, a.y, b.x - a.x, b.y - a.y)
-      drag.hits = shots.filter((_, i) => overlaps(touched, shotRect(i))).map((record) => record.id)
+      drag.hits = shots.filter((_, i) => overlaps(touched, rects[i])).map((record) => record.id)
       const base = drag.additive ? (store.get().shotSelection.length > 0 ? store.get().shotSelection : [store.get().activeId]) : []
       setMarquee({ area, ids: [...new Set([...base, ...drag.hits])] })
       return
@@ -533,7 +539,7 @@ export function Workspace() {
       if (handle) cursor = HANDLE_CURSOR[handle]
       else if (movable && contains(sel, world)) cursor = 'move'
       else if (contains(rect(0, 0, source.width, source.height), world)) cursor = 'crosshair'
-    } else if (layout && shotAt(shots.length, world) === active) {
+    } else if (layout && shotAt(sizes, world) === active) {
       const p = inActive(world)
       const s = store.get()
       const items = itemsFor(s.doc, layout)
@@ -553,7 +559,7 @@ export function Workspace() {
     if (cropping) return leaveCrop()
     if (!layout) return
     const world = worldPoint(event)
-    if (shotAt(shots.length, world) === active && contains(layout.content, inActive(world))) enterCrop()
+    if (shotAt(sizes, world) === active && contains(layout.content, inActive(world))) enterCrop()
   }
 
   // -------------------------------------------------------------------------
@@ -577,8 +583,7 @@ export function Workspace() {
     const drag = labelDrag.current
     if (!drag) return
     if (!reorder && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < DRAG_THRESHOLD) return
-    const world = worldPoint(event)
-    const slot = Math.max(0, Math.min(shots.length, Math.round((world.x + SHOT_GAP / 2) / (OUTPUT.width + SHOT_GAP))))
+    const slot = slotAt(rects, worldPoint(event).x)
     setReorder({ id: drag.id, from: drag.from, slot, active: true })
   }
 
@@ -654,7 +659,8 @@ export function Workspace() {
     // Outlined shots: the picked ones (or what the box being drawn would pick); otherwise the active one.
     const picked = new Set(marquee ? marquee.ids : state.shotSelection)
     const highlighted = (id: string, index: number) => (marquee || picked.size > 0 ? picked.has(id) : shots.length > 1 && index === active)
-    const slotX = reorder ? g.originX + (reorder.slot * (OUTPUT.width + SHOT_GAP) - SHOT_GAP / 2) * g.k : 0
+    const slotLeft = reorder ? g.originX + slotX(rects, reorder.slot) * g.k : 0
+    const tallest = Math.max(...rects.map((r) => r.h)) * g.k
 
     content = (
       <>
@@ -663,7 +669,8 @@ export function Workspace() {
             key={record.id}
             doc={record.doc}
             style={style}
-            box={toScreen(g, shotRect(index))}
+            backdrop={backdrop}
+            box={toScreen(g, rects[index])}
             active={index === active}
             outlined={highlighted(record.id, index)}
             faded={reorder?.id === record.id}
@@ -671,7 +678,7 @@ export function Workspace() {
         ))}
 
         {shots.map((record, index) => {
-          const box = toScreen(g, shotRect(index))
+          const box = toScreen(g, rects[index])
           const isActive = index === active
           const isPicked = state.shotSelection.includes(record.id)
           const unsaved = isUnsaved(record)
@@ -697,6 +704,11 @@ export function Workspace() {
             >
               <span className="min-w-0 truncate font-medium">{empty ? 'Empty shot' : shotFileName(record, index)}</span>
               {unsaved && <span className="size-1.5 shrink-0 rounded-full bg-(--tc-accent)" title="Not exported yet" aria-label="not exported" />}
+              {box.width > 150 && (
+                <span className="shrink-0 text-(--tc-value) tabular-nums" data-testid="shot-size">
+                  {record.doc.size.width} × {record.doc.size.height}
+                </span>
+              )}
               <span className="flex-1" />
               {box.width > 90 && !(empty && shots.length === 1) && (
                 <button
@@ -724,7 +736,7 @@ export function Workspace() {
         {reorder && (
           <span
             className="pointer-events-none absolute w-0.5 rounded-full bg-(--tc-accent)"
-            style={{ left: slotX - 1, top: activeBox.top - 24, height: activeBox.height + 24 }}
+            style={{ left: slotLeft - 1, top: activeBox.top - 24, height: tallest + 24 }}
             aria-hidden
           />
         )}
@@ -733,7 +745,7 @@ export function Workspace() {
           <svg
             className="pointer-events-none absolute overflow-visible"
             style={{ left: activeBox.left, top: activeBox.top, width: activeBox.width, height: activeBox.height }}
-            viewBox={`0 0 ${OUTPUT.width} ${OUTPUT.height}`}
+            viewBox={`0 0 ${doc.size.width} ${doc.size.height}`}
             preserveAspectRatio="none"
             aria-hidden
           >
@@ -813,6 +825,8 @@ export function Workspace() {
       data-boxes={selection.length}
       data-redactions={doc.redactions.length}
       data-edge={effectiveEdge}
+      data-size={`${doc.size.width}x${doc.size.height}`}
+      data-fill={doc.fill}
       data-angle={doc.angle}
       data-light-color={doc.lightColor ?? style.glow}
       data-light-intensity={doc.lightIntensity}

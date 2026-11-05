@@ -24,7 +24,7 @@ import {
   pasteFromEvent,
   removeSelected,
   selectAllBoxes,
-  shuffleBackground,
+  shuffleLook,
   startCapture,
   stepShot
 } from './actions'
@@ -119,7 +119,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.shiftKey && event.code === 'Digit1') return run('fit')
   if (event.shiftKey && event.code === 'Digit2') return run('fit-shot')
   if (key === 'c' && s.doc.sourceId) return void (s.mode === 'crop' ? leaveCrop() : enterCrop())
-  if (key === 'r') return void shuffleBackground()
+  if (key === 'r') return void shuffleLook()
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
   if (key === 'escape' && s.selection.length > 0) return void store.set({ selection: [] })
   if (key === 'escape' && s.shotSelection.length > 0) return void clearPickedShots()
@@ -177,16 +177,21 @@ export function App() {
       if (event.dataTransfer && hasFiles(event)) event.dataTransfer.dropEffect = 'copy'
     }
     const onDrop = (event: DragEvent) => {
-      event.preventDefault()
       depth = 0
       store.set({ dragOver: false })
+      // A drop zone that takes the files itself (the background image) already handled them.
+      if (event.defaultPrevented) return
+      event.preventDefault()
       const files = [...(event.dataTransfer?.files ?? [])]
       if (!files.length) return
       // Dropped onto an empty shot: fill that one.
       const s = store.get()
       if (s.mode === 'compose') {
         const shots = liveShots(s)
-        const index = shotAt(shots.length, toWorld(workspaceGeometry(s), event.clientX, event.clientY))
+        const index = shotAt(
+          shots.map((record) => record.doc.size),
+          toWorld(workspaceGeometry(s), event.clientX, event.clientY)
+        )
         if (index >= 0 && shots[index].doc.sourceId === null) selectShot(shots[index].id)
       }
       void loadFiles(files, 'drop')

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { decodeBackdrop } from './backdrop'
 import { DEFAULT_DOC, randomAngle, type Density, type Doc, type ExportFormat } from './doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from './house-style'
 
@@ -71,6 +72,8 @@ export interface AppState {
   capture: CaptureState
   houseStyleOpen: boolean
   style: HouseStyle
+  /** The house background image, decoded; null when the style has none, or while it decodes. */
+  backdrop: { url: string; bitmap: ImageBitmap } | null
   /** Camera of the shots canvas. */
   view: Camera
   /** Camera of the crop view (the active shot's whole screenshot). */
@@ -84,6 +87,8 @@ export interface AppState {
 
 const PREFS_KEY = 'cawmera.prefs.v1'
 const STYLE_KEY = 'cawmera.houseStyle.v1'
+/** The house background image is megabytes, so it's stored on its own and only written when it changes. */
+const STYLE_IMAGE_KEY = 'cawmera.houseStyleImage.v1'
 
 interface Prefs {
   theme: Theme
@@ -109,6 +114,29 @@ function writeJson(key: string, value: unknown) {
   }
 }
 
+function readText(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeText(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+  } catch {
+    /* too big or unavailable: the image still works until Cawmera closes */
+  }
+}
+
+function loadStoredStyle(): HouseStyle {
+  const stored = readJson(STYLE_KEY)
+  if (!stored || typeof stored !== 'object') return DEFAULT_HOUSE_STYLE
+  return loadHouseStyle({ ...stored, backgroundImage: readText(STYLE_IMAGE_KEY) })
+}
+
 function loadPrefs(): Prefs {
   const raw = (readJson(PREFS_KEY) ?? {}) as Partial<Prefs>
   return {
@@ -121,10 +149,12 @@ function loadPrefs(): Prefs {
 
 export const newId = () => Math.random().toString(36).slice(2, 10)
 
-/** A new shot: a light direction unlike its neighbour's, the same light colour and intensity. */
+/** A new shot: a light direction unlike its neighbour's; the same size, background, light colour and intensity. */
 export function emptyDoc(previous?: Doc): Doc {
   return {
     ...DEFAULT_DOC,
+    size: previous?.size ?? DEFAULT_DOC.size,
+    fill: previous?.fill ?? DEFAULT_DOC.fill,
     angle: randomAngle(previous?.angle),
     lightColor: previous?.lightColor ?? null,
     lightIntensity: previous?.lightIntensity ?? DEFAULT_DOC.lightIntensity
@@ -132,7 +162,6 @@ export function emptyDoc(previous?: Doc): Doc {
 }
 
 const prefs = loadPrefs()
-const storedStyle = readJson(STYLE_KEY)
 const firstShot: ShotRecord = { id: newId(), doc: emptyDoc(), past: [], future: [], savedDoc: null }
 
 let state: AppState = {
@@ -151,7 +180,8 @@ let state: AppState = {
   format: prefs.format,
   capture: { phase: 'idle', remaining: 0 },
   houseStyleOpen: false,
-  style: storedStyle ? loadHouseStyle(storedStyle) : DEFAULT_HOUSE_STYLE,
+  style: loadStoredStyle(),
+  backdrop: null,
   view: FIT_ALL,
   cropView: FIT_ALL,
   viewport: { width: 0, height: 0 },
@@ -160,12 +190,36 @@ let state: AppState = {
 
 const listeners = new Set<() => void>()
 
+let backdropDecoding: Promise<void> = Promise.resolve()
+
+/** Decodes the house background image whenever the style gets a different one. */
+function syncBackdrop() {
+  const url = state.style.backgroundImage
+  if ((state.backdrop?.url ?? null) === url) return
+  state.backdrop?.bitmap.close()
+  state = { ...state, backdrop: null }
+  if (!url) return
+  backdropDecoding = decodeBackdrop(url).then(
+    (bitmap) => {
+      if (state.style.backgroundImage === url) store.set({ backdrop: { url, bitmap } })
+      else bitmap.close()
+    },
+    () => {
+      /* not decodable: shots set to Image keep the gradient */
+    }
+  )
+}
+
+/** Resolves once the house background image, if any, can be drawn (before an export). */
+export const backdropReady = () => backdropDecoding
+
 export const store = {
   get: () => state,
   set(patch: Partial<AppState> | ((current: AppState) => Partial<AppState>)) {
     const next = typeof patch === 'function' ? patch(state) : patch
     const prev = state
     state = { ...state, ...next }
+    if (prev.style.backgroundImage !== state.style.backgroundImage) syncBackdrop()
     if (
       prev.theme !== state.theme ||
       prev.delay !== state.delay ||
@@ -174,7 +228,8 @@ export const store = {
     ) {
       writeJson(PREFS_KEY, { theme: state.theme, delay: state.delay, format: state.format, collapsed: state.collapsed })
     }
-    if (prev.style !== state.style) writeJson(STYLE_KEY, serializeHouseStyle(state.style))
+    if (prev.style !== state.style) writeJson(STYLE_KEY, serializeHouseStyle({ ...state.style, backgroundImage: null }))
+    if (prev.style.backgroundImage !== state.style.backgroundImage) writeText(STYLE_IMAGE_KEY, state.style.backgroundImage)
     listeners.forEach((listener) => listener())
   },
   subscribe(listener: () => void) {
@@ -184,6 +239,8 @@ export const store = {
     }
   }
 }
+
+syncBackdrop()
 
 export function useApp<T>(selector: (s: AppState) => T): T {
   return useSyncExternalStore(store.subscribe, () => selector(state))

@@ -1,6 +1,6 @@
 import { FORMAT_LABEL, type Doc, type ExportFormat, type RedactStyle, type Spotlight } from '../app/doc'
-import { OUTPUT, type HouseStyle } from '../app/house-style'
-import { intersect, rect, type Rect } from './geometry'
+import type { HouseStyle } from '../app/house-style'
+import { intersect, rect, type Rect, type Size } from './geometry'
 import { computeLayout, sourceRectToOutput, visibleSource, type Layout } from './layout'
 
 export interface SourceImage {
@@ -13,21 +13,24 @@ export interface Scene {
   source: SourceImage | null
   doc: Doc
   style: HouseStyle
+  /** The house background image, for shots set to Image. */
+  backdrop?: ImageBitmap | null
 }
 
 type Ctx = CanvasRenderingContext2D
 
 export function layoutFor(scene: Scene): Layout | null {
   const { source, doc, style } = scene
-  return source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style) : null
+  return source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size) : null
 }
 
-/** Draws the full 1600×1000 composition. `k` = canvas px per export px (1 for export, smaller for previews). */
+/** Draws the whole composition. `k` = canvas px per export px (1 for export, smaller for previews). */
 export function drawScene(ctx: Ctx, scene: Scene, k = 1): Layout | null {
-  const { source, doc, style } = scene
+  const { source, doc, style, backdrop } = scene
   ctx.save()
   ctx.setTransform(k, 0, 0, k, 0, 0)
-  drawPlate(ctx, style, doc.angle, doc.lightColor ?? style.glow, doc.lightIntensity)
+  if (doc.fill === 'image' && backdrop) drawBackdrop(ctx, backdrop, doc.size)
+  else drawPlate(ctx, style, doc.size, doc.angle, doc.lightColor ?? style.glow, doc.lightIntensity)
 
   const layout = layoutFor(scene)
   if (source && layout) {
@@ -81,8 +84,10 @@ export function lightPoint(angle: number): [number, number] {
   return [0.5 + (sx / norm) * 0.54, 0.5 + (sy / norm) * 0.56]
 }
 
-export function drawPlate(ctx: Ctx, style: HouseStyle, angle: number, color: string = style.glow, intensity = 1) {
-  const { width: W, height: H } = OUTPUT
+export function drawPlate(ctx: Ctx, style: HouseStyle, size: Size, angle: number, color: string = style.glow, intensity = 1) {
+  const { width: W, height: H } = size
+  const longSide = Math.max(W, H)
+  const shortSide = Math.min(W, H)
   const [lx, ly] = lightPoint(angle)
   const light = { x: lx * W, y: ly * H }
   const far = { x: W - light.x, y: H - light.y }
@@ -95,7 +100,7 @@ export function drawPlate(ctx: Ctx, style: HouseStyle, angle: number, color: str
 
   const strength = Math.min(1, style.glowStrength * Math.max(0, intensity))
   if (strength > 0) {
-    const glow = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, W * 0.62)
+    const glow = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, longSide * 0.62)
     glow.addColorStop(0, withAlpha(color, strength))
     glow.addColorStop(0.45, withAlpha(color, strength * 0.35))
     glow.addColorStop(1, withAlpha(color, 0))
@@ -106,11 +111,28 @@ export function drawPlate(ctx: Ctx, style: HouseStyle, angle: number, color: str
   // Quiet vignette, pulled towards the light, so the far corner settles.
   const cx = W / 2 + (light.x - W / 2) * 0.3
   const cy = H / 2 + (light.y - H / 2) * 0.3
-  const vignette = ctx.createRadialGradient(cx, cy, H * 0.4, cx, cy, W * 0.85)
+  const vignette = ctx.createRadialGradient(cx, cy, shortSide * 0.4, cx, cy, longSide * 0.85)
   vignette.addColorStop(0, 'rgba(0, 0, 0, 0)')
   vignette.addColorStop(1, 'rgba(0, 0, 0, 0.28)')
   ctx.fillStyle = vignette
   ctx.fillRect(0, 0, W, H)
+}
+
+/** Where a background picture goes so it fills the whole image: scaled to cover, centred. */
+export function coverRect(picture: Size, output: Size): Rect {
+  const k = Math.max(output.width / picture.width, output.height / picture.height)
+  const w = picture.width * k
+  const h = picture.height * k
+  return rect((output.width - w) / 2, (output.height - h) / 2, w, h)
+}
+
+function drawBackdrop(ctx: Ctx, picture: ImageBitmap, size: Size) {
+  const { x, y, w, h } = coverRect(picture, size)
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(picture, x, y, w, h)
+  ctx.restore()
 }
 
 function drawBorder(ctx: Ctx, frame: Rect, radius: number, style: HouseStyle) {
@@ -241,13 +263,13 @@ function scratch(width: number, height: number) {
 const MIME: Record<ExportFormat, string> = { webp: 'image/webp', png: 'image/png' }
 
 /**
- * Renders the export-size image. WebP is lossless (quality 1 is lossless in Chromium), about half
+ * Renders the image at its export size. WebP is lossless (quality 1 is lossless in Chromium), about half
  * the size of the PNG with identical pixels.
  */
 export async function renderImage(scene: Scene, format: ExportFormat): Promise<Blob> {
   const canvas = document.createElement('canvas')
-  canvas.width = OUTPUT.width
-  canvas.height = OUTPUT.height
+  canvas.width = scene.doc.size.width
+  canvas.height = scene.doc.size.height
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('2D canvas is unavailable')
   drawScene(ctx, scene, 1)

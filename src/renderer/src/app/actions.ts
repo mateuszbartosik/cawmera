@@ -12,11 +12,15 @@ import {
   type Density,
   type Doc,
   type Edge,
-  type ExportFormat
+  type ExportFormat,
+  type Fill
 } from './doc'
-import { DEFAULT_HOUSE_STYLE, OUTPUT, loadHouseStyle, serializeHouseStyle } from './house-style'
+import { readBackdrop } from './backdrop'
+import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle } from './house-style'
+import { shuffledLook } from './shuffle'
 import {
   addShot,
+  backdropReady,
   commitFrom,
   FIT_ALL,
   getSource,
@@ -34,6 +38,7 @@ import {
   type SourceEntry
 } from './store'
 import { layoutFor, renderImage, type Scene } from '../render/compose'
+import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { revealActive } from '../canvas/view'
 import {
@@ -77,6 +82,9 @@ export async function loadBitmap(bitmap: ImageBitmap, meta: { name: string; orig
     ...DEFAULT_DOC,
     sourceId: entry.id,
     capturedAt: entry.detected,
+    // Size and background carry over like the light colour: one change covers a whole set of images.
+    size: fillsActive ? current.size : (last?.size ?? DEFAULT_DOC.size),
+    fill: fillsActive ? current.fill : (last?.fill ?? DEFAULT_DOC.fill),
     // Keep the redaction look across shots of one entry.
     redactStyle: current.redactStyle,
     spotlight: { ...DEFAULT_SPOTLIGHT, dim: current.spotlight.dim, outline: current.spotlight.outline },
@@ -318,12 +326,14 @@ async function captureInBrowser() {
 
 function sceneFor(doc: Doc): Scene | null {
   const source = getSource(doc.sourceId)
-  return source ? { source: { image: source.bitmap, width: source.width, height: source.height }, doc, style: store.get().style } : null
+  const { style, backdrop } = store.get()
+  return source ? { source: { image: source.bitmap, width: source.width, height: source.height }, doc, style, backdrop: backdrop?.bitmap ?? null } : null
 }
 
-const sizeLabel = (format: ExportFormat) => `${OUTPUT.width} × ${OUTPUT.height} ${FORMAT_LABEL[format]}`
+const sizeLabel = ({ width, height }: Size, format: ExportFormat) => `${width} × ${height} ${FORMAT_LABEL[format]}`
 
 export async function exportImage() {
+  await backdropReady()
   const { doc, format, activeId } = store.get()
   const scene = sceneFor(doc)
   if (!scene) {
@@ -340,11 +350,11 @@ export async function exportImage() {
     const path = saved.path
     if (path && bridge) {
       toast.success(`Saved ${path.split(/[\\/]/).pop()}`, {
-        description: sizeLabel(format),
+        description: sizeLabel(doc.size, format),
         action: { label: 'Show in folder', onClick: () => void bridge?.revealFile(path) }
       })
     } else {
-      toast.success(`Downloaded ${name}`, { description: sizeLabel(format) })
+      toast.success(`Downloaded ${name}`, { description: sizeLabel(doc.size, format) })
     }
   } catch (error) {
     toast.error('Export failed', { description: error instanceof Error ? error.message : String(error) })
@@ -352,6 +362,7 @@ export async function exportImage() {
 }
 
 export async function exportAll() {
+  await backdropReady()
   const { format } = store.get()
   leaveCrop()
   const shots = liveShots()
@@ -369,7 +380,7 @@ export async function exportAll() {
     if (!saved) return
     markSaved(shots.map(({ record }) => record.id))
     toast.success(`Exported ${saved.count} ${saved.count === 1 ? 'image' : 'images'}`, {
-      description: saved.folder ? saved.folder : sizeLabel(format)
+      description: saved.folder ? saved.folder : FORMAT_LABEL[format]
     })
   } catch (error) {
     toast.error('Export failed', { description: error instanceof Error ? error.message : String(error) })
@@ -377,6 +388,7 @@ export async function exportAll() {
 }
 
 export async function copyImage() {
+  await backdropReady()
   const scene = sceneFor(store.get().doc)
   if (!scene) {
     toast('Add a screenshot first', { description: 'Paste, drop, browse or capture one.' })
@@ -385,7 +397,7 @@ export async function copyImage() {
   leaveCrop()
   try {
     await copyPngToClipboard(await renderImage(scene, 'png'))
-    toast.success('Copied to clipboard', { description: `${sizeLabel('png')} (clipboards only take PNG)` })
+    toast.success('Copied to clipboard', { description: `${sizeLabel(scene.doc.size, 'png')} (clipboards only take PNG)` })
   } catch (error) {
     toast.error('Copy failed', { description: error instanceof Error ? error.message : String(error) })
   }
@@ -434,13 +446,54 @@ export function setLightIntensity(intensity: number, history = true) {
   if (store.get().doc.lightIntensity !== next) updateDoc({ lightIntensity: next }, { history })
 }
 
-/** Background section reset: house colour and strength; the direction stays. */
-export function resetBackground() {
-  updateDoc({ lightColor: DEFAULT_DOC.lightColor, lightIntensity: DEFAULT_DOC.lightIntensity })
+export function setSize(size: Size) {
+  const { doc } = store.get()
+  if (doc.size.width !== size.width || doc.size.height !== size.height) updateDoc({ size })
 }
 
-export function shuffleBackground() {
-  updateDoc((doc) => ({ angle: randomAngle(doc.angle) }))
+export function setFill(fill: Fill) {
+  if (store.get().doc.fill !== fill) updateDoc({ fill })
+}
+
+/** Background section reset: the house gradient, its colour and strength; the direction stays. */
+export function resetBackground() {
+  updateDoc({ fill: DEFAULT_DOC.fill, lightColor: DEFAULT_DOC.lightColor, lightIntensity: DEFAULT_DOC.lightIntensity })
+}
+
+/** A new edge and light direction for the active shot (R). */
+export function shuffleLook() {
+  const { doc, style } = store.get()
+  updateDoc(shuffledLook(doc, getSource(doc.sourceId), style))
+}
+
+/** The picked image becomes the house background, for every shot set to Image. */
+export async function setBackgroundImage(file: File) {
+  if (!file.type.startsWith('image/')) {
+    toast.error(`${file.name} is not an image`)
+    return
+  }
+  try {
+    const { url, bitmap } = await readBackdrop(file)
+    store.set((s) => ({ style: { ...s.style, backgroundImage: url }, backdrop: { url, bitmap } }))
+    setFill('image')
+  } catch {
+    toast.error(`Could not read ${file.name}`)
+  }
+}
+
+export function pickBackgroundImage() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp'
+  input.onchange = () => {
+    const file = input.files?.[0]
+    if (file) void setBackgroundImage(file)
+  }
+  input.click()
+}
+
+export function removeBackgroundImage() {
+  store.set((s) => ({ style: { ...s.style, backgroundImage: null } }))
 }
 
 export function addRedaction() {
@@ -497,13 +550,15 @@ export function resetSpotlight() {
   updateDoc({ spotlight: DEFAULT_SPOTLIGHT })
 }
 
-/** Panel header reset: back to the freshly loaded shot, keeping the screenshot, light and name. */
+/** Panel header reset: back to the freshly loaded shot, keeping the screenshot, size, background, light and name. */
 export function resetAll() {
   const { doc } = store.get()
   const source = getSource(doc.sourceId)
   updateDoc({
     ...DEFAULT_DOC,
     sourceId: doc.sourceId,
+    size: doc.size,
+    fill: doc.fill,
     capturedAt: source?.detected ?? 1,
     angle: doc.angle,
     lightColor: doc.lightColor,
@@ -514,7 +569,15 @@ export function resetAll() {
 }
 
 export function clearSource() {
-  updateDoc((doc) => ({ ...DEFAULT_DOC, angle: doc.angle, lightColor: doc.lightColor, lightIntensity: doc.lightIntensity, fileName: doc.fileName }))
+  updateDoc((doc) => ({
+    ...DEFAULT_DOC,
+    size: doc.size,
+    fill: doc.fill,
+    angle: doc.angle,
+    lightColor: doc.lightColor,
+    lightIntensity: doc.lightIntensity,
+    fileName: doc.fileName
+  }))
   store.set({ selection: [], mode: 'compose' })
 }
 

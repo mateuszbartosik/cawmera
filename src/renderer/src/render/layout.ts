@@ -1,17 +1,14 @@
 import { edgeDirections, type Direction, type Edge } from '../app/doc'
-import { OUTPUT, uiScale, type HouseStyle } from '../app/house-style'
-import { clipTo, intersect, normalize, rect, resizeRect, type Handle, type Point, type Rect } from './geometry'
+import { EXPORT_DENSITY, uiScale, type HouseStyle } from '../app/house-style'
+import { clipTo, intersect, normalize, rect, resizeRect, type Handle, type Point, type Rect, type Size } from './geometry'
 
-export interface Size {
-  width: number
-  height: number
-}
+export type { Size } from './geometry'
 
 /**
- * Where the screenshot lands in the 1600×1000 output.
+ * Where the screenshot lands in the output image.
  *
  * Scale is never "fit": it comes only from how the shot was captured, the UI zoom and the house
- * design width, so every image shows the captured UI at the same size.
+ * design width, so every image, whatever its size, shows the captured UI at the same size.
  *
  * The frame shows one selection of the screenshot. Per axis, the edge decides where it sits:
  * - coming in from a side, the screenshot touches that edge and its frame runs off it; at most
@@ -37,9 +34,7 @@ export interface Layout {
 /** How far a frame runs past the output edge it comes in from, so no border or corner shows there. */
 export const BLEED_OVERSHOOT = 64
 
-export const OUTPUT_RECT: Rect = rect(0, 0, OUTPUT.width, OUTPUT.height)
-
-export function contentScale(capturedAt: number, zoom: number, exportPerCssPx: number = OUTPUT.scale): number {
+export function contentScale(capturedAt: number, zoom: number, exportPerCssPx: number = EXPORT_DENSITY): number {
   return (exportPerCssPx / capturedAt) * zoom
 }
 
@@ -56,9 +51,9 @@ const room = (total: number, inset: number, dir: Direction) => total - (dir === 
  * The most of the screenshot (source px) the frame can show. With no explicit edge, the automatic
  * edge comes in from a side as soon as the selection needs it, so the larger limit applies.
  */
-export function capacity(scale: number, style: Pick<HouseStyle, 'inset'>, edge: Edge | null): Size {
+export function capacity(scale: number, style: Pick<HouseStyle, 'inset'>, edge: Edge | null, output: Size): Size {
   const dirs = edge ? edgeDirections(edge) : { x: 1 as Direction, y: 1 as Direction }
-  return { width: room(OUTPUT.width, style.inset, dirs.x) / scale, height: room(OUTPUT.height, style.inset, dirs.y) / scale }
+  return { width: room(output.width, style.inset, dirs.x) / scale, height: room(output.height, style.inset, dirs.y) / scale }
 }
 
 /** The stored selection clipped to the image, or the whole image. */
@@ -69,17 +64,17 @@ export function baseSelection(crop: Rect | null, image: Size): Rect {
 }
 
 /** Without an explicit edge: come in from the right / bottom only where the selection doesn't fit inside. */
-export function autoEdge(selection: Size, scale: number, style: Pick<HouseStyle, 'inset'>): Edge {
-  const x = selection.width * scale > room(OUTPUT.width, style.inset, 0) + 0.5
-  const y = selection.height * scale > room(OUTPUT.height, style.inset, 0) + 0.5
+export function autoEdge(selection: Size, scale: number, style: Pick<HouseStyle, 'inset'>, output: Size): Edge {
+  const x = selection.width * scale > room(output.width, style.inset, 0) + 0.5
+  const y = selection.height * scale > room(output.height, style.inset, 0) + 0.5
   return x && y ? 'br' : x ? 'r' : y ? 'b' : 'c'
 }
 
 /** The edge a document actually uses. */
-export function resolveEdge(edge: Edge | null, crop: Rect | null, image: Size, scale: number, style: Pick<HouseStyle, 'inset'>): Edge {
+export function resolveEdge(edge: Edge | null, crop: Rect | null, image: Size, scale: number, style: Pick<HouseStyle, 'inset'>, output: Size): Edge {
   if (edge) return edge
   const base = baseSelection(crop, image)
-  return autoEdge({ width: base.w, height: base.h }, scale, style)
+  return autoEdge({ width: base.w, height: base.h }, scale, style, output)
 }
 
 /**
@@ -110,14 +105,15 @@ export function computeLayout(
   capturedAt: number,
   zoom: number,
   edgeSetting: Edge | null,
-  style: HouseStyle
+  style: HouseStyle,
+  output: Size
 ): Layout {
   const scale = scaleFor(capturedAt, zoom, style)
-  const edge = resolveEdge(edgeSetting, crop, image, scale, style)
-  const sel = effectiveSelection(crop, image, capacity(scale, style, edge), edge)
+  const edge = resolveEdge(edgeSetting, crop, image, scale, style, output)
+  const sel = effectiveSelection(crop, image, capacity(scale, style, edge, output), edge)
   const dirs = edgeDirections(edge)
-  const px = place(OUTPUT.width, sel.w * scale, dirs.x)
-  const py = place(OUTPUT.height, sel.h * scale, dirs.y)
+  const px = place(output.width, sel.w * scale, dirs.x)
+  const py = place(output.height, sel.h * scale, dirs.y)
   return {
     scale,
     image,

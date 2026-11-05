@@ -1,10 +1,12 @@
+import { DEFAULT_SIZE } from './size'
+
 /**
  * The locked look of every image. People taking screenshots never see these controls; a designer
  * can open View → House style, tune them, and share the result as a JSON file that others import.
  */
 
-/** Output is fixed: 16:10, sized to stay sharp on high-density screens. */
-export const OUTPUT = { width: 1600, height: 1000, scale: 2 } as const
+/** Export px per CSS px when an image is shown at half its pixel width, which is the canvas's 100%. */
+export const EXPORT_DENSITY = 2
 
 export interface HouseStyle {
   /** Shown when the style is imported, so people know which one they have. */
@@ -27,6 +29,8 @@ export interface HouseStyle {
   border: number
   /** Spotlight outline colour. */
   accent: string
+  /** The image shots set to Image fill their background with, as a data URL, so it travels in the file. */
+  backgroundImage: string | null
 }
 
 /** A neutral studio look: graphite plate, soft white light. Brands bring their own as a JSON file. */
@@ -41,13 +45,20 @@ export const DEFAULT_HOUSE_STYLE: HouseStyle = {
   radius: 20,
   shadow: 0.55,
   border: 0.14,
-  accent: '#FFFFFF'
+  accent: '#FFFFFF',
+  backgroundImage: null
 }
 
 const HEX = /^#[0-9a-f]{6}$/i
+const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/
+/** About 12 MB of image, far above what Cawmera itself stores (see backdrop.ts). */
+const MAX_IMAGE_URL_LENGTH = 16_000_000
 
-/** Format of a stored or exported house style. 2: 100% light intensity is what 1 called 200%. */
-export const HOUSE_STYLE_VERSION = 2
+/**
+ * Format of a stored or exported house style. 2: 100% light intensity is what 1 called 200%.
+ * 3: it can carry a background image.
+ */
+export const HOUSE_STYLE_VERSION = 3
 
 /** A stored or imported house style (any format version), upgraded to the current one. */
 export function loadHouseStyle(input: unknown): HouseStyle {
@@ -60,8 +71,11 @@ export function loadHouseStyle(input: unknown): HouseStyle {
 /** What gets stored or exported: the style plus its format version. */
 export const serializeHouseStyle = (style: HouseStyle) => ({ version: HOUSE_STYLE_VERSION, ...style })
 
-/** Export px per CSS px of the captured UI at 100% UI zoom. */
-export const uiScale = (style: Pick<HouseStyle, 'designWidth'>) => OUTPUT.width / style.designWidth
+/**
+ * Export px per CSS px of the captured UI at 100% UI zoom. The same in every image size: the design
+ * width says how wide a default 1600 px image is shown.
+ */
+export const uiScale = (style: Pick<HouseStyle, 'designWidth'>) => DEFAULT_SIZE.width / style.designWidth
 
 /** Accepts a partial or untrusted object (imported JSON, storage) and returns a valid style. */
 export function sanitizeHouseStyle(input: unknown): HouseStyle {
@@ -77,6 +91,8 @@ export function sanitizeHouseStyle(input: unknown): HouseStyle {
       : (DEFAULT_HOUSE_STYLE[key] as number)
   }
   const name = typeof source.name === 'string' ? source.name.trim().slice(0, 40) : ''
+  const image = source.backgroundImage
+  const backgroundImage = typeof image === 'string' && image.length <= MAX_IMAGE_URL_LENGTH && IMAGE_DATA_URL.test(image) ? image : null
   return {
     name,
     designWidth: Math.round(number('designWidth', 480, 1000)),
@@ -88,6 +104,7 @@ export function sanitizeHouseStyle(input: unknown): HouseStyle {
     radius: number('radius', 0, 48),
     shadow: number('shadow', 0, 1),
     border: number('border', 0, 0.5),
-    accent: color('accent')
+    accent: color('accent'),
+    backgroundImage
   }
 }
