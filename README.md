@@ -1,10 +1,34 @@
+<div align="center">
+
+<img src=".github/assets/icon.png" width="128" height="128" alt="Cawmera icon: a raven holding up a camera">
+
 # Cawmera
 
-Puts a screenshot into a frame. Every image gets the same background and shows the UI at the same scale, at 1600 × 1000 or any size you pick.
+**Puts a screenshot into a frame.**<br>
+Every image gets the same background and shows the UI at the same scale, at 1600 × 1000 or any size you pick.
+
+[![Download for Windows](https://img.shields.io/github/v/release/mateuszbartosik/cawmera?style=for-the-badge&label=Download%20for%20Windows&labelColor=26262F&color=66DCC2)](https://github.com/mateuszbartosik/cawmera/releases/latest)
+[![MIT license](https://img.shields.io/badge/license-MIT-66DCC2?style=for-the-badge&labelColor=26262F)](LICENSE)
+
+</div>
+
+<br>
+
+<p align="center">
+  <img src=".github/assets/hero.webp" alt="Cawmera's own window, framed by Cawmera on a graphite background with a mint light. On its canvas, a dashboard screenshot is being made into an Article (OG) image with a background image.">
+</p>
+<p align="center"><sub>Cawmera, framed by Cawmera.</sub></p>
+
+## What it does
+
+- **One scale for the UI.** Cawmera never shrinks a screenshot to fit. Its scale comes from how it was captured, so text reads the same in every image.
+- **One look for a product.** Background, light, frame and shadow come from a house style that a team shares as a single file.
+- **Any size.** 1600 × 1000 by default, Article (OG) for link previews, presets for slides and social posts, or your own width and height.
+- **Private.** Screenshots stay on your computer: Cawmera never stores them and makes no network requests.
 
 ## Download
 
-Windows builds are on the [Releases](../../releases) page: unzip and run `Cawmera.exe`. The app isn't code-signed, so Windows may warn the first time you open it. For macOS or Linux, build it from source.
+Get the Windows zip from the [latest release](https://github.com/mateuszbartosik/cawmera/releases/latest), unzip it and run `Cawmera.exe`. The app isn't code-signed, so Windows may warn the first time you open it. For macOS or Linux, [build it from source](#develop).
 
 ## Use
 
@@ -25,6 +49,9 @@ The background, light, frame and scale come from a house style, and so does the 
 
 ## Shortcuts
 
+<details>
+<summary>Show all shortcuts</summary>
+
 | Action | Keys |
 | --- | --- |
 | Open images | `Ctrl+O` |
@@ -42,6 +69,8 @@ The background, light, frame and scale come from a house style, and so does the 
 | Pan the canvas | drag inside a shot, `Space` + drag, or scroll |
 | Light / dark | `Ctrl+Shift+L` |
 | House style | `Ctrl+Alt+H` |
+
+</details>
 
 ## Develop
 
