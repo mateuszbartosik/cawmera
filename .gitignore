@@ -2,6 +2,7 @@ node_modules/
 cawmera-styles/
 out/
 release/
+native/recorder/build/
 *.log
 .DS_Store
 *.tsbuildinfo
