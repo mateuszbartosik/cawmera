@@ -85,3 +85,32 @@ describe('click effects', () => {
     expect(ripple.calls).toContain('stroke')
   })
 })
+
+describe('alpha composition', () => {
+  it('multiplies the cursor opacity into the caller alpha and restores it', () => {
+    const { ctx, alphaAtCall } = fakeContext()
+    ctx.globalAlpha = 0.5
+    drawCursor(ctx, { x: 0, y: 0, shape: 'arrow', opacity: 0.5 }, 'light', 22, 1)
+    expect(alphaAtCall.stroke).toEqual([0.25])
+    expect(alphaAtCall.fill).toEqual([0.25])
+    expect(ctx.globalAlpha).toBe(0.5)
+  })
+
+  it('multiplies the ring alpha into the caller alpha and restores it', () => {
+    const { ctx, alphaAtCall } = fakeContext()
+    ctx.globalAlpha = 0.5
+    drawClickEffect(ctx, { x: 5, y: 5, progress: 0.5 }, 'ring', '#ff0000', 20)
+    expect(alphaAtCall.stroke[0]).toBeCloseTo(0.5 * 0.9 * 0.5)
+    expect(ctx.globalAlpha).toBe(0.5)
+  })
+
+  it('weights the ripple disc and its ring against the caller alpha, not each other', () => {
+    const { ctx, alphaAtCall } = fakeContext()
+    ctx.globalAlpha = 0.5
+    drawClickEffect(ctx, { x: 5, y: 5, progress: 0.9 }, 'ripple', '#ff0000', 20)
+    expect(alphaAtCall.fill[0]).toBeCloseTo(0.5 * 0.35 * 0.1)
+    const ringProgress = (0.9 * 650 - 120) / 530
+    expect(alphaAtCall.stroke[0]).toBeCloseTo(0.5 * 0.9 * (1 - ringProgress))
+    expect(ctx.globalAlpha).toBe(0.5)
+  })
+})

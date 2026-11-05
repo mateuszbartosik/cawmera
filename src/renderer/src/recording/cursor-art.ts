@@ -72,7 +72,7 @@ export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number): [
 export function drawCursor(ctx: CanvasRenderingContext2D, frame: CursorFrame, look: CursorLook, heightPx: number, press: number): void {
   const { fill, outline } = LOOKS[look]
   ctx.save()
-  ctx.globalAlpha = frame.opacity
+  ctx.globalAlpha *= frame.opacity
   ctx.transform(...cursorMatrix(frame.shape, frame, heightPx * press))
   const path = new Path2D(CURSOR_ART[frame.shape].d)
   ctx.shadowColor = SHADOW.color

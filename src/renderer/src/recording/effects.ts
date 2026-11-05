@@ -47,9 +47,16 @@ export function pressScale(clicks: Click[], t: number): number {
   return 1 - (1 - PRESS.scale) * deepest
 }
 
-function strokeRing(ctx: CanvasRenderingContext2D, click: ActiveClick, color: string, radiusPx: number, progress: number): void {
+function strokeRing(
+  ctx: CanvasRenderingContext2D,
+  click: ActiveClick,
+  color: string,
+  radiusPx: number,
+  progress: number,
+  baseAlpha: number
+): void {
   const radius = radiusPx * (RING_START_RADIUS + (1 - RING_START_RADIUS) * progress)
-  ctx.globalAlpha = RING_ALPHA * (1 - progress)
+  ctx.globalAlpha = baseAlpha * RING_ALPHA * (1 - progress)
   ctx.strokeStyle = color
   ctx.lineWidth = radiusPx * RING_WIDTH_RATIO
   ctx.beginPath()
@@ -65,17 +72,18 @@ export function drawClickEffect(
   radiusPx: number
 ): void {
   ctx.save()
+  const baseAlpha = ctx.globalAlpha
   if (effect === 'ring') {
-    strokeRing(ctx, click, color, radiusPx, click.progress)
+    strokeRing(ctx, click, color, radiusPx, click.progress, baseAlpha)
   } else {
-    ctx.globalAlpha = RIPPLE_ALPHA * (1 - click.progress)
+    ctx.globalAlpha = baseAlpha * RIPPLE_ALPHA * (1 - click.progress)
     ctx.fillStyle = color
     ctx.beginPath()
     ctx.arc(click.x, click.y, radiusPx * click.progress, 0, Math.PI * 2)
     ctx.fill()
     const elapsed = click.progress * CLICK_EFFECT_MS.ripple
     const ringProgress = (elapsed - RIPPLE_RING_DELAY_MS) / (CLICK_EFFECT_MS.ripple - RIPPLE_RING_DELAY_MS)
-    if (ringProgress > 0) strokeRing(ctx, click, color, radiusPx, ringProgress)
+    if (ringProgress > 0) strokeRing(ctx, click, color, radiusPx, ringProgress, baseAlpha)
   }
   ctx.restore()
 }
