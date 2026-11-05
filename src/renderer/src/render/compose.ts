@@ -29,25 +29,14 @@ export function drawScene(ctx: Ctx, scene: Scene, k = 1): Layout | null {
   const { source, doc, style, backdrop } = scene
   ctx.save()
   ctx.setTransform(k, 0, 0, k, 0, 0)
-  if (doc.fill === 'image' && backdrop) drawBackdrop(ctx, backdrop, doc.size)
-  else drawPlate(ctx, style, doc.size, doc.angle, doc.lightColor ?? style.glow, doc.lightIntensity)
+  drawBackground(ctx, doc, style, backdrop)
 
   const layout = layoutFor(scene)
   if (source && layout) {
     const { frame, content, sel } = layout
     const radius = Math.min(style.radius, frame.w / 2, frame.h / 2)
 
-    // Shadow first, as a filled shape under the screenshot. Shadow lengths are device px, hence * k.
-    if (style.shadow > 0) {
-      ctx.save()
-      ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
-      ctx.shadowBlur = 80 * k
-      ctx.shadowOffsetY = 28 * k
-      ctx.fillStyle = '#05070d'
-      roundRectPath(ctx, frame, radius)
-      ctx.fill()
-      ctx.restore()
-    }
+    drawFrameShadow(ctx, frame, radius, style, k)
 
     ctx.save()
     roundRectPath(ctx, frame, radius)
@@ -126,6 +115,17 @@ export function coverRect(picture: Size, output: Size): Rect {
   return rect((output.width - w) / 2, (output.height - h) / 2, w, h)
 }
 
+/** The plate, or the house image for shots set to Image. */
+export function drawBackground(
+  ctx: Ctx,
+  doc: Pick<Doc, 'fill' | 'size' | 'angle' | 'lightColor' | 'lightIntensity'>,
+  style: HouseStyle,
+  backdrop?: ImageBitmap | null
+) {
+  if (doc.fill === 'image' && backdrop) drawBackdrop(ctx, backdrop, doc.size)
+  else drawPlate(ctx, style, doc.size, doc.angle, doc.lightColor ?? style.glow, doc.lightIntensity)
+}
+
 function drawBackdrop(ctx: Ctx, picture: ImageBitmap, size: Size) {
   const { x, y, w, h } = coverRect(picture, size)
   ctx.save()
@@ -135,7 +135,20 @@ function drawBackdrop(ctx: Ctx, picture: ImageBitmap, size: Size) {
   ctx.restore()
 }
 
-function drawBorder(ctx: Ctx, frame: Rect, radius: number, style: HouseStyle) {
+/** Drawn first, as a filled shape under the frame. Shadow lengths are device px, hence * k. */
+export function drawFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: HouseStyle, k: number) {
+  if (style.shadow <= 0) return
+  ctx.save()
+  ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
+  ctx.shadowBlur = 80 * k
+  ctx.shadowOffsetY = 28 * k
+  ctx.fillStyle = '#05070d'
+  roundRectPath(ctx, frame, radius)
+  ctx.fill()
+  ctx.restore()
+}
+
+export function drawBorder(ctx: Ctx, frame: Rect, radius: number, style: HouseStyle) {
   if (style.border <= 0) return
   const edge = ctx.createLinearGradient(0, frame.y, 0, frame.y + Math.min(frame.h, 640))
   edge.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1, style.border * 1.7)})`)
