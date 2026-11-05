@@ -22,6 +22,7 @@ export function fakeContext(): {
         const alphas = alphaAtCall[method] ?? []
         alphas.push(properties.get('globalAlpha') as number)
         alphaAtCall[method] = alphas
+        if (method === 'drawImage' && (args[0] as { tag?: string } | undefined)?.tag === 'video') calls.push('drawImage:video')
         if (method === 'save') saved.push(new Map(properties))
         if (method === 'restore') properties = saved.pop() ?? properties
         return GRADIENT_METHODS.has(method) ? gradientStub() : args[0]
