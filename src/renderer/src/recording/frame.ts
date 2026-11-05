@@ -107,15 +107,42 @@ function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'exp
   return lookOf(scene, first) === lookOf(scene, last) ? [t] : times
 }
 
+interface Layer { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D }
+
+const layers = new WeakMap<object, Layer>()
+
+function layerFor(target: Ctx): Layer {
+  const { width, height } = target.canvas
+  const existing = layers.get(target)
+  if (existing && existing.canvas.width === width && existing.canvas.height === height) return existing
+  const canvas = new OffscreenCanvas(width, height)
+  const layer = { canvas, ctx: canvas.getContext('2d') as OffscreenCanvasRenderingContext2D }
+  layers.set(target, layer)
+  return layer
+}
+
+/**
+ * With several samples, each is drawn opaquely onto a layer and blended onto the target once at
+ * alpha 1/(i+1): that is the running mean. Drawing the elements straight onto the target would
+ * blend each of them separately and leave earlier samples with too much weight.
+ */
 export function drawRecordingFrame(ctx: Ctx, scene: RecordingScene, t: number, quality: 'preview' | 'export', k = 1): void {
   const layout = recordingLayout(scene.videoSize, scene.doc.size, scene.style)
+  const times = sampleTimes(scene, t, quality)
   ctx.save()
-  sampleTimes(scene, t, quality).forEach((ti, i) => {
-    ctx.save()
-    // Each sample repaints the whole output opaquely at alpha 1/(i+1), which makes the canvas the mean of the samples so far.
-    ctx.globalAlpha = 1 / (i + 1)
-    drawSample(ctx, scene, layout, ti, k)
-    ctx.restore()
-  })
+  if (times.length === 1) {
+    ctx.globalAlpha = 1
+    drawSample(ctx, scene, layout, times[0], k)
+  } else {
+    const layer = layerFor(ctx)
+    times.forEach((ti, i) => {
+      layer.ctx.save()
+      drawSample(layer.ctx, scene, layout, ti, k)
+      layer.ctx.restore()
+      ctx.globalAlpha = 1 / (i + 1)
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(layer.canvas, 0, 0)
+    })
+  }
   ctx.restore()
 }

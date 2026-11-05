@@ -77,14 +77,22 @@ describe('drawRecordingFrame', () => {
     expect(videoDraws(1000, 'preview')).toBe(1)
   })
 
-  it('draws the samples as a running mean and leaves the context as it found it', () => {
+  it('blends full-alpha layers into the target as a running mean and leaves the context as it found it', () => {
     const fake = fakeContext()
     fake.ctx.globalAlpha = 0.8
     drawRecordingFrame(fake.ctx, scene, 2700, 'preview')
-    expect(fake.alphaAtCall['drawImage']).toHaveLength(3)
     expect(fake.alphaAtCall['drawImage']).toEqual([1, 1 / 2, 1 / 3])
+    expect(fake.layers).toHaveLength(1)
+    expect(fake.layers[0].alphaAtCall['drawImage']).toEqual([1, 1, 1])
     expect(fake.ctx.globalAlpha).toBe(0.8)
     expect(fake.calls.filter((c) => c === 'save')).toHaveLength(fake.calls.filter((c) => c === 'restore').length)
+  })
+
+  it('draws a single sample straight onto the target', () => {
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, scene, 1000, 'export')
+    expect(fake.layers).toHaveLength(0)
+    expect(fake.alphaAtCall['drawImage']).toEqual([1])
   })
 
   it('paints every sample over an opaque base before the background', () => {

@@ -2,16 +2,19 @@ const gradientStub = () => ({ addColorStop: () => undefined })
 
 const GRADIENT_METHODS = new Set(['createLinearGradient', 'createRadialGradient'])
 
-export function fakeContext(): {
+interface FakeLayer {
   ctx: CanvasRenderingContext2D
-  calls: string[]
   alphaAtCall: Record<string, number[]>
-} {
-  const calls: string[] = []
+}
+
+/** Offscreen layers share the target's `calls` but keep their own alphas, listed in `layers`. */
+function buildFake(calls: string[], width: number, height: number) {
   const alphaAtCall: Record<string, number[]> = {}
-  let properties = new Map<string | symbol, unknown>([['globalAlpha', 1]])
+  let properties = new Map<string | symbol, unknown>([
+    ['globalAlpha', 1],
+    ['canvas', { width, height }]
+  ])
   const saved: Map<string | symbol, unknown>[] = []
-  globalThis.Path2D = class {} as unknown as typeof Path2D
 
   const ctx = new Proxy({} as Record<string | symbol, unknown>, {
     get(_target, name) {
@@ -35,4 +38,27 @@ export function fakeContext(): {
     }
   })
   return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, alphaAtCall }
+}
+
+export function fakeContext(size = { width: 1920, height: 1080 }): {
+  ctx: CanvasRenderingContext2D
+  calls: string[]
+  alphaAtCall: Record<string, number[]>
+  layers: FakeLayer[]
+} {
+  const calls: string[] = []
+  const layers: FakeLayer[] = []
+  globalThis.Path2D = class {} as unknown as typeof Path2D
+  globalThis.OffscreenCanvas = class {
+    constructor(
+      public width: number,
+      public height: number
+    ) {}
+    getContext() {
+      const layer = buildFake(calls, this.width, this.height)
+      layers.push(layer)
+      return layer.ctx
+    }
+  } as unknown as typeof OffscreenCanvas
+  return { ...buildFake(calls, size.width, size.height), layers }
 }
