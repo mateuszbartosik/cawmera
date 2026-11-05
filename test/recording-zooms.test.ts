@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoZooms } from '../src/renderer/src/recording/zooms'
+import { autoZooms, ZOOM_RULES } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
 const click = (t: number, x: number, y: number, button: 'left' | 'right' = 'left') => ({ t, x, y, button, up: t + 80 })
@@ -50,5 +50,16 @@ describe('autoZooms', () => {
     expect(zooms).toHaveLength(2)
     expect(zooms[0].end).toBe(3500)
     expect(zooms[1].start).toBe(3500)
+  })
+
+  it('merges overlapping zooms whose clicks all fit at the minimum depth', () => {
+    const rules = { ...ZOOM_RULES, groupGapMs: 1000 }
+    const zooms = autoZooms([click(3000, 300, 540), click(4200, 1300, 540)], frame, 20_000, rules)
+    expect(zooms).toHaveLength(1)
+    expect(zooms[0].start).toBe(2900)
+    expect(zooms[0].end).toBe(5700)
+    expect(zooms[0].depth).toBeCloseTo(1920 / (1000 + 2 * 0.1 * 1920))
+    expect(zooms[0].focus.x).toBeCloseTo(800)
+    expect(zooms[0].focus.y).toBeCloseTo(540)
   })
 })
