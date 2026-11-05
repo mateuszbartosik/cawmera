@@ -1,10 +1,22 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as cursorArt from '../src/renderer/src/recording/cursor-art'
+import * as effects from '../src/renderer/src/recording/effects'
+import { recordingLayout } from '../src/renderer/src/recording/layout'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { buildCursorPath } from '../src/renderer/src/recording/cursor'
 import { drawRecordingFrame, shutterTimes, viewMatrix } from '../src/renderer/src/recording/frame'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { fakeContext } from './fake-canvas'
+
+vi.mock('../src/renderer/src/recording/cursor-art', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/renderer/src/recording/cursor-art')>()
+  return { ...original, drawCursor: vi.fn(original.drawCursor) }
+})
+vi.mock('../src/renderer/src/recording/effects', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/renderer/src/recording/effects')>()
+  return { ...original, drawClickEffect: vi.fn(original.drawClickEffect) }
+})
 
 const output = { width: 1920, height: 1080 }
 const layout = { content: { x: 96, y: 54, w: 1728, h: 972 }, scale: 0.675 }
@@ -73,5 +85,44 @@ describe('drawRecordingFrame', () => {
     expect(fake.alphaAtCall['drawImage']).toEqual([1, 1 / 2, 1 / 3])
     expect(fake.ctx.globalAlpha).toBe(0.8)
     expect(fake.calls.filter((c) => c === 'save')).toHaveLength(fake.calls.filter((c) => c === 'restore').length)
+  })
+
+  it('paints every sample over an opaque base before the background', () => {
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, scene, 2700, 'preview')
+    const baseFills = fake.calls.flatMap((c, i) => (c === 'fillStyle=#000' ? [i] : []))
+    expect(baseFills).toHaveLength(3)
+    expect(fake.calls[baseFills[0] + 1]).toBe('fillRect')
+    expect(baseFills[0]).toBeLessThan(fake.calls.indexOf('createLinearGradient'))
+  })
+
+  it('draws the click effect and the cursor where they happened, in composition px', () => {
+    const click = { t: 1000, x: 640, y: 360, button: 'left' as const, up: 1090 }
+    const resting = { ...track, scale: 1.5, clicks: [click], cursor: still.map((s) => ({ ...s, x: 640, y: 360 })) }
+    const clicked = { ...scene, track: resting, zooms: [], path: buildCursorPath(resting, 0), settings: { ...scene.settings, motionBlur: 0 } }
+    const { content, scale } = recordingLayout(clicked.videoSize, output, DEFAULT_HOUSE_STYLE)
+    const expected = { x: content.x + 640 * scale, y: content.y + 360 * scale }
+    vi.mocked(effects.drawClickEffect).mockClear()
+    vi.mocked(cursorArt.drawCursor).mockClear()
+
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, clicked, 1100, 'export')
+
+    expect(effects.drawClickEffect).toHaveBeenCalledTimes(1)
+    const [, effectClick, , color, radius] = vi.mocked(effects.drawClickEffect).mock.calls[0]
+    expect(effectClick.x).toBeCloseTo(expected.x)
+    expect(effectClick.y).toBeCloseTo(expected.y)
+    expect(color).toBe(DEFAULT_HOUSE_STYLE.accent)
+    expect(radius).toBeCloseTo(28 * scale * 1.5)
+
+    expect(cursorArt.drawCursor).toHaveBeenCalledTimes(1)
+    const [, cursorFrame, , height] = vi.mocked(cursorArt.drawCursor).mock.calls[0]
+    expect(cursorFrame.x).toBeCloseTo(expected.x)
+    expect(cursorFrame.y).toBeCloseTo(expected.y)
+    expect(height).toBeCloseTo(cursorArt.CURSOR_BASE_PX * DEFAULT_RECORDING.cursorSize * scale * 1.5)
+
+    expect(vi.mocked(effects.drawClickEffect).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(cursorArt.drawCursor).mock.invocationCallOrder[0]
+    )
   })
 })

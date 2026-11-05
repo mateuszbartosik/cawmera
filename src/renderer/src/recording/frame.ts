@@ -27,6 +27,7 @@ export const BLUR_SAMPLES = { preview: 3, export: 8 }
 export type Matrix = [number, number, number, number, number, number]
 
 const CLICK_EFFECT_RADIUS_PX = 28
+const OPAQUE_BASE = '#000'
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -53,6 +54,9 @@ function drawSample(ctx: Ctx, scene: RecordingScene, layout: RecordingLayout, ti
   const canvas = ctx as CanvasRenderingContext2D
   const camera = cameraAt(ti, zooms, videoSize, settings.zoomSpeed)
   const [a, b, c, d, e, f] = viewMatrix(camera, layout, doc.size)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.fillStyle = OPAQUE_BASE
+  ctx.fillRect(0, 0, doc.size.width * k, doc.size.height * k)
   ctx.setTransform(a * k, b * k, c * k, d * k, e * k, f * k)
 
   drawBackground(canvas, doc, style, backdrop)
