@@ -7,8 +7,13 @@ const SOURCE_DIR = join('native', 'recorder')
 const BUILD_DIR = join(SOURCE_DIR, 'build')
 const HELPER = join(BUILD_DIR, 'Release', 'cawmera-recorder.exe')
 const BUNDLED_CMAKE = join('Common7', 'IDE', 'CommonExtensions', 'Microsoft', 'CMake', 'CMake', 'bin', 'cmake.exe')
-const FORBIDDEN_IMPORTS = /\b(?:SetWindowsHookEx|GetAsyncKeyState|GetKeyState|GetKeyboardState)[AW]?\b/g
 const INSTALL_HINT = 'Install Visual Studio 2022 or its Build Tools with the "Desktop development with C++" workload.'
+
+const FORBIDDEN_APIS = ['SetWindowsHookEx', 'GetAsyncKeyState', 'GetKeyState', 'GetKeyboardState', 'SetWinEventHook',
+  'RegisterHotKey']
+const FORBIDDEN_IMPORT = new RegExp(String.raw`\b(?:NtUser)?(?:${FORBIDDEN_APIS.join('|')})[AW]?\b`, 'g')
+const NETWORK_DLLS = ['WS2_32.DLL', 'WSOCK32.DLL', 'WINHTTP.DLL', 'WININET.DLL', 'URLMON.DLL', 'DNSAPI.DLL']
+const STRING_ENCODINGS = [['ASCII', 'ascii'], ['UTF-16LE', 'utf16le']]
 
 function fail(message) {
   console.error(`\nbuild:recorder: ${message}`)
@@ -22,7 +27,8 @@ function run(tool, args, failure) {
 }
 
 function outputOf(tool, args) {
-  const result = spawnSync(tool, args, { encoding: 'utf8' })
+  // English output from the MSVC tools, so dumpbin's "Ordinal" lines parse on localized installs too.
+  const result = spawnSync(tool, args, { encoding: 'utf8', env: { ...process.env, VSLANG: '1033' } })
   if (result.error) fail(`couldn't start ${tool}: ${result.error.message}`)
   if (result.status !== 0) {
     fail(`${tool} ${args.join(' ')} exited with code ${result.status}\n${result.stdout}${result.stderr}`)
@@ -31,7 +37,7 @@ function outputOf(tool, args) {
 }
 
 function findVisualStudio() {
-  const programFiles = process.env['ProgramFiles(x86)'] ?? 'C:\Program Files (x86)'
+  const programFiles = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
   const vswhere = join(programFiles, 'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
   if (!existsSync(vswhere)) fail(`vswhere.exe isn't at ${vswhere}. ${INSTALL_HINT}`)
 
@@ -56,12 +62,43 @@ function findDumpbin(installation) {
   return dumpbin
 }
 
-function checkImports(dumpbin) {
+// Every DLL in dumpbin's imports and delay-load imports, upper-cased, with the ordinals imported from it.
+function ordinalsByDll(imports) {
+  const dlls = new Map()
+  let current = []
+  for (const line of imports.split(/\r?\n/)) {
+    const dll = line.match(/^\s+(\S+\.dll)\s*$/i)?.[1].toUpperCase()
+    if (dll) {
+      current = dlls.get(dll) ?? []
+      dlls.set(dll, current)
+    }
+    const ordinal = line.match(/\bOrdinal\s+(\d+)\s*$/)?.[1]
+    if (ordinal) current.push(ordinal)
+  }
+  return dlls
+}
+
+function apiNamesInBytes(file) {
+  const bytes = readFileSync(file)
+  return FORBIDDEN_APIS.flatMap((api) => STRING_ENCODINGS
+    .filter(([, encoding]) => bytes.includes(Buffer.from(api, encoding)))
+    .map(([label]) => `${api} (${label})`))
+}
+
+function checkHelperApis(dumpbin) {
   const imports = outputOf(dumpbin, ['/imports', HELPER])
-  if (!/^\s+\S+\.dll\s*$/im.test(imports)) fail(`dumpbin listed no imported DLLs for ${HELPER}`)
-  const forbidden = [...new Set(imports.match(FORBIDDEN_IMPORTS))]
-  if (forbidden.length > 0) {
-    fail(`${HELPER} imports ${forbidden.join(', ')}. The helper must never read the keyboard or install hooks.`)
+  const dlls = ordinalsByDll(imports)
+  if (dlls.size === 0) fail(`dumpbin listed no imported DLLs for ${HELPER}.`)
+
+  const broken = [
+    ['it imports a keyboard or hook API', [...new Set(imports.match(FORBIDDEN_IMPORT))]],
+    ['its bytes name a keyboard or hook API', apiNamesInBytes(HELPER)],
+    ['it imports from USER32.dll by ordinal', dlls.get('USER32.DLL') ?? []],
+    ['it imports a network DLL', [...dlls.keys()].filter((dll) => NETWORK_DLLS.includes(dll))]
+  ].filter(([, found]) => found.length > 0)
+  if (broken.length > 0) {
+    const rules = broken.map(([rule, found]) => `\n  - ${rule}: ${found.join(', ')}`).join('')
+    fail(`${HELPER} breaks the helper's rules (no keyboard, no hooks, no network):${rules}`)
   }
 }
 
@@ -74,8 +111,8 @@ const dumpbin = findDumpbin(installation)
 run(cmake, ['-S', SOURCE_DIR, '-B', BUILD_DIR, '-G', 'Visual Studio 17 2022', '-A', 'x64',
   `-DCMAKE_GENERATOR_INSTANCE=${installation}`], `CMake couldn't configure ${SOURCE_DIR}`)
 run(cmake, ['--build', BUILD_DIR, '--config', 'Release'], 'the build failed')
-run(join(dirname(cmake), 'ctest.exe'), ['--test-dir', BUILD_DIR, '-C', 'Release', '--output-on-failure'],
-  'the helper tests failed')
+run(join(dirname(cmake), 'ctest.exe'),
+  ['--test-dir', BUILD_DIR, '-C', 'Release', '--output-on-failure', '--no-tests=error'], 'the helper tests failed')
 if (!existsSync(HELPER)) fail(`${HELPER} wasn't built.`)
-checkImports(dumpbin)
-console.log(`\n${HELPER} is built and tested, and imports no keyboard or hook APIs.`)
+checkHelperApis(dumpbin)
+console.log(`\n${HELPER} is built and tested, and uses no keyboard, hook or network APIs.`)

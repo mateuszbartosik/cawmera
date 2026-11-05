@@ -92,6 +92,17 @@ void fitsCentredScalingDownOrUp() {
     CHECK(nearly(up.y, 0));
 }
 
+void fitsAnEmptySourceToTheCentre() {
+    const Fit minimized = fitInside(0, 0, 1920, 1080);
+    CHECK(minimized.scale == 0);
+    CHECK(nearly(minimized.x, 960));
+    CHECK(nearly(minimized.y, 540));
+    CHECK(fitInside(0, 720, 1920, 1080).scale == 0);
+
+    const auto [x, y] = screenToVideo(500, 300, {0, 0, 0, 0}, minimized);
+    CHECK(std::isfinite(x) && std::isfinite(y));
+}
+
 void mapsScreenPointsIntoTheVideo() {
     const auto [x, y] = screenToVideo(100 + 640, 50 + 360, {100, 50, 1380, 770}, fitInside(1280, 720, 1920, 1080));
     CHECK(nearly(x, 960));
@@ -196,6 +207,7 @@ void listsCursorShapesLikeTheRenderer() {
 
 int main() {
     fitsCentredScalingDownOrUp();
+    fitsAnEmptySourceToTheCentre();
     mapsScreenPointsIntoTheVideo();
     clampsRectsToBounds();
     roundsSizesUpToEven();

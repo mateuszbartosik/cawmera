@@ -3,6 +3,7 @@
 #include <algorithm>
 
 Fit fitInside(int srcW, int srcH, int dstW, int dstH) {
+    if (srcW <= 0 || srcH <= 0) return {0, dstW / 2.0, dstH / 2.0};
     const double scale = std::min(static_cast<double>(dstW) / srcW, static_cast<double>(dstH) / srcH);
     return {scale, (dstW - srcW * scale) / 2, (dstH - srcH * scale) / 2};
 }
