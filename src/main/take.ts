@@ -146,15 +146,18 @@ export function createTakeLifecycle(host: TakeHost) {
 
   async function conclude(take: Take, session: RecorderSession) {
     const result = await session.ended
-    release(take)
     if (!take.begun) {
+      release(take)
       if (!take.cancelled && 'error' in result) endedBeforeBegin = result.error
       await removeFiles(take)
     } else if ('error' in result) {
+      release(take)
       send('recording:failed', result.error)
       await removeFiles(take)
     } else {
+      // Still current while its track is read, so a close in that moment is held instead of losing the take.
       await deliver(take)
+      release(take)
     }
     take.settle()
   }

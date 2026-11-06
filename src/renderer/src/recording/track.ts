@@ -15,7 +15,8 @@ const CURSOR_ROW_LENGTH = 4
 const CLICK_ROW_LENGTH = 5
 const HIDDEN_SHAPE_INDEX = -1
 const NO_RELEASE = -1
-const STOP_CLICK_WITHIN_MS = 1000
+const STOP_CLICK_WITHIN_MS = 700
+const TASKBAR_ZONE_PX = 250
 
 function invalidTrack(): never {
   throw new Error('Not a Cawmera recording track')
@@ -82,10 +83,16 @@ export function isShownClick(click: Click, frame: Size): boolean {
   return click.button === 'left' && isInFrame(click, frame)
 }
 
+function couldBeOnTaskbar(click: Click, track: RecordingTrack): boolean {
+  if (track.kind === 'window') return !isInFrame(click, track)
+  const nearestEdgePx = Math.min(click.x, track.width - click.x, click.y, track.height - click.y)
+  return nearestEdgePx <= TASKBAR_ZONE_PX * track.scale
+}
+
 export function stopClickOf(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): Click | null {
   const last = track.clicks.at(-1)
-  const stoppedFromTaskbar = stoppedBy === 'window'
-  return stoppedFromTaskbar && last !== undefined && last.t >= track.durationMs - STOP_CLICK_WITHIN_MS ? last : null
+  if (stoppedBy !== 'window' || last === undefined || last.t < track.durationMs - STOP_CLICK_WITHIN_MS) return null
+  return couldBeOnTaskbar(last, track) ? last : null
 }
 
 export function withoutStopClick(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): RecordingTrack {

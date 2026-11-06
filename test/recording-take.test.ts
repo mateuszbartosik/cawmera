@@ -69,6 +69,20 @@ const takes = {
       9700
     )
   },
+  'a taskbar stop with the cursor moving away before the take ended': {
+    stoppedBy: 'window' as const,
+    raw: track(
+      [
+        ...work,
+        ...rest(next, lookAtResult.startMs, lookAtResult.endMs),
+        ...glide(next, taskbarButton, lookAtResult.endMs, 8900),
+        ...rest(taskbarButton, 8900, 9500),
+        ...glide(taskbarButton, { x: 900, y: 700 }, 9500, 9700)
+      ],
+      [...workClicks, { t: 9500, ...taskbarButton, button: 'left', up: null }],
+      9700
+    )
+  },
   'a taskbar stop on the button’s thumbnail': {
     stoppedBy: 'window' as const,
     raw: track(

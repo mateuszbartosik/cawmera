@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { RecorderResult, RecorderSession } from '../src/main/recorder-process'
 import { createTakeLifecycle, STOP_SHORTCUT, type TakeHost } from '../src/main/take'
 import type { RecordingError, RecordingFinished, RecordingStartRequest } from '../src/shared/types'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
 
 const request: RecordingStartRequest = { sourceId: 'window:42:0', displayId: null }
 const cancelled: RecordingError = { code: 'cancelled', message: 'Recording cancelled' }
@@ -323,6 +328,26 @@ describe('take lifecycle', () => {
       await session.writeTrack()
       session.end(DONE)
       await vi.waitFor(() => expect(sentOn(t, 'recording:finished')).toEqual([expect.objectContaining({ stoppedBy: 'window' })]))
+      expect(t.takes.stopLiveTake()).toBe(false)
+    })
+
+    it('holds a close while the finished take’s track is still being read', async () => {
+      const t = await setup()
+      await warmUp(t)
+      t.takes.begin()
+      let finishReading = () => {}
+      const reading = new Promise<void>((resolve) => (finishReading = resolve))
+      vi.mocked(readFile).mockClear()
+      vi.mocked(readFile).mockImplementationOnce(async () => {
+        await reading
+        return TRACK
+      })
+      t.shortcuts.press()
+      await vi.waitFor(() => expect(readFile).toHaveBeenCalled())
+      expect(t.takes.stopLiveTake()).toBe(true)
+      expect(sentOn(t, 'recording:finished')).toEqual([])
+      finishReading()
+      await vi.waitFor(() => expect(sentOn(t, 'recording:finished')).toHaveLength(1))
       expect(t.takes.stopLiveTake()).toBe(false)
     })
   })

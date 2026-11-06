@@ -95,14 +95,43 @@ describe('auto trim of a take stopped from the taskbar', () => {
     })
 
     it('ends where the wait starts if that comes sooner', () => {
-      const cursor = [...glide({ x: 700, y: 300 }, clicked, 2000), ...glide(clicked, outsideWait, 2480, 20), ...stay(button, 2800, 5000)]
-      expect(autoTrim(track(cursor, 5000, [click]), stopClickOn(button)).end).toBe(2800)
+      const cursor = [...glide({ x: 700, y: 300 }, clicked, 2000), ...glide(clicked, outsideWait, 2480, 32), ...stay(button, 3000, 5000)]
+      expect(autoTrim(track(cursor, 5000, [click]), stopClickOn(button)).end).toBe(3000)
     })
 
     it('lets the click land even when a short rest ended just after it', () => {
       const restingClick: Click = { ...click, t: 2500 }
       const cursor = [...stay(clicked, 2000, 2600), ...glide(clicked, outsideWait, 2600, 60), ...stay(button, 3560, 5000)]
       expect(autoTrim(track(cursor, 5000, [restingClick]), stopClickOn(button)).end).toBe(2500 + 650)
+    })
+  })
+
+  describe('when the cursor stays near the button before the stop', () => {
+    const nearButton: Spot = { x: 900, y: 910 }
+    const arriving = [...stay(content, 0, 2000), ...glide(content, nearButton, 2000)]
+    const clickNearButton = (t: number): Click => ({ t, ...nearButton, button: 'left', up: t + 80 })
+
+    it('keeps a stay of more than 2 s as content, like typing in a chat box above the button', () => {
+      const chatBox: Spot = { x: 900, y: 880 }
+      const cursor = [
+        ...stay(content, 0, 2000),
+        ...glide(content, chatBox, 2000),
+        ...stay(chatBox, 2480, 19_500),
+        ...glide(chatBox, button, 19_500, 15),
+        ...stay(button, 19_740, 20_200)
+      ]
+      const typing = { ...track(cursor, 20_200, [{ t: 2500, ...chatBox, button: 'left', up: 2580 }]), scale: 1.5 }
+      expect(autoTrim(typing, { ...stopClickOn(button), t: 20_000 }).end).toBe(20_000)
+    })
+
+    it('lets a content click inside the wait land', () => {
+      const cursor = [...arriving, ...stay(nearButton, 2480, 3200), ...glide(nearButton, button, 3200, 15), ...stay(button, 3440, 4200)]
+      expect(autoTrim(track(cursor, 4200, [clickNearButton(2500)]), { ...stopClickOn(button), t: 4000 }).end).toBe(2500 + 650)
+    })
+
+    it('never lets that landing reach the stop click', () => {
+      const cursor = [...arriving, ...stay(nearButton, 2480, 3700), ...glide(nearButton, button, 3700, 10), ...stay(button, 3860, 4200)]
+      expect(autoTrim(track(cursor, 4200, [clickNearButton(3600)]), { ...stopClickOn(button), t: 4000 }).end).toBe(4000)
     })
   })
 })

@@ -1,6 +1,7 @@
 import fixtureJson from './fixtures/track-from-helper.json?raw'
 import { describe, expect, it } from 'vitest'
 import { parseTrack, stopClickOf, withoutStopClick, type Click, type RecordingTrack } from '../src/renderer/src/recording/track'
+import { autoTrim } from '../src/renderer/src/recording/trim'
 
 const raw = {
   version: 1,
@@ -52,15 +53,40 @@ describe('the click that stopped a take', () => {
   const take = (clicks: Click[]): RecordingTrack =>
     ({ kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 10_000, scale: 1, cursor: [], clicks })
   const next: Click = { t: 6000, x: 1000, y: 700, button: 'left', up: 6080 }
-  const taskbar: Click = { t: 9200, x: 900, y: 1060, button: 'left', up: null }
+  const taskbar: Click = { t: 9700, x: 900, y: 1060, button: 'left', up: null }
 
   it('drops the taskbar click that stopped the take', () => {
     expect(withoutStopClick(take([next, taskbar]), 'window').clicks).toEqual([next])
   })
 
-  it('keeps a last click from before the final second', () => {
-    const earlier = { ...taskbar, t: 8900 }
+  it('keeps a last click from before the final 700 ms', () => {
+    const earlier = { ...taskbar, t: 9200 }
     expect(withoutStopClick(take([next, earlier]), 'window').clicks).toEqual([next, earlier])
+  })
+
+  it('keeps a content click in the middle of the screen when Alt+Tab ended the take', () => {
+    const save: Click = { t: 9500, x: 960, y: 540, button: 'left', up: 9580 }
+    const resting = Array.from({ length: 100 }, (_, i) => ({ t: 8600 + i * 16, x: 960, y: 540, shape: 'arrow' as const }))
+    const altTabbed: RecordingTrack = { ...take([next, save]), durationMs: 10_200, cursor: resting }
+    const kept = withoutStopClick(altTabbed, 'window')
+    expect(kept.clicks).toEqual([next, save])
+    expect(autoTrim(kept, stopClickOf(altTabbed, 'window')).end).toBe(10_000)
+  })
+
+  it('never drops a click inside a window take’s frame', () => {
+    const windowTake: RecordingTrack = { ...take([next, taskbar]), kind: 'window' }
+    expect(stopClickOf(windowTake, 'window')).toBeNull()
+    const belowTheWindow = { ...taskbar, y: 1150 }
+    expect(stopClickOf({ ...windowTake, clicks: [next, belowTheWindow] }, 'window')).toEqual(belowTheWindow)
+  })
+
+  it('is found on a monitor take only near an edge, where the taskbar and its thumbnails are', () => {
+    const lastClickAt = (x: number, y: number) => stopClickOf(take([next, { ...taskbar, x, y }]), 'window')
+    expect(lastClickAt(960, 840)).not.toBeNull()
+    expect(lastClickAt(100, 540)).not.toBeNull()
+    expect(lastClickAt(960, 820)).toBeNull()
+    expect(lastClickAt(960, 540)).toBeNull()
+    expect(stopClickOf({ ...take([next, { ...taskbar, x: 960, y: 720 }]), scale: 1.5 }, 'window')).not.toBeNull()
   })
 
   it('keeps every click when the take stopped another way', () => {
@@ -73,9 +99,9 @@ describe('the click that stopped a take', () => {
     expect(withoutStopClick(take([]), 'window').clicks).toEqual([])
   })
 
-  it('is found only for a taskbar stop, in the final second', () => {
+  it('is found only for a taskbar stop, in the final 700 ms', () => {
     expect(stopClickOf(take([next, taskbar]), 'window')).toEqual(taskbar)
-    expect(stopClickOf(take([next, { ...taskbar, t: 8900 }]), 'window')).toBeNull()
+    expect(stopClickOf(take([next, { ...taskbar, t: 9200 }]), 'window')).toBeNull()
     expect(stopClickOf(take([next, taskbar]), 'shortcut')).toBeNull()
     expect(stopClickOf(take([]), 'window')).toBeNull()
   })
