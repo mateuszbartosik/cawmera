@@ -3,33 +3,13 @@ import { toast } from 'sonner'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import { store } from '../app/store'
-import { drawRecordingFrame, type RecordingScene } from '../recording/frame'
+import { drawRecordingFrame } from '../recording/frame'
 import { attachPlayer, setPlayhead, setPlaying } from '../recording/playback'
 import { RecordingPlayer } from '../recording/player'
-import { cursorPathFor, getRecording, type RecordingEntry } from '../recording/registry'
+import { getRecording } from '../recording/registry'
+import { recordingScene } from '../recording/scene'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
-
-export function recordingScene(
-  entry: RecordingEntry,
-  doc: Doc,
-  style: HouseStyle,
-  backdrop: ImageBitmap | null,
-  video: CanvasImageSource
-): RecordingScene | null {
-  if (!doc.recording) return null
-  return {
-    video,
-    videoSize: { width: entry.track.width, height: entry.track.height },
-    track: entry.track,
-    zooms: entry.zooms,
-    path: cursorPathFor(entry, doc.recording.smoothing),
-    doc,
-    settings: doc.recording,
-    style,
-    backdrop
-  }
-}
 
 export function sizeCanvas(canvas: HTMLCanvasElement, size: Size, backingWidth: number) {
   const backingHeight = Math.max(1, Math.round((backingWidth * size.height) / size.width))

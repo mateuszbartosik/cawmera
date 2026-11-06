@@ -84,4 +84,4 @@ npm run build:web    # the same UI as a single HTML file
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The MP4 muxer, [mediabunny](https://mediabunny.dev), is bundled under MPL-2.0.

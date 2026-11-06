@@ -23,6 +23,7 @@ import {
   type ShotRecord
 } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
+import { recordingScene } from '../recording/scene'
 import { getRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
 import {
@@ -56,7 +57,7 @@ import {
 } from '../render/layout'
 import { cn } from '../ui/controls'
 import { activeIndex, panBy, shotAt, shotRects, slotAt, slotX, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
-import { RecordingCanvas, recordingScene, sizeCanvas } from './RecordingCanvas'
+import { RecordingCanvas, sizeCanvas } from './RecordingCanvas'
 
 const HANDLE_PX = 8
 const MIN_ITEM = 6

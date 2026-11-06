@@ -2,11 +2,12 @@ import { toast } from 'sonner'
 import type { CaptureSource, RecordingError, RecordingFinished } from '@shared/types'
 import { recordingUrl } from '@shared/media'
 import { countdown, interruptCountdown, resetCancellation } from '../app/actions'
-import type { Doc } from '../app/doc'
-import { addShot, emptyDoc, liveShots, store, updateDoc } from '../app/store'
+import { exportFileName, type Doc } from '../app/doc'
+import { addShot, backdropReady, emptyDoc, liveShots, markSaved, store, updateDoc } from '../app/store'
 import { revealActive } from '../canvas/view'
-import { bridge } from '../platform/bridge'
-import { registerRecording } from './registry'
+import { bridge, saveVideo } from '../platform/bridge'
+import { exportRecordingVideo } from './export'
+import { getRecording, registerRecording } from './registry'
 import { runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { parseTrack } from './track'
@@ -170,4 +171,45 @@ function addRecordingShot(id: string, settings: RecordingDoc) {
 
 export function setRecording(patch: Partial<RecordingDoc>, history = true) {
   updateDoc((doc) => (doc.recording ? { recording: { ...doc.recording, ...patch } } : {}), { history })
+}
+
+const percent = (share: number) => Math.round(share * 100)
+
+export async function exportRecording() {
+  const { doc, activeId, exportProgress } = store.get()
+  if (exportProgress !== null || !doc.recording) return
+  const entry = getRecording(doc.sourceId)
+  if (!entry) {
+    toast('This recording is no longer available', { description: 'Record it again.' })
+    return
+  }
+  const recordingDoc = { ...doc, recording: doc.recording }
+  const name = exportFileName(doc.fileName, 'mp4', `whats-new-shot-${liveShots().findIndex((record) => record.id === activeId) + 1}`)
+  store.set({ exportProgress: 0 })
+  try {
+    await backdropReady()
+    const { style, backdrop } = store.get()
+    let shown = 0
+    const video = await exportRecordingVideo(entry, recordingDoc, style, backdrop?.bitmap ?? null, (share) => {
+      if (percent(share) !== shown) store.set({ exportProgress: share })
+      shown = percent(share)
+    })
+    const saved = await saveVideo(video, name)
+    if (!saved) return
+    markSaved([activeId])
+    const description = `${doc.size.width} × ${doc.size.height} MP4 · ${doc.recording.fps} fps`
+    const path = saved.path
+    if (path && bridge) {
+      toast.success(`Saved ${path.split(/[\/]/).pop()}`, {
+        description,
+        action: { label: 'Show in folder', onClick: () => void bridge?.revealFile(path) }
+      })
+    } else {
+      toast.success(`Downloaded ${name}`, { description })
+    }
+  } catch (error) {
+    toast.error('Export failed', { description: error instanceof Error ? error.message : String(error) })
+  } finally {
+    store.set({ exportProgress: null })
+  }
 }

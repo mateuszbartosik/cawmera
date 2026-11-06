@@ -42,6 +42,16 @@ export async function saveImage(blob: Blob, fileName: string, format: ImageForma
   return { path: null }
 }
 
+/** Saves one video. Desktop: native save dialog, remembering the folder. Browser: a download. */
+export async function saveVideo(blob: Blob, fileName: string): Promise<{ path: string | null } | null> {
+  if (bridge) {
+    const result = await bridge.saveVideo(await blobBytes(blob), fileName)
+    return result ? { path: result.path } : null
+  }
+  download(blob, fileName)
+  return { path: null }
+}
+
 /** Saves several images. Desktop: pick a folder once. Browser: one download each. */
 export async function saveImages(images: { name: string; blob: Blob }[]): Promise<{ folder: string | null; count: number } | null> {
   if (bridge) {

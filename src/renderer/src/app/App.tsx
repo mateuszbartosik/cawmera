@@ -8,7 +8,7 @@ import { isNarrow, PANEL_GAP, shotAt, toWorld, workspaceGeometry, zoomFit, zoomS
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge } from '../platform/bridge'
-import { finishRecording, recordingFailed } from '../recording/actions'
+import { exportRecording, finishRecording, recordingFailed } from '../recording/actions'
 import { Timeline } from '../timeline/Timeline'
 import { Toolbar } from '../toolbar/Toolbar'
 import {
@@ -45,11 +45,12 @@ function runCommand(command: MenuCommand) {
     case 'previous-shot':
       return stepShot(-1)
     case 'export':
-      return void exportImage()
+      return void (store.get().doc.recording ? exportRecording() : exportImage())
     case 'export-all':
       return void exportAll()
     case 'copy':
-      return void copyImage()
+      if (!store.get().doc.recording) void copyImage()
+      return
     case 'undo':
       return undo()
     case 'redo':

@@ -32,7 +32,7 @@ import {
 } from '../app/actions'
 import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
-import { setRecording, startRecordingPicker } from '../recording/actions'
+import { exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
 import type { RecordingFps } from '../recording/settings'
 import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
@@ -436,6 +436,7 @@ function ExportSection() {
 export function Panel() {
   const hasSource = useApp((s) => s.doc.sourceId !== null)
   const isRecording = useApp((s) => s.doc.recording !== null)
+  const exportProgress = useApp((s) => s.exportProgress)
   const houseStyleOpen = useApp((s) => s.houseStyleOpen)
   const narrow = useApp((s) => isNarrow(s))
   const format = useApp((s) => s.format)
@@ -489,8 +490,16 @@ export function Panel() {
       </div>
       <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-(--tc-divider) p-3">
         {isRecording ? (
-          <Button variant="primary" className="col-span-2" icon={<UploadSimple size={14} />} disabled data-testid="export">
-            Export MP4
+          <Button
+            variant="primary"
+            className="col-span-2"
+            icon={<UploadSimple size={14} />}
+            disabled={exportProgress !== null}
+            onClick={() => void exportRecording()}
+            data-testid="export"
+            hint="Save this shot as a video (Ctrl+S)"
+          >
+            {exportProgress === null ? 'Export MP4' : `Exporting ${Math.round(exportProgress * 100)}%`}
           </Button>
         ) : (
           <>

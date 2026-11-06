@@ -151,12 +151,12 @@ export function slugify(name: string): string {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/\.(png|webp)$/i, '')
+    .replace(/\.(png|webp|mp4)$/i, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80)
 }
 
-export function exportFileName(name: string, format: ExportFormat = 'webp', fallback = 'whats-new-shot'): string {
-  return `${slugify(name) || fallback}.${format}`
+export function exportFileName(name: string, extension: ExportFormat | 'mp4' = 'webp', fallback = 'whats-new-shot'): string {
+  return `${slugify(name) || fallback}.${extension}`
 }
