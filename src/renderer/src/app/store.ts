@@ -422,6 +422,14 @@ export function markSaved(ids: string[]) {
   }))
 }
 
+/** Marks `doc`, the state that was written to a file, as saved: edits made since still count as unsaved. */
+export function markSnapshotSaved(id: string, doc: Doc) {
+  store.set((s) => ({
+    savedDoc: id === s.activeId ? doc : s.savedDoc,
+    shots: s.shots.map((record) => (record.id === id && record.id !== s.activeId ? { ...record, savedDoc: doc } : record))
+  }))
+}
+
 // ---------------------------------------------------------------------------
 // Sources live outside the state: big bitmaps, referenced by id from documents and history.
 

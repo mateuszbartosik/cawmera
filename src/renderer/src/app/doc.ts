@@ -157,6 +157,9 @@ export function slugify(name: string): string {
     .slice(0, 80)
 }
 
+/** The name an unnamed shot exports under; `index` is its place in the row, from 0. */
+export const shotFallbackName = (index: number) => `whats-new-shot-${index + 1}`
+
 export function exportFileName(name: string, extension: ExportFormat | 'mp4' = 'webp', fallback = 'whats-new-shot'): string {
   return `${slugify(name) || fallback}.${extension}`
 }

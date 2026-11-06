@@ -8,6 +8,7 @@ import {
   normalizeAngle,
   randomAngle,
   snapDensity,
+  shotFallbackName,
   slugify,
   type Density,
   type Doc,
@@ -16,6 +17,8 @@ import {
   type Fill
 } from './doc'
 import { readBackdrop } from './backdrop'
+import { toastExportFailed, toastSaved } from './save-toast'
+import { evenSize } from './size'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle } from './house-style'
 import { shuffledLook } from './shuffle'
 import {
@@ -200,7 +203,7 @@ export function deletePickedShots() {
 
 /** File name a shot exports under (empty names get a numbered default). */
 export function shotFileName(record: ShotRecord, index: number) {
-  return exportFileName(record.doc.fileName, store.get().format, `whats-new-shot-${index + 1}`)
+  return exportFileName(record.doc.fileName, store.get().format, shotFallbackName(index))
 }
 
 // ---------------------------------------------------------------------------
@@ -350,22 +353,14 @@ export async function exportImage() {
   }
   leaveCrop()
   const index = liveShots().findIndex((record) => record.id === activeId)
-  const name = exportFileName(doc.fileName, format, `whats-new-shot-${index + 1}`)
+  const name = exportFileName(doc.fileName, format, shotFallbackName(index))
   try {
     const saved = await saveImage(await renderImage(scene, format), name, format)
     if (!saved) return
     markSaved([activeId])
-    const path = saved.path
-    if (path && bridge) {
-      toast.success(`Saved ${path.split(/[\\/]/).pop()}`, {
-        description: sizeLabel(doc.size, format),
-        action: { label: 'Show in folder', onClick: () => void bridge?.revealFile(path) }
-      })
-    } else {
-      toast.success(`Downloaded ${name}`, { description: sizeLabel(doc.size, format) })
-    }
+    toastSaved(saved, name, sizeLabel(doc.size, format))
   } catch (error) {
-    toast.error('Export failed', { description: error instanceof Error ? error.message : String(error) })
+    toastExportFailed(error)
   }
 }
 
@@ -391,7 +386,7 @@ export async function exportAll() {
       description: saved.folder ? saved.folder : FORMAT_LABEL[format]
     })
   } catch (error) {
-    toast.error('Export failed', { description: error instanceof Error ? error.message : String(error) })
+    toastExportFailed(error)
   }
 }
 
@@ -455,8 +450,9 @@ export function setLightIntensity(intensity: number, history = true) {
   if (store.get().doc.lightIntensity !== next) updateDoc({ lightIntensity: next }, { history })
 }
 
-export function setSize(size: Size) {
+export function setSize(requested: Size) {
   const { doc } = store.get()
+  const size = doc.recording ? evenSize(requested) : requested
   if (doc.size.width !== size.width || doc.size.height !== size.height) updateDoc({ size })
 }
 

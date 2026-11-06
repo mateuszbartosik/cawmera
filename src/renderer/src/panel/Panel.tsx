@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Record, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
-import { EDGE_NAMES, FORMAT_LABEL, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
+import { EDGE_NAMES, FORMAT_LABEL, shotFallbackName, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import {
   addRedaction,
@@ -32,7 +32,7 @@ import {
 } from '../app/actions'
 import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
-import { exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
+import { exportPercent, exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
 import type { RecordingFps } from '../recording/settings'
 import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
@@ -403,7 +403,7 @@ function ExportSection() {
   const fps = useApp((s) => s.doc.recording?.fps)
   const index = useApp((s) => s.shots.findIndex((record) => record.id === s.activeId))
   const section = useSection('export')
-  const fallback = `whats-new-shot-${index + 1}`
+  const fallback = shotFallbackName(index)
   return (
     <Section title="Export" testId="section-export" {...section}>
       <SizeField size={size} onChange={setSize} />
@@ -499,7 +499,7 @@ export function Panel() {
             data-testid="export"
             hint="Save this shot as a video (Ctrl+S)"
           >
-            {exportProgress === null ? 'Export MP4' : `Exporting ${Math.round(exportProgress * 100)}%`}
+            {exportProgress === null ? 'Export MP4' : `Exporting ${exportPercent(exportProgress)}%`}
           </Button>
         ) : (
           <>

@@ -28,6 +28,9 @@ export function clampSide(value: number, fallback: number): number {
   return Math.min(MAX_SIDE, Math.max(MIN_SIDE, Math.round(value)))
 }
 
+/** Video encoders need even sides. */
+export const evenSize = ({ width, height }: Size): Size => ({ width: Math.round(width / 2) * 2, height: Math.round(height / 2) * 2 })
+
 export function presetFor(size: Size): SizePreset | null {
   return SIZE_PRESETS.find((preset) => preset.width === size.width && preset.height === size.height) ?? null
 }

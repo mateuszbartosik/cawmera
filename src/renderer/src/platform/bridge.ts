@@ -43,12 +43,12 @@ export async function saveImage(blob: Blob, fileName: string, format: ImageForma
 }
 
 /** Saves one video. Desktop: native save dialog, remembering the folder. Browser: a download. */
-export async function saveVideo(blob: Blob, fileName: string): Promise<{ path: string | null } | null> {
+export async function saveVideo(bytes: Uint8Array, fileName: string): Promise<{ path: string | null } | null> {
   if (bridge) {
-    const result = await bridge.saveVideo(await blobBytes(blob), fileName)
+    const result = await bridge.saveVideo(bytes, fileName)
     return result ? { path: result.path } : null
   }
-  download(blob, fileName)
+  download(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'video/mp4' }), fileName)
   return { path: null }
 }
 

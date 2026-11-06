@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampSide, presetFor, ratioLabel } from '../src/renderer/src/app/size'
+import { clampSide, evenSize, presetFor, ratioLabel } from '../src/renderer/src/app/size'
 
 describe('image size', () => {
   it('recognizes a preset by its width and height', () => {
@@ -24,4 +24,13 @@ describe('image size', () => {
     expect(ratioLabel({ width: 1234, height: 567 })).toBe('2.18:1')
     expect(ratioLabel({ width: 567, height: 1234 })).toBe('1:2.18')
   })
+})
+
+describe('even size', () => {
+  it('rounds odd sides to the nearest even number', () => {
+    expect(evenSize({ width: 1921, height: 1081 })).toEqual({ width: 1922, height: 1082 })
+    expect(evenSize({ width: 1000, height: 401 })).toEqual({ width: 1000, height: 402 })
+  })
+
+  it('leaves even sides alone', () => expect(evenSize({ width: 1920, height: 1080 })).toEqual({ width: 1920, height: 1080 }))
 })
