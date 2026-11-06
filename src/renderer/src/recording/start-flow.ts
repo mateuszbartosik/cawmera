@@ -32,6 +32,9 @@ export async function runStartFlow(flow: StartFlow): Promise<boolean> {
     helperStopped = true
     await flow.stopRecording()
   }
+  const report = (error: RecordingError) => {
+    if (error.code !== 'cancelled') flow.showError(error)
+  }
 
   try {
     await flow.hideWindow()
@@ -59,14 +62,14 @@ export async function runStartFlow(flow: StartFlow): Promise<boolean> {
       await countdown.hide()
     }
     if (start.failure) {
-      if (start.failure.code !== 'cancelled') flow.showError(start.failure)
+      report(start.failure)
       return false
     }
     if (!counted) return false
     const beginError = await flow.beginRecording()
     if (beginError) {
       helperStopped = true
-      flow.showError(beginError)
+      report(beginError)
       return false
     }
     began = true

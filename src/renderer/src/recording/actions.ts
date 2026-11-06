@@ -10,6 +10,7 @@ import { bridge, saveVideo } from '../platform/bridge'
 import { getRecording, registerRecording } from './registry'
 import { runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
+import { unavailableReason } from './support'
 import { parseTrack } from './track'
 import { autoZooms } from './zooms'
 
@@ -35,7 +36,8 @@ function toastFor(error: RecordingError) {
       })
       return
     case 'unsupported':
-      toast.error('Recording needs Windows 10 version 2004 or newer')
+      if (error.reason) toast.error(unavailableReason(error.reason))
+      else toast.error('Recording isn’t available', { description: error.message })
       return
     case 'target-gone':
       toast.error('The window to record is gone', { description: 'Pick it again.' })

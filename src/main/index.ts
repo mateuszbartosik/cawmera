@@ -18,7 +18,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { CaptureSource, CountdownRequest, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
-import { recordingVideoFile, registerRecording } from './recording'
+import { cancelWarmTake, recordingVideoFile, registerRecording, stopLiveTake } from './recording'
 
 registerMediaScheme()
 
@@ -466,12 +466,14 @@ function createWindow() {
   })
 
   win.once('ready-to-show', () => win?.show())
-  // Let the renderer check for unexported shots before the window goes away.
+  // Let the renderer check for unexported shots before the window goes away. Closing during a
+  // take stops it instead: the take becomes a shot, and the next close asks about it.
   win.on('close', (event) => {
     if (closeApproved || !win || win.webContents.isCrashed()) return
     event.preventDefault()
-    win.webContents.send('close-request')
     clearCloseFallback()
+    if (stopLiveTake()) return
+    win.webContents.send('close-request')
     closeFallback = setTimeout(() => {
       closeApproved = true
       win?.close()
@@ -484,6 +486,12 @@ function createWindow() {
   })
   // Dropped files must never navigate the window away from the app.
   win.webContents.on('will-navigate', (event) => event.preventDefault())
+  const cancelCaptureInProgress = () => {
+    closeCountdown()
+    cancelWarmTake()
+  }
+  win.webContents.on('render-process-gone', cancelCaptureInProgress)
+  win.webContents.on('did-navigate', cancelCaptureInProgress)
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }

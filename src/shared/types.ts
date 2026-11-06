@@ -49,13 +49,16 @@ export type MenuCommand =
   | 'toggle-house-style'
   | 'about'
 
-export type RecordingSupport = { ok: true } | { ok: false; reason: 'platform' | 'windows-version' | 'helper-missing' }
+export type RecordingUnavailableReason = 'platform' | 'windows-version' | 'helper-missing'
+
+export type RecordingSupport = { ok: true } | { ok: false; reason: RecordingUnavailableReason }
 
 export type RecordingErrorCode = 'unsupported' | 'access-denied' | 'target-gone' | 'encoder' | 'internal' | 'timeout' | 'cancelled'
 
 export interface RecordingError {
   code: RecordingErrorCode
   message: string
+  reason?: RecordingUnavailableReason
 }
 
 export interface RecordingStartRequest {

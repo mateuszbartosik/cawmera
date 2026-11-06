@@ -4,6 +4,7 @@ import { runStartFlow, type StartFlow } from '../src/renderer/src/recording/star
 
 const targetGone: RecordingError = { code: 'target-gone', message: 'gone' }
 const accessDenied: RecordingError = { code: 'access-denied', message: 'denied' }
+const cancelled: RecordingError = { code: 'cancelled', message: 'Recording cancelled' }
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -114,6 +115,33 @@ describe('recording start flow', () => {
     warm.resolve(null)
     expect(await running).toBe(true)
     expect(calls.indexOf('hideCountdown')).toBeLessThan(calls.indexOf('beginRecording'))
+  })
+
+  it('ends the countdown at once and quietly when the take is cancelled during it', async () => {
+    const warm = deferred<RecordingError | null>()
+    const countdownEnded = deferred<boolean>()
+    const { flow, calls } = setup({ startRecording: () => warm.promise })
+    flow.countdown!.run = () => countdownEnded.promise
+    flow.countdown!.interrupt = () => {
+      calls.push('interrupt')
+      countdownEnded.resolve(false)
+    }
+    const running = runStartFlow(flow)
+    warm.resolve(cancelled)
+    expect(await running).toBe(false)
+    expect(calls).toContain('interrupt')
+    expect(calls).not.toContain('beginRecording')
+    expect(count(calls, 'stopRecording')).toBe(0)
+    expect(flow.showError).not.toHaveBeenCalled()
+    expect(count(calls, 'restoreWindow')).toBe(1)
+  })
+
+  it('restores quietly when beginning is cancelled because Cawmera is back on screen', async () => {
+    const { flow, calls } = setup({ beginRecording: () => Promise.resolve(cancelled) })
+    expect(await runStartFlow(flow)).toBe(false)
+    expect(flow.showError).not.toHaveBeenCalled()
+    expect(count(calls, 'stopRecording')).toBe(0)
+    expect(count(calls, 'restoreWindow')).toBe(1)
   })
 
   it('shows one error and restores once when beginning fails', async () => {

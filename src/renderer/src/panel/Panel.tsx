@@ -142,7 +142,7 @@ function ScreenshotSection() {
             onClick={startRecordingPicker}
             disabled={busy || support?.ok !== true}
             data-testid="record"
-            hint={support && !support.ok ? unavailableReason(support) : 'Record a window or a screen. Stop with Ctrl+Shift+2'}
+            hint={support && !support.ok ? unavailableReason(support.reason) : 'Record a window or a screen. Stop with Ctrl+Shift+2'}
           >
             Record
           </Button>

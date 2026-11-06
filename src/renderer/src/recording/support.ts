@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RecordingSupport } from '@shared/types'
+import type { RecordingSupport, RecordingUnavailableReason } from '@shared/types'
 import { bridge } from '../platform/bridge'
 
 let known: Promise<RecordingSupport> | null = null
@@ -25,8 +25,8 @@ export function useRecordingSupport(): RecordingSupport | null {
   return support
 }
 
-export function unavailableReason(support: Extract<RecordingSupport, { ok: false }>): string {
-  switch (support.reason) {
+export function unavailableReason(reason: RecordingUnavailableReason): string {
+  switch (reason) {
     case 'platform':
       return 'Recording works on Windows only'
     case 'windows-version':
