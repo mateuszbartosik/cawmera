@@ -1,15 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CanvasHTMLAttributes } from 'react'
+import { toast } from 'sonner'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import { store } from '../app/store'
 import { drawRecordingFrame, type RecordingScene } from '../recording/frame'
-import { attachPlayer } from '../recording/playback'
+import { attachPlayer, setPlayhead, setPlaying } from '../recording/playback'
 import { RecordingPlayer } from '../recording/player'
 import { cursorPathFor, getRecording, type RecordingEntry } from '../recording/registry'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
-
-const STORE_WRITE_INTERVAL_MS = 33
 
 export function recordingScene(
   entry: RecordingEntry,
@@ -59,24 +58,24 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
     if (!entryId) return
     const created = new RecordingPlayer(recordingUrl(entryId))
     const { start = 0, end = Number.POSITIVE_INFINITY } = store.get().doc.recording?.trim ?? {}
-    let lastWrite = 0
     const offFrame = created.onFrame((time) => {
       drawRef.current(time)
-      const now = performance.now()
-      if (!store.get().playback.playing || now - lastWrite >= STORE_WRITE_INTERVAL_MS) {
-        lastWrite = now
-        store.set((s) => ({ playback: { ...s.playback, time } }))
-      }
+      setPlayhead(time)
     })
-    const offPlaying = created.onPlayingChange((playing) => store.set((s) => ({ playback: { ...s.playback, playing } })))
+    const offPlaying = created.onPlayingChange(setPlaying)
+    const offError = created.onError(() =>
+      toast.error('The recording could not be played', { id: `recording-error-${entryId}`, description: 'Its file may be missing or damaged.' })
+    )
     created.setTrim({ start, end })
     created.seek(start)
+    setPlayhead(start)
     store.set({ playback: { playing: false, time: start } })
     attachPlayer(created)
     setPlayer(created)
     return () => {
       offFrame()
       offPlaying()
+      offError()
       attachPlayer(null)
       setPlayer(null)
       created.dispose()
@@ -92,18 +91,25 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
     () => (entry && player ? recordingScene(entry, doc, style, backdrop, player.video) : null),
     [entry, player, doc, style, backdrop]
   )
+  const posterScene = useMemo(
+    () => (entry?.poster ? recordingScene(entry, doc, style, backdrop, entry.poster) : null),
+    [entry, doc, style, backdrop]
+  )
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx || !player) return
+    if (!canvas || !ctx) return
     sizeCanvas(canvas, doc.size, backingWidth)
     const k = backingWidth / doc.size.width
-    drawRef.current = (sourceMs) => {
-      if (scene) drawRecordingFrame(ctx, scene, sourceMs, 'preview', k)
+    const draw = (sourceMs: number) => {
+      const playable = scene !== null && player !== null && player.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      const shown = playable ? scene : posterScene
+      if (shown) drawRecordingFrame(ctx, shown, playable ? sourceMs : shown.settings.trim.start, 'preview', k)
     }
-    drawRef.current(player.time)
-  }, [scene, player, doc.size, backingWidth])
+    drawRef.current = draw
+    draw(player ? player.time : 0)
+  }, [scene, posterScene, player, doc.size, backingWidth])
 
   return <canvas ref={canvasRef} {...canvasProps} />
 }

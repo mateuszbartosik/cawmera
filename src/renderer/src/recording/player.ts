@@ -1,17 +1,19 @@
 import type { Trim } from './trim'
+import { clampToTrim, hasReachedEnd, playbackStart } from './trim-loop'
 
 type FrameListener = (sourceMs: number) => void
 type PlayingListener = (playing: boolean) => void
+type ErrorListener = () => void
 
 const MS_PER_SECOND = 1000
-/** A video that stopped within this many ms of the trim end counts as finished, so Play starts over. */
-const END_TOLERANCE_MS = 50
 
 export class RecordingPlayer {
   readonly video = document.createElement('video')
   private trim: Trim = { start: 0, end: Number.POSITIVE_INFINITY }
   private readonly frameListeners = new Set<FrameListener>()
   private readonly playingListeners = new Set<PlayingListener>()
+  private readonly errorListeners = new Set<ErrorListener>()
+  private finished = false
   private frameRequest: number | null = null
   private disposed = false
 
@@ -25,6 +27,8 @@ export class RecordingPlayer {
     video.addEventListener('seeked', this.announceFrame)
     video.addEventListener('play', this.onPlay)
     video.addEventListener('pause', this.onPause)
+    video.addEventListener('ended', this.onEnded)
+    video.addEventListener('error', this.emitError)
     video.src = url
   }
 
@@ -37,8 +41,11 @@ export class RecordingPlayer {
   }
 
   play() {
-    if (this.time < this.trim.start || this.time >= this.trim.end - END_TOLERANCE_MS) this.seek(this.trim.start)
-    void this.video.play().catch(() => undefined)
+    const from = playbackStart(this.time, this.trim, this.finished)
+    if (from !== this.time) this.seek(from)
+    void this.video.play().catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) this.emitError()
+    })
   }
 
   pause() {
@@ -46,7 +53,12 @@ export class RecordingPlayer {
   }
 
   seek(sourceMs: number) {
-    this.video.currentTime = Math.max(0, sourceMs) / MS_PER_SECOND
+    this.finished = false
+    this.setVideoTime(clampToTrim(sourceMs, this.trim))
+  }
+
+  private setVideoTime(sourceMs: number) {
+    this.video.currentTime = sourceMs / MS_PER_SECOND
   }
 
   onFrame(listener: FrameListener): () => void {
@@ -59,6 +71,11 @@ export class RecordingPlayer {
     return () => this.playingListeners.delete(listener)
   }
 
+  onError(listener: ErrorListener): () => void {
+    this.errorListeners.add(listener)
+    return () => this.errorListeners.delete(listener)
+  }
+
   dispose() {
     this.disposed = true
     this.cancelFrameRequest()
@@ -67,11 +84,14 @@ export class RecordingPlayer {
     video.removeEventListener('seeked', this.announceFrame)
     video.removeEventListener('play', this.onPlay)
     video.removeEventListener('pause', this.onPause)
+    video.removeEventListener('ended', this.onEnded)
+    video.removeEventListener('error', this.emitError)
     video.pause()
     video.removeAttribute('src')
     video.load()
     this.frameListeners.clear()
     this.playingListeners.clear()
+    this.errorListeners.clear()
   }
 
   private announceFrame = () => this.emitFrame(this.time)
@@ -82,6 +102,21 @@ export class RecordingPlayer {
 
   private emitPlaying(playing: boolean) {
     for (const listener of this.playingListeners) listener(playing)
+  }
+
+  private emitError = () => {
+    for (const listener of this.errorListeners) listener()
+  }
+
+  private finish() {
+    this.video.pause()
+    this.setVideoTime(this.trim.end)
+    this.finished = true
+  }
+
+  private onEnded = () => {
+    this.finish()
+    this.emitFrame(Math.min(this.trim.end, this.time))
   }
 
   private onPlay = () => {
@@ -109,9 +144,8 @@ export class RecordingPlayer {
   }
 
   private onPresentedFrame(sourceMs: number) {
-    if (sourceMs >= this.trim.end) {
-      this.video.pause()
-      this.seek(this.trim.end)
+    if (hasReachedEnd(sourceMs, this.trim)) {
+      this.finish()
       return
     }
     this.emitFrame(sourceMs)

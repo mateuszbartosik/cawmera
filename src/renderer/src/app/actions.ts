@@ -415,7 +415,8 @@ export async function copyImage() {
 // Editing
 
 export function enterCrop() {
-  if (!store.get().doc.sourceId) return
+  const { doc } = store.get()
+  if (!doc.sourceId || doc.recording) return
   store.set({ mode: 'crop', selection: [], shotSelection: [], cropView: FIT_ALL })
 }
 

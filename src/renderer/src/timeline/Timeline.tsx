@@ -4,7 +4,7 @@ import type { Doc } from '../app/doc'
 import { commitFrom, store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
 import { setRecording } from '../recording/actions'
-import { scrubTo, togglePlayback } from '../recording/playback'
+import { applyTrim, scrubTo, togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording } from '../recording/registry'
 import type { Trim } from '../recording/trim'
 import { cn, IconButton } from '../ui/controls'
@@ -54,7 +54,8 @@ export function Timeline() {
 function TimelinePanel() {
   const recording = useApp((s) => s.doc.recording)
   const recordingId = useApp((s) => s.doc.sourceId)
-  const { playing, time } = useApp((s) => s.playback)
+  const playing = useApp((s) => s.playback.playing)
+  const time = usePlayhead()
   const entry = getRecording(recordingId)
   const { ref: trackRef, width } = useWidth()
   if (!recording || !entry) return null
@@ -152,6 +153,7 @@ function TimelinePanel() {
           className="absolute cursor-pointer touch-none"
           style={{ top: BODY_PADDING, bottom: BODY_PADDING, left: SIDE_PADDING + LABEL_WIDTH, right: SIDE_PADDING }}
           onPointerDown={(event) => {
+            if (event.button !== 0) return
             event.currentTarget.setPointerCapture(event.pointerId)
             scrubToPointer(event)
           }}
@@ -172,26 +174,28 @@ function TimelinePanel() {
 
 function TrimHandle({ edge, trim, duration, x }: { edge: Edge; trim: Trim; duration: number; x: number }) {
   const docBeforeDrag = useRef<Doc | null>(null)
+  const grabOffset = useRef(0)
+  const docBeforeKeys = useRef<Doc | null>(null)
 
-  const finishDrag = () => {
-    if (docBeforeDrag.current) commitFrom(docBeforeDrag.current)
-    docBeforeDrag.current = null
+  const finish = (before: { current: Doc | null }) => {
+    if (before.current) commitFrom(before.current)
+    before.current = null
   }
-  const dragTo = (t: number) => {
+  const moveEdgeTo = (t: number) => {
     const current = store.get().doc.recording?.trim
     if (!current) return
     const next = dragTrim(current, edge, t, duration)
     setRecording({ trim: next }, false)
+    applyTrim(next)
     scrubTo(next[edge])
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
     if (direction === 0) return
     event.preventDefault()
-    const step = event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS
-    const next = dragTrim(trim, edge, trim[edge] + direction * step, duration)
-    setRecording({ trim: next })
-    scrubTo(next[edge])
+    docBeforeKeys.current ??= store.get().doc
+    const current = store.get().doc.recording?.trim ?? trim
+    moveEdgeTo(current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS))
   }
 
   return (
@@ -212,18 +216,24 @@ function TrimHandle({ edge, trim, duration, x }: { edge: Edge; trim: Trim; durat
         translate: edge === 'end' ? '-100%' : undefined
       }}
       onKeyDown={onKeyDown}
+      onKeyUp={() => finish(docBeforeKeys)}
+      onBlur={() => finish(docBeforeKeys)}
       onPointerDown={(event) => {
+        if (event.button !== 0) return
         event.stopPropagation()
         event.currentTarget.setPointerCapture(event.pointerId)
+        const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
+        grabOffset.current = event.clientX - bounds.left - x
         docBeforeDrag.current = store.get().doc
       }}
       onPointerMove={(event) => {
         if (!docBeforeDrag.current) return
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
-        dragTo(xToTime(event.clientX - bounds.left, duration, bounds.width))
+        moveEdgeTo(xToTime(event.clientX - bounds.left - grabOffset.current, duration, bounds.width))
       }}
-      onPointerUp={finishDrag}
-      onPointerCancel={finishDrag}
+      onPointerUp={() => finish(docBeforeDrag)}
+      onPointerCancel={() => finish(docBeforeDrag)}
+      onLostPointerCapture={() => finish(docBeforeDrag)}
     />
   )
 }
