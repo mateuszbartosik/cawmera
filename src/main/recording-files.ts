@@ -5,6 +5,11 @@ const RECORDING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 
 export const isRecordingId = (id: string) => RECORDING_ID.test(id)
 
-export const recordingDir = (root: string, id: string) => join(root, id)
+export function recordingDir(root: string, id: string) {
+  if (!isRecordingId(id)) throw new Error('Not a recording id')
+  return join(root, id)
+}
+
+export const removeRecording = (root: string, id: string) => rm(recordingDir(root, id), { recursive: true, force: true })
 
 export const clearRecordings = (root: string) => rm(root, { recursive: true, force: true })

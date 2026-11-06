@@ -252,6 +252,34 @@ async function showCountdown(request: CountdownRequest) {
 // ---------------------------------------------------------------------------
 // IPC
 
+interface SaveDialogOptions {
+  extension: string
+  filter: Electron.FileFilter
+  title: string
+  defaultFolder: string
+  fallbackName: string
+}
+
+/** Save dialog for one file, starting in the last export folder; null when cancelled or the payload is empty. */
+async function saveBytesWithDialog(bytes: unknown, suggestedName: unknown, options: SaveDialogOptions) {
+  if (!win || !(bytes instanceof Uint8Array) || bytes.byteLength === 0) return null
+  const name = typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : options.fallbackName
+  const prefs = await readPrefs()
+  const folder = prefs.lastSaveDir && existsSync(prefs.lastSaveDir) ? prefs.lastSaveDir : options.defaultFolder
+  const result = await dialog.showSaveDialog(win, {
+    title: options.title,
+    defaultPath: join(folder, name),
+    filters: [options.filter],
+    properties: ['createDirectory', 'showOverwriteConfirmation']
+  })
+  if (result.canceled || !result.filePath) return null
+  const path =
+    extname(result.filePath).toLowerCase() === `.${options.extension}` ? result.filePath : `${result.filePath}.${options.extension}`
+  await writeFile(path, bytes)
+  await writePrefs({ ...prefs, lastSaveDir: dirname(path) })
+  return { path }
+}
+
 function registerIpc() {
   ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('sources:list', () => listSources())
@@ -318,42 +346,26 @@ function registerIpc() {
     png: { name: 'PNG image', extensions: ['png'] }
   }
 
-  ipcMain.handle('file:save-image', async (_event, bytes: unknown, suggestedName: unknown, format: unknown) => {
-    if (!win || !(bytes instanceof Uint8Array)) return null
+  ipcMain.handle('file:save-image', (_event, bytes: unknown, suggestedName: unknown, format: unknown) => {
     const kind: ImageFormat = format === 'png' ? 'png' : 'webp'
-    const name = typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : `whats-new-shot.${kind}`
-    const prefs = await readPrefs()
-    const folder = prefs.lastSaveDir && existsSync(prefs.lastSaveDir) ? prefs.lastSaveDir : app.getPath('pictures')
-    const result = await dialog.showSaveDialog(win, {
+    return saveBytesWithDialog(bytes, suggestedName, {
+      extension: kind,
+      filter: FILTERS[kind],
       title: `Export ${kind.toUpperCase()}`,
-      defaultPath: join(folder, name),
-      filters: [FILTERS[kind]],
-      properties: ['createDirectory', 'showOverwriteConfirmation']
+      defaultFolder: app.getPath('pictures'),
+      fallbackName: `whats-new-shot.${kind}`
     })
-    if (result.canceled || !result.filePath) return null
-    const path = extname(result.filePath).toLowerCase() === `.${kind}` ? result.filePath : `${result.filePath}.${kind}`
-    await writeFile(path, bytes)
-    await writePrefs({ ...prefs, lastSaveDir: dirname(path) })
-    return { path }
   })
 
-  ipcMain.handle('file:save-video', async (_event, bytes: unknown, suggestedName: unknown) => {
-    if (!win || !(bytes instanceof Uint8Array)) return null
-    const name = typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : 'whats-new-recording.mp4'
-    const prefs = await readPrefs()
-    const folder = prefs.lastSaveDir && existsSync(prefs.lastSaveDir) ? prefs.lastSaveDir : app.getPath('videos')
-    const result = await dialog.showSaveDialog(win, {
+  ipcMain.handle('file:save-video', (_event, bytes: unknown, suggestedName: unknown) =>
+    saveBytesWithDialog(bytes, suggestedName, {
+      extension: 'mp4',
+      filter: { name: 'MP4 video', extensions: ['mp4'] },
       title: 'Export MP4',
-      defaultPath: join(folder, name),
-      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
-      properties: ['createDirectory', 'showOverwriteConfirmation']
+      defaultFolder: app.getPath('videos'),
+      fallbackName: 'whats-new-recording.mp4'
     })
-    if (result.canceled || !result.filePath) return null
-    const path = extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`
-    await writeFile(path, bytes)
-    await writePrefs({ ...prefs, lastSaveDir: dirname(path) })
-    return { path }
-  })
+  )
 
   ipcMain.handle('file:save-images', async (_event, images: unknown) => {
     if (!win || !Array.isArray(images) || images.length === 0) return null

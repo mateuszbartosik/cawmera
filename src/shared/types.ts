@@ -51,7 +51,7 @@ export type MenuCommand =
 
 export type RecordingSupport = { ok: true } | { ok: false; reason: 'platform' | 'windows-version' | 'helper-missing' }
 
-export type RecordingErrorCode = 'unsupported' | 'access-denied' | 'target-gone' | 'encoder' | 'internal' | 'timeout'
+export type RecordingErrorCode = 'unsupported' | 'access-denied' | 'target-gone' | 'encoder' | 'internal' | 'timeout' | 'cancelled'
 
 export interface RecordingError {
   code: RecordingErrorCode
@@ -96,8 +96,11 @@ export interface CawmeraBridge {
   readClipboardImage(): Promise<Uint8Array | null>
   revealFile(path: string): Promise<void>
   recordingSupport(): Promise<RecordingSupport>
-  /** Starts recording the source; resolves with null once frames are flowing, or why it could not start. */
+  /** Warms the recorder up on the source; resolves with null once it is ready (nothing is recorded yet), or why it could not start. */
   startRecording(request: RecordingStartRequest): Promise<RecordingError | null>
+  /** Starts a warmed-up recording (after the countdown). Resolves with an error if the target went away meanwhile. */
+  beginRecording(): Promise<RecordingError | null>
+  /** Before beginRecording() this cancels the take and a pending startRecording() resolves `cancelled`. */
   stopRecording(): Promise<void>
   onRecordingFinished(listener: (result: RecordingFinished) => void): () => void
   onRecordingFailed(listener: (error: RecordingError) => void): () => void

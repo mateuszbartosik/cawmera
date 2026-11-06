@@ -36,6 +36,7 @@ const bridge: CawmeraBridge = {
   revealFile: (path) => ipcRenderer.invoke('file:reveal', path),
   recordingSupport: () => ipcRenderer.invoke('recording:support'),
   startRecording: (request) => ipcRenderer.invoke('recording:start', request),
+  beginRecording: () => ipcRenderer.invoke('recording:begin'),
   stopRecording: () => ipcRenderer.invoke('recording:stop'),
   onRecordingFinished: (listener) => subscribeWith<RecordingFinished>('recording:finished', listener),
   onRecordingFailed: (listener) => subscribeWith<RecordingError>('recording:failed', listener),

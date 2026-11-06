@@ -6,13 +6,13 @@ import { release } from 'node:os'
 import { join } from 'node:path'
 import type { RecordingError, RecordingFinished, RecordingStartRequest, RecordingSupport } from '../shared/types'
 import { startRecorder, type RecorderSession } from './recorder-process'
-import { clearRecordings, isRecordingId, recordingDir } from './recording-files'
+import { clearRecordings, isRecordingId, recordingDir, removeRecording } from './recording-files'
 
 const STOP_SHORTCUT = 'CommandOrControl+Shift+2'
 const MIN_WINDOWS_BUILD = 19041
 const FRAMES_PER_SECOND = 60
 const READY_TIMEOUT_MS = 10_000
-const STOP_TIMEOUT_MS = 4_000
+const STOP_TIMEOUT_MS = 20_000
 
 type StoppedBy = RecordingFinished['stoppedBy']
 
@@ -38,6 +38,12 @@ export const recordingVideoFile = (id: string) =>
 
 const failure = (code: RecordingError['code'], message: string): RecordingError => ({ code, message })
 
+const asRecordingError = (error: unknown): RecordingError => {
+  const candidate = error as Partial<RecordingError> | null
+  if (candidate && typeof candidate.code === 'string' && typeof candidate.message === 'string') return candidate as RecordingError
+  return failure('internal', error instanceof Error ? error.message : 'The recording could not start')
+}
+
 /** Window ids look like `window:<hwnd>:0`; screens are found through their Electron display. */
 function targetArgs(request: RecordingStartRequest): string[] | null {
   const window = /^window:(\d+):\d+$/.exec(request.sourceId)
@@ -51,20 +57,29 @@ function targetArgs(request: RecordingStartRequest): string[] | null {
 }
 
 export function registerRecording(getWindow: () => BrowserWindow | null) {
-  let session: RecorderSession | null = null
-  let starting: Promise<unknown> | null = null
-  let stopReason: StoppedBy | null = null
-  let stopRequestedWhileStarting: StoppedBy | null = null
+  interface Take {
+    id: string
+    dir: string
+    session: RecorderSession
+    begun: boolean
+    cancelled: boolean
+    stopReason: StoppedBy | null
+  }
+  let take: Take | null = null
+  /** Why the warmed-up helper ended before beginRecording() was called; reported by that call. */
+  let endedBeforeBegin: RecordingError | null = null
+  let starting: { abort: AbortController; done: Promise<unknown> } | null = null
   let detachTriggers = () => {}
 
   const send = (channel: string, payload: unknown) => getWindow()?.webContents.send(channel, payload)
 
   const requestStop = (reason: StoppedBy) => {
-    if (session) {
-      stopReason ??= reason
-      session.stop()
-    } else if (starting) {
-      stopRequestedWhileStarting ??= reason
+    if (take) {
+      if (!take.begun) take.cancelled = true
+      else take.stopReason ??= reason
+      take.session.stop()
+    } else {
+      starting?.abort.abort()
     }
   }
 
@@ -80,49 +95,58 @@ export function registerRecording(getWindow: () => BrowserWindow | null) {
     }
   }
 
-  const conclude = async (id: string, dir: string, running: RecorderSession) => {
-    const result = await running.ended
+  const conclude = async (current: Take) => {
+    const result = await current.session.ended
     detachTriggers()
-    const stoppedBy = stopReason ?? 'target-gone'
-    session = null
-    stopReason = null
+    if (take === current) take = null
+    if (current.cancelled) {
+      await removeRecording(recordingsRoot(), current.id).catch(() => {})
+      return
+    }
+    if (!current.begun) {
+      if ('error' in result) endedBeforeBegin = result.error
+      return
+    }
     if ('error' in result) {
       send('recording:failed', result.error)
       return
     }
     try {
-      const track = await readFile(join(dir, 'track.json'), 'utf8')
-      finishedIds.add(id)
-      send('recording:finished', { id, stoppedBy, track } satisfies RecordingFinished)
+      const track = await readFile(join(current.dir, 'track.json'), 'utf8')
+      finishedIds.add(current.id)
+      send('recording:finished', { id: current.id, stoppedBy: current.stopReason ?? 'target-gone', track } satisfies RecordingFinished)
     } catch {
       send('recording:failed', failure('internal', 'The recording finished but its cursor track could not be read'))
     }
   }
 
-  const begin = async (request: RecordingStartRequest): Promise<RecordingError | null> => {
+  const warmUp = async (request: RecordingStartRequest, abort: AbortSignal): Promise<RecordingError | null> => {
     const support = recordingSupport()
     if (!support.ok) return failure('unsupported', `Recording is not available (${support.reason})`)
     const target = targetArgs(request)
     if (!target) return failure('target-gone', 'The source to record is no longer available')
     const id = randomUUID()
     const dir = recordingDir(recordingsRoot(), id)
-    await mkdir(dir, { recursive: true })
     try {
-      const running = await startRecorder({
+      await mkdir(dir, { recursive: true })
+      const session = await startRecorder({
         command: helperPath(),
         args: [...target, '--fps', String(FRAMES_PER_SECOND), '--out', dir],
         readyTimeoutMs: READY_TIMEOUT_MS,
-        stopTimeoutMs: STOP_TIMEOUT_MS
+        stopTimeoutMs: STOP_TIMEOUT_MS,
+        signal: abort
       })
-      session = running
-      attachTriggers()
-      void conclude(id, dir, running)
-      if (stopRequestedWhileStarting) requestStop(stopRequestedWhileStarting)
+      const current: Take = { id, dir, session, begun: false, cancelled: abort.aborted, stopReason: null }
+      take = current
+      void conclude(current)
+      if (abort.aborted) {
+        session.stop()
+        return failure('cancelled', 'Recording cancelled')
+      }
       return null
     } catch (error) {
-      return error as RecordingError
-    } finally {
-      stopRequestedWhileStarting = null
+      await removeRecording(recordingsRoot(), id).catch(() => {})
+      return asRecordingError(error)
     }
   }
 
@@ -131,14 +155,29 @@ export function registerRecording(getWindow: () => BrowserWindow | null) {
   ipcMain.handle('recording:start', async (_event, request: unknown): Promise<RecordingError | null> => {
     const r = (request && typeof request === 'object' ? request : {}) as Partial<RecordingStartRequest>
     if (typeof r.sourceId !== 'string') return failure('internal', 'Invalid recording request')
-    if (session || starting) return failure('internal', 'A recording is already running')
-    const pending = begin({ sourceId: r.sourceId, displayId: typeof r.displayId === 'string' ? r.displayId : null })
-    starting = pending
+    if (take || starting) return failure('internal', 'A recording is already running')
+    endedBeforeBegin = null
+    const abort = new AbortController()
+    const done = warmUp({ sourceId: r.sourceId, displayId: typeof r.displayId === 'string' ? r.displayId : null }, abort.signal)
+    starting = { abort, done }
     try {
-      return await pending
+      return await done
     } finally {
       starting = null
     }
+  })
+
+  ipcMain.handle('recording:begin', async (): Promise<RecordingError | null> => {
+    const current = take
+    if (!current || current.begun) {
+      const early = endedBeforeBegin
+      endedBeforeBegin = null
+      return early ?? failure('internal', 'No recording is ready to begin')
+    }
+    current.session.begin()
+    current.begun = true
+    attachTriggers()
+    return null
   })
 
   ipcMain.handle('recording:stop', () => requestStop('shortcut'))
@@ -150,9 +189,9 @@ export function registerRecording(getWindow: () => BrowserWindow | null) {
     cleanedUp = true
     void (async () => {
       requestStop('window')
-      await starting
-      const running = session
-      if (running) await running.ended
+      await starting?.done.catch(() => {})
+      requestStop('window')
+      if (take) await take.session.ended
       await clearRecordings(recordingsRoot()).catch(() => {})
       app.quit()
     })()
