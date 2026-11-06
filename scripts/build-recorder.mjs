@@ -10,7 +10,8 @@ const BUNDLED_CMAKE = join('Common7', 'IDE', 'CommonExtensions', 'Microsoft', 'C
 const INSTALL_HINT = 'Install Visual Studio 2022 or its Build Tools with the "Desktop development with C++" workload.'
 
 const FORBIDDEN_APIS = ['SetWindowsHookEx', 'GetAsyncKeyState', 'GetKeyState', 'GetKeyboardState', 'SetWinEventHook',
-  'RegisterHotKey']
+  'RegisterHotKey', 'ToUnicode', 'ToUnicodeEx', 'MapVirtualKey', 'MapVirtualKeyEx', 'GetKeyboardLayout', 'GetKeyNameText', 'BlockInput',
+  'SendInput', 'keybd_event', 'AttachThreadInput', 'GetRawInputBuffer']
 const FORBIDDEN_IMPORT = new RegExp(String.raw`\b(?:NtUser)?(?:${FORBIDDEN_APIS.join('|')})[AW]?\b`, 'g')
 const NETWORK_DLLS = ['WS2_32.DLL', 'WSOCK32.DLL', 'WINHTTP.DLL', 'WININET.DLL', 'URLMON.DLL', 'DNSAPI.DLL']
 const STRING_ENCODINGS = [['ASCII', 'ascii'], ['UTF-16LE', 'utf16le']]

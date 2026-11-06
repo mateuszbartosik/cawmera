@@ -33,7 +33,8 @@ target_link_libraries(cawmera-recorder PRIVATE
 add_executable(recorder-tests tests/recorder_tests.cpp)
 target_link_libraries(recorder-tests PRIVATE recorder_core)
 target_compile_definitions(recorder-tests PRIVATE
-    "TRACK_TS_PATH=u8\"${PROJECT_SOURCE_DIR}/../../src/renderer/src/recording/track.ts\"")
+    "TRACK_TS_PATH=u8\"${PROJECT_SOURCE_DIR}/../../src/renderer/src/recording/track.ts\""
+    "TRACK_FIXTURE_PATH=u8\"${PROJECT_SOURCE_DIR}/../../test/fixtures/track-from-helper.json\"")
 
 enable_testing()
 add_test(NAME recorder-tests COMMAND recorder-tests)

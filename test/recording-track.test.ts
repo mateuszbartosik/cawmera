@@ -1,3 +1,4 @@
+import fixtureJson from './fixtures/track-from-helper.json?raw'
 import { describe, expect, it } from 'vitest'
 import { parseTrack, stopClickOf, withoutStopClick, type Click, type RecordingTrack } from '../src/renderer/src/recording/track'
 
@@ -77,5 +78,30 @@ describe('the click that stopped a take', () => {
     expect(stopClickOf(take([next, { ...taskbar, t: 8900 }]), 'window')).toBeNull()
     expect(stopClickOf(take([next, taskbar]), 'shortcut')).toBeNull()
     expect(stopClickOf(take([]), 'window')).toBeNull()
+  })
+})
+
+describe('the track the native helper writes', () => {
+  const fromHelper = parseTrack(JSON.parse(fixtureJson))
+
+  it('reads the header', () => {
+    expect(fromHelper).toMatchObject({ kind: 'window', width: 1280, height: 720, fps: 60, durationMs: 1000, scale: 1.25 })
+  })
+
+  it('maps shape indexes to names and a hidden row to no shape', () => {
+    expect(fromHelper.cursor).toEqual([
+      { t: 0, x: 640, y: 360, shape: 'arrow' },
+      { t: 16.7, x: 650.5, y: 361.25, shape: 'hand' },
+      { t: 33.3, x: 660, y: 362, shape: null },
+      { t: 50, x: 670.12, y: 364, shape: 'ibeam' }
+    ])
+  })
+
+  it('reads released and still-held clicks', () => {
+    expect(fromHelper.clicks).toEqual([
+      { t: 20, x: 650.5, y: 361.25, button: 'left', up: 95.5 },
+      { t: 400, x: 100, y: 200, button: 'right', up: null },
+      { t: 900, x: 660, y: 362, button: 'left', up: null }
+    ])
   })
 })

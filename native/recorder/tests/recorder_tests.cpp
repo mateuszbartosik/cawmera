@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -60,7 +61,9 @@ std::optional<Args> parsed(std::vector<std::wstring> words) {
 
 std::string writtenJson(const TrackWriter& track, std::string_view kind, int width, int height, int fps,
                         double durationMs, double scale) {
-    const auto path = std::filesystem::temp_directory_path() / "cawmera-recorder-tests-track.json";
+    static int writes = 0;
+    const auto path = std::filesystem::temp_directory_path() /
+                      std::format("cawmera-recorder-tests-track-{}-{}.json", GetCurrentProcessId(), ++writes);
     CHECK(track.write(path, kind, width, height, fps, durationMs, scale));
     const std::string json = readFile(path);
     std::filesystem::remove(path);
@@ -291,6 +294,24 @@ void writesNullForNumbersThatAreNotFinite() {
     CHECK(contains(writtenJson(track, "window", 100, 100, 60, 0, 1), R"("cursor":[[0.0,null,20.00,-1]])"));
 }
 
+void writesTheTrackTheRendererFixtureHolds() {
+    TrackWriter track;
+    track.addCursor(0, 640, 360, track.shapeIndex("arrow"));
+    track.addCursor(16.7, 650.5, 361.25, track.shapeIndex("hand"));
+    track.addCursor(33.3, 660, 362, TrackWriter::HIDDEN_SHAPE);
+    track.addCursor(50, 670.125, 363.999, track.shapeIndex("ibeam"));
+    track.addClick(20, 650.5, 361.25, MouseButton::left);
+    track.release(MouseButton::left, 95.5);
+    track.addClick(400, 100, 200, MouseButton::right);
+    track.addClick(900, 660, 362, MouseButton::left);
+
+    const std::string json = writtenJson(track, "window", 1280, 720, 60, 1000, 1.25);
+    const std::string fixture = readFile(TRACK_FIXTURE_PATH);
+    CHECK(!fixture.empty());
+    if (json != fixture) std::fprintf(stderr, "helper track differs from the fixture, it wrote:\n%s", json.c_str());
+    CHECK(json == fixture);
+}
+
 void listsCursorShapesLikeTheRenderer() {
     const std::vector<std::string> expected(CURSOR_SHAPES.begin(), CURSOR_SHAPES.end());
     CHECK(rendererCursorShapes() == expected);
@@ -322,6 +343,7 @@ int main() {
     writesTheTrackWithAReleasedClick();
     writesTheHeaderHiddenCursorAndHeldButton();
     writesNullForNumbersThatAreNotFinite();
+    writesTheTrackTheRendererFixtureHolds();
     listsCursorShapesLikeTheRenderer();
 
     if (failures > 0) std::fprintf(stderr, "%d check(s) failed\n", failures);
