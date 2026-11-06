@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { autoTrim } from '../src/renderer/src/recording/trim'
-import { DEFAULT_RECORDING, recordingDocFor } from '../src/renderer/src/recording/settings'
+import { DEFAULT_RECORDING, defaultsFor, differsFromDefault, recordingDocFor } from '../src/renderer/src/recording/settings'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
 
 const cursor = Array.from({ length: 100 }, (_, i) => ({ t: i * 16, x: i * 10, y: 400, shape: 'arrow' as const }))
@@ -22,4 +22,19 @@ describe('recording document', () => {
   })
 
   it('keeps screenshots free of recording settings', () => expect(DEFAULT_DOC.recording).toBeNull())
+})
+
+describe('section resets', () => {
+  const doc = recordingDocFor(track, null)
+
+  it('sees a section as customised only when one of its settings moved', () => {
+    expect(differsFromDefault(doc, ['cursorSize', 'look'])).toBe(false)
+    expect(differsFromDefault({ ...doc, look: 'dark' }, ['cursorSize', 'look'])).toBe(true)
+    expect(differsFromDefault({ ...doc, look: 'dark' }, ['motionBlur'])).toBe(false)
+  })
+
+  it('restores only the named settings', () => {
+    const moved = { ...doc, look: 'dark' as const, motionBlur: 0 }
+    expect({ ...moved, ...defaultsFor(['look']) }).toEqual({ ...doc, motionBlur: 0 })
+  })
 })

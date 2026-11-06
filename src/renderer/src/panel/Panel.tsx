@@ -32,7 +32,8 @@ import {
 } from '../app/actions'
 import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
-import { startRecordingPicker } from '../recording/actions'
+import { setRecording, startRecordingPicker } from '../recording/actions'
+import type { RecordingFps } from '../recording/settings'
 import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
 import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
@@ -40,7 +41,9 @@ import { BackdropField } from './BackdropField'
 import { EdgePicker } from './EdgePicker'
 import { FileDrop } from './FileDrop'
 import { LightPad } from './LightPad'
+import { CursorSection, MotionSection, RecordingSection } from './RecordingSections'
 import { SizeField } from './SizeField'
+import { useSection } from './useSection'
 import { isNarrow, PANEL_GAP, PANEL_WIDTH, SHEET_SHARE } from '../canvas/view'
 
 const DELAYS: { value: CaptureDelay; label: string }[] = [
@@ -66,6 +69,10 @@ const REDACT_OPTIONS: { value: RedactStyle; label: string }[] = [
   { value: 'solid', label: 'Solid' }
 ]
 const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = (['webp', 'png'] as const).map((value) => ({ value, label: FORMAT_LABEL[value] }))
+const FPS_OPTIONS: { value: RecordingFps; label: string }[] = [
+  { value: 60, label: '60' },
+  { value: 30, label: '30' }
+]
 const FILL_OPTIONS: { value: Fill; label: string }[] = [
   { value: 'gradient', label: 'Gradient' },
   { value: 'image', label: 'Image' }
@@ -73,12 +80,6 @@ const FILL_OPTIONS: { value: Fill; label: string }[] = [
 
 const percent = (value: number) => `${Math.round(value * 100)}%`
 const px = (value: number) => `${Math.round(value)}px`
-
-function useSection(id: string) {
-  const collapsed = useApp((s) => !!s.collapsed[id])
-  const toggle = () => store.set((s) => ({ collapsed: { ...s.collapsed, [id]: !s.collapsed[id] } }))
-  return { collapsed, onToggle: toggle }
-}
 
 function EdgeField({ doc, style }: { doc: Doc; style: HouseStyle }) {
   const source = getSource(doc.sourceId)
@@ -399,6 +400,7 @@ function ExportSection() {
   const size = useApp((s) => s.doc.size)
   const fileName = useApp((s) => s.doc.fileName)
   const format = useApp((s) => s.format)
+  const fps = useApp((s) => s.doc.recording?.fps)
   const index = useApp((s) => s.shots.findIndex((record) => record.id === s.activeId))
   const section = useSection('export')
   const fallback = `whats-new-shot-${index + 1}`
@@ -410,19 +412,23 @@ function ExportSection() {
         help="Name it after the page and the feature, like billing-cost-breakdown."
         value={fileName}
         placeholder={fallback}
-        suffix={`.${format}`}
+        suffix={fps === undefined ? `.${format}` : '.mp4'}
         testId="file-name"
         onChange={(value) => setFileName(value)}
         onCommit={() => setFileName(fileName, true)}
       />
-      <Segmented
-        label="Format"
-        help="WebP is lossless here: the same pixels as PNG at about half the size. Copy always puts a PNG on the clipboard."
-        value={format}
-        options={FORMAT_OPTIONS}
-        onChange={(value) => store.set({ format: value })}
-        testId="format"
-      />
+      {fps === undefined ? (
+        <Segmented
+          label="Format"
+          help="WebP is lossless here: the same pixels as PNG at about half the size. Copy always puts a PNG on the clipboard."
+          value={format}
+          options={FORMAT_OPTIONS}
+          onChange={(value) => store.set({ format: value })}
+          testId="format"
+        />
+      ) : (
+        <Segmented label="Frame rate" value={fps} options={FPS_OPTIONS} onChange={(value) => setRecording({ fps: value })} testId="frame-rate" />
+      )}
     </Section>
   )
 }
@@ -434,7 +440,13 @@ export function Panel() {
   const narrow = useApp((s) => isNarrow(s))
   const format = useApp((s) => s.format)
   // The active shot's live document can have an image its stored record doesn't have yet.
-  const ready = useApp((s) => s.shots.filter((record) => (record.id === s.activeId ? s.doc : record.doc).sourceId !== null).length)
+  const ready = useApp(
+    (s) =>
+      s.shots.filter((record) => {
+        const doc = record.id === s.activeId ? s.doc : record.doc
+        return doc.sourceId !== null && doc.recording === null
+      }).length
+  )
 
   return (
     <aside
@@ -460,7 +472,15 @@ export function Panel() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-(--tc-divider) [scrollbar-width:thin]">
-        {!isRecording && <ScreenshotSection />}
+        {isRecording ? (
+          <>
+            <RecordingSection />
+            <CursorSection />
+            <MotionSection />
+          </>
+        ) : (
+          <ScreenshotSection />
+        )}
         <BackgroundSection />
         {hasSource && !isRecording && <RedactSection />}
         {hasSource && !isRecording && <SpotlightSection />}
@@ -468,12 +488,20 @@ export function Panel() {
         <ExportSection />
       </div>
       <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-(--tc-divider) p-3">
-        <Button icon={<Copy size={14} />} onClick={() => void copyImage()} data-testid="copy" hint="Copy as PNG (Ctrl+Shift+C)">
-          Copy
-        </Button>
-        <Button variant="primary" icon={<UploadSimple size={14} />} onClick={() => void exportImage()} data-testid="export" hint="Save this shot (Ctrl+S)">
-          Export {FORMAT_LABEL[format]}
-        </Button>
+        {isRecording ? (
+          <Button variant="primary" className="col-span-2" icon={<UploadSimple size={14} />} disabled data-testid="export">
+            Export MP4
+          </Button>
+        ) : (
+          <>
+            <Button icon={<Copy size={14} />} onClick={() => void copyImage()} data-testid="copy" hint="Copy as PNG (Ctrl+Shift+C)">
+              Copy
+            </Button>
+            <Button variant="primary" icon={<UploadSimple size={14} />} onClick={() => void exportImage()} data-testid="export" hint="Save this shot (Ctrl+S)">
+              Export {FORMAT_LABEL[format]}
+            </Button>
+          </>
+        )}
         {ready > 1 && (
           <Button
             className="col-span-2"

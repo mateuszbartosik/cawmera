@@ -374,7 +374,7 @@ export async function exportAll() {
   const { format } = store.get()
   leaveCrop()
   const shots = liveShots()
-    .map((record, index) => ({ record, index, scene: sceneFor(record.doc) }))
+    .map((record, index) => ({ record, index, scene: record.doc.recording ? null : sceneFor(record.doc) }))
     .filter((item) => item.scene)
   if (shots.length === 0) {
     toast('Add a screenshot first', { description: 'Paste, drop, browse or capture one.' })

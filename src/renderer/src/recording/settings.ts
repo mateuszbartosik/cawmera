@@ -35,3 +35,13 @@ export const RECORDING_SIZE: Size = { width: 1920, height: 1080 }
 export function recordingDocFor(track: RecordingTrack, previous: RecordingDoc | null): RecordingDoc {
   return { ...(previous ?? DEFAULT_RECORDING), trim: autoTrim(track) }
 }
+
+type DefaultKey = keyof typeof DEFAULT_RECORDING
+
+export function defaultsFor(keys: readonly DefaultKey[]): Partial<RecordingDoc> {
+  return Object.fromEntries(keys.map((key) => [key, DEFAULT_RECORDING[key]]))
+}
+
+export function differsFromDefault(doc: RecordingDoc, keys: readonly DefaultKey[]): boolean {
+  return keys.some((key) => doc[key] !== DEFAULT_RECORDING[key])
+}
