@@ -17,6 +17,10 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { CaptureSource, CountdownRequest, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
+import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
+import { recordingVideoFile, registerRecording } from './recording'
+
+registerMediaScheme()
 
 let win: BrowserWindow | null = null
 /** Set once the renderer agreed to close (no unsaved shots, or the user chose to discard them). */
@@ -333,6 +337,24 @@ function registerIpc() {
     return { path }
   })
 
+  ipcMain.handle('file:save-video', async (_event, bytes: unknown, suggestedName: unknown) => {
+    if (!win || !(bytes instanceof Uint8Array)) return null
+    const name = typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : 'whats-new-recording.mp4'
+    const prefs = await readPrefs()
+    const folder = prefs.lastSaveDir && existsSync(prefs.lastSaveDir) ? prefs.lastSaveDir : app.getPath('videos')
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Export MP4',
+      defaultPath: join(folder, name),
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    })
+    if (result.canceled || !result.filePath) return null
+    const path = extname(result.filePath).toLowerCase() === '.mp4' ? result.filePath : `${result.filePath}.mp4`
+    await writeFile(path, bytes)
+    await writePrefs({ ...prefs, lastSaveDir: dirname(path) })
+    return { path }
+  })
+
   ipcMain.handle('file:save-images', async (_event, images: unknown) => {
     if (!win || !Array.isArray(images) || images.length === 0) return null
     const valid = (images as NamedImage[]).filter((image) => typeof image?.name === 'string' && image.bytes instanceof Uint8Array)
@@ -481,6 +503,8 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu()
     registerIpc()
     registerDisplayMedia()
+    registerRecording(() => win)
+    registerMediaProtocol(recordingVideoFile)
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

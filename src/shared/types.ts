@@ -49,6 +49,27 @@ export type MenuCommand =
   | 'toggle-house-style'
   | 'about'
 
+export type RecordingSupport = { ok: true } | { ok: false; reason: 'platform' | 'windows-version' | 'helper-missing' }
+
+export type RecordingErrorCode = 'unsupported' | 'access-denied' | 'target-gone' | 'encoder' | 'internal' | 'timeout'
+
+export interface RecordingError {
+  code: RecordingErrorCode
+  message: string
+}
+
+export interface RecordingStartRequest {
+  sourceId: string
+  displayId: string | null
+}
+
+export interface RecordingFinished {
+  id: string
+  stoppedBy: 'shortcut' | 'window' | 'target-gone'
+  /** The helper's track.json, unparsed. */
+  track: string
+}
+
 export interface CawmeraBridge {
   readonly platform: string
   getVersion(): Promise<string>
@@ -74,6 +95,13 @@ export interface CawmeraBridge {
   copyPng(bytes: Uint8Array): Promise<void>
   readClipboardImage(): Promise<Uint8Array | null>
   revealFile(path: string): Promise<void>
+  recordingSupport(): Promise<RecordingSupport>
+  /** Starts recording the source; resolves with null once frames are flowing, or why it could not start. */
+  startRecording(request: RecordingStartRequest): Promise<RecordingError | null>
+  stopRecording(): Promise<void>
+  onRecordingFinished(listener: (result: RecordingFinished) => void): () => void
+  onRecordingFailed(listener: (error: RecordingError) => void): () => void
+  saveVideo(bytes: Uint8Array, suggestedName: string): Promise<{ path: string } | null>
   setNativeTheme(theme: 'dark' | 'light'): void
   zoomFactor(): number
   onMenuCommand(listener: (command: MenuCommand) => void): () => void

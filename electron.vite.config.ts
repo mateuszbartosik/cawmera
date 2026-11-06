@@ -12,8 +12,8 @@ function contentSecurityPolicy(): Plugin {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "media-src 'self' blob: mediastream:",
-    "connect-src 'self' blob: data:"
+    "media-src 'self' blob: mediastream: cawmera-media:",
+    "connect-src 'self' blob: data: cawmera-media:"
   ].join('; ')
   return {
     name: 'cawmera-csp',

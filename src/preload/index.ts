@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
-import type { CawmeraBridge, MenuCommand } from '../shared/types'
+import type { CawmeraBridge, MenuCommand, RecordingError, RecordingFinished } from '../shared/types'
+
+function subscribeWith<T>(channel: string, listener: (payload: T) => void) {
+  const handler = (_event: IpcRendererEvent, payload: T) => listener(payload)
+  ipcRenderer.on(channel, handler)
+  return () => {
+    ipcRenderer.removeListener(channel, handler)
+  }
+}
 
 function subscribe(channel: string, listener: () => void) {
   const handler = () => listener()
@@ -26,6 +34,12 @@ const bridge: CawmeraBridge = {
   copyPng: (bytes) => ipcRenderer.invoke('clipboard:write-png', bytes),
   readClipboardImage: () => ipcRenderer.invoke('clipboard:read-image'),
   revealFile: (path) => ipcRenderer.invoke('file:reveal', path),
+  recordingSupport: () => ipcRenderer.invoke('recording:support'),
+  startRecording: (request) => ipcRenderer.invoke('recording:start', request),
+  stopRecording: () => ipcRenderer.invoke('recording:stop'),
+  onRecordingFinished: (listener) => subscribeWith<RecordingFinished>('recording:finished', listener),
+  onRecordingFailed: (listener) => subscribeWith<RecordingError>('recording:failed', listener),
+  saveVideo: (bytes, suggestedName) => ipcRenderer.invoke('file:save-video', bytes, suggestedName),
   setNativeTheme: (theme) => ipcRenderer.send('theme:set', theme),
   zoomFactor: () => webFrame.getZoomFactor(),
   onMenuCommand: (listener) => {

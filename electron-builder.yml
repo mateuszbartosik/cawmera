@@ -15,6 +15,9 @@ win:
     - portable
     - zip
   icon: build/icon.png
+  extraResources:
+    - from: native/recorder/build/Release/cawmera-recorder.exe
+      to: cawmera-recorder.exe
   # No code-signing certificate yet. Skips signing only; the icon and version info are still written.
   signExecutable: false
 portable:
