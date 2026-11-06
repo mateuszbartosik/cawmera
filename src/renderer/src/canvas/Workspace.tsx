@@ -22,6 +22,8 @@ import {
   type BoxRef,
   type ShotRecord
 } from '../app/store'
+import { drawRecordingFrame } from '../recording/frame'
+import { getRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
 import {
   clipTo,
@@ -54,6 +56,7 @@ import {
 } from '../render/layout'
 import { cn } from '../ui/controls'
 import { activeIndex, panBy, shotAt, shotRects, slotAt, slotX, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
+import { RecordingCanvas, recordingScene, sizeCanvas } from './RecordingCanvas'
 
 const HANDLE_PX = 8
 const MIN_ITEM = 6
@@ -176,34 +179,43 @@ const ShotCanvas = memo(function ShotCanvas({
   const ref = useRef<HTMLCanvasElement>(null)
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
   const backingWidth = Math.max(1, Math.min(4096, Math.round(box.width * dpr)))
+  const recording = doc.recording ? getRecording(doc.sourceId) : null
+  const live = recording !== null && active
   useLayoutEffect(() => {
     const canvas = ref.current
     if (!canvas) return
-    const backingHeight = Math.max(1, Math.round((backingWidth * doc.size.height) / doc.size.width))
-    if (canvas.width !== backingWidth) canvas.width = backingWidth
-    if (canvas.height !== backingHeight) canvas.height = backingHeight
+    sizeCanvas(canvas, doc.size, backingWidth)
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, backingWidth, backingHeight)
+    ctx.clearRect(0, 0, backingWidth, canvas.height)
+    if (recording) {
+      const scene = recording.poster && recordingScene(recording, doc, style, backdrop, recording.poster)
+      if (scene) drawRecordingFrame(ctx, scene, scene.settings.trim.start, 'preview', backingWidth / doc.size.width)
+      return
+    }
     const source = getSource(doc.sourceId)
     const scene = { source: source ? { image: source.bitmap, width: source.width, height: source.height } : null, doc, style, backdrop }
     drawScene(ctx, scene, backingWidth / doc.size.width)
-  }, [doc, style, backdrop, backingWidth])
+  }, [doc, style, backdrop, backingWidth, recording, live])
   const empty = doc.sourceId === null
+  const canvasProps = {
+    'data-testid': 'shot-canvas',
+    'data-active': active || undefined,
+    'aria-label': empty ? 'Empty shot' : recording ? 'Framed recording' : 'Framed screenshot',
+    className: 'block size-full',
+    style: { boxShadow: outlined ? '0 0 0 1.5px var(--tc-accent)' : '0 0 0 1px var(--tc-artboard-edge)' }
+  }
   return (
     <div
       className="pointer-events-none absolute"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, opacity: faded ? 0.45 : 1 }}
     >
-      <canvas
-        ref={ref}
-        data-testid="shot-canvas"
-        data-active={active || undefined}
-        aria-label={empty ? 'Empty shot' : 'Framed screenshot'}
-        className="block size-full"
-        style={{ boxShadow: outlined ? '0 0 0 1.5px var(--tc-accent)' : '0 0 0 1px var(--tc-artboard-edge)' }}
-      />
+      {live ? (
+        <RecordingCanvas doc={doc} style={style} backdrop={backdrop} backingWidth={backingWidth} canvasProps={canvasProps} />
+      ) : (
+        <canvas ref={ref} {...canvasProps} />
+      )}
       {empty && box.width > 60 && (
         <span className="absolute inset-0 grid place-items-center text-white/40" aria-hidden>
           <ImageSquare size={Math.max(16, Math.min(40, box.width / 18))} />

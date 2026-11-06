@@ -1,7 +1,7 @@
 import { ArrowUUpLeft, ArrowUUpRight, CornersIn, MagnifyingGlassMinus, MagnifyingGlassPlus, Moon, Plus, Sun } from '@phosphor-icons/react'
 import { newShot } from '../app/actions'
 import { redo, store, undo, useApp } from '../app/store'
-import { isNarrow, workspaceGeometry, zoomFit, zoomStep, zoomTo } from '../canvas/view'
+import { isNarrow, TIMELINE_SPACE, timelineShows, workspaceGeometry, zoomFit, zoomStep, zoomTo } from '../canvas/view'
 import { IconButton } from '../ui/controls'
 
 const Divider = () => <span className="mx-1 h-4 w-px bg-(--tc-line)" aria-hidden />
@@ -13,6 +13,7 @@ export function Toolbar() {
   const theme = useApp((s) => s.theme)
   const zoom = useApp((s) => workspaceGeometry(s).zoom)
   const narrow = useApp((s) => isNarrow(s))
+  const timeline = useApp(timelineShows)
   const cropping = useApp((s) => s.mode === 'crop' && s.doc.sourceId !== null)
   const center = useApp((s) => {
     const g = workspaceGeometry(s)
@@ -25,7 +26,7 @@ export function Toolbar() {
       aria-label="View"
       data-testid="toolbar"
       className="absolute flex h-9 -translate-x-1/2 items-center gap-0.5 rounded-lg border border-(--tc-line) bg-(--tc-panel) px-1.5 text-(--tc-fg) shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px] backdrop-saturate-150"
-      style={narrow ? { left: center, top: 10 } : { left: center, bottom: 12 }}
+      style={narrow ? { left: center, top: 10 } : { left: center, bottom: 12 + (timeline ? TIMELINE_SPACE : 0) }}
     >
       {!cropping && (
         <>

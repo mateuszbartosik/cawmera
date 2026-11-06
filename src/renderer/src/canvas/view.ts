@@ -5,6 +5,8 @@ import type { Point, Rect, Size } from '../render/geometry'
 export const PANEL_WIDTH = 300
 export const PANEL_GAP = 10
 const TOOLBAR_SPACE = 64
+/** Height the recording timeline takes at the bottom of the canvas. */
+export const TIMELINE_SPACE = 176
 /** The crop bar sits above the toolbar while cropping. */
 const CROP_BAR_SPACE = 46
 /** Below this width the panel docks to the bottom as a sheet and the toolbar moves to the top. */
@@ -79,12 +81,18 @@ export function activeIndex(s: Pick<AppState, 'shots' | 'activeId'>): number {
   return Math.max(0, s.shots.findIndex((record) => record.id === s.activeId))
 }
 
+/** The timeline runs under the canvas of a recording shot, except in the narrow layout. */
+export function timelineShows(s: Pick<AppState, 'viewport' | 'doc'>): boolean {
+  return !isNarrow(s) && s.doc.recording !== null
+}
+
 function areaOf(s: AppState, cropping: boolean) {
   const narrow = isNarrow(s)
   const right = narrow ? 0 : PANEL_WIDTH + PANEL_GAP * 2
   const barSpace = cropping ? CROP_BAR_SPACE : 0
   const top = narrow ? TOOLBAR_SPACE - 8 + barSpace : 0
-  const bottom = narrow ? Math.round(s.viewport.height * SHEET_SHARE) + PANEL_GAP : TOOLBAR_SPACE + barSpace
+  const timelineSpace = timelineShows(s) ? TIMELINE_SPACE : 0
+  const bottom = narrow ? Math.round(s.viewport.height * SHEET_SHARE) + PANEL_GAP : TOOLBAR_SPACE + barSpace + timelineSpace
   return {
     x: 0,
     y: top,

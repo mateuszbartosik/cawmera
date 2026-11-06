@@ -9,6 +9,7 @@ import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge } from '../platform/bridge'
 import { finishRecording, recordingFailed } from '../recording/actions'
+import { Timeline } from '../timeline/Timeline'
 import { Toolbar } from '../toolbar/Toolbar'
 import {
   cancelCapture,
@@ -242,6 +243,7 @@ export function App() {
       <CropBar />
       <SelectionBar />
       <Toolbar />
+      <Timeline />
       <Panel />
       <CaptureDialog />
       <Toaster
