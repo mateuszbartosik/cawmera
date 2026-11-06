@@ -24,7 +24,7 @@ import {
 } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
 import { recordingScene } from '../recording/scene'
-import { getRecording } from '../recording/registry'
+import { POSTER_TIME_MS, useRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
 import {
   clipTo,
@@ -180,7 +180,8 @@ const ShotCanvas = memo(function ShotCanvas({
   const ref = useRef<HTMLCanvasElement>(null)
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
   const backingWidth = Math.max(1, Math.min(4096, Math.round(box.width * dpr)))
-  const recording = doc.recording ? getRecording(doc.sourceId) : null
+  const entry = useRecording(doc.sourceId)
+  const recording = doc.recording ? entry : null
   const live = recording !== null && active
   useLayoutEffect(() => {
     const canvas = ref.current
@@ -192,7 +193,7 @@ const ShotCanvas = memo(function ShotCanvas({
     ctx.clearRect(0, 0, backingWidth, canvas.height)
     if (recording) {
       const scene = recording.poster && recordingScene(recording, doc, style, backdrop, recording.poster)
-      if (scene) drawRecordingFrame(ctx, scene, scene.settings.trim.start, 'preview', backingWidth / doc.size.width)
+      if (scene) drawRecordingFrame(ctx, scene, POSTER_TIME_MS, 'preview', backingWidth / doc.size.width)
       return
     }
     const source = getSource(doc.sourceId)

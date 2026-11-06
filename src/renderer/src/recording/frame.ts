@@ -1,7 +1,7 @@
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import { drawBackground, drawBorder, drawFrameShadow, roundRectPath } from '../render/compose'
-import type { Size } from '../render/geometry'
+import { clamp, type Size } from '../render/geometry'
 import { cameraAt, type CameraState } from './camera'
 import { CURSOR_BASE_PX, drawCursor } from './cursor-art'
 import { cursorAt, type CursorPath } from './cursor'
@@ -31,8 +31,6 @@ const OPAQUE_BASE = '#000'
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
-const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
-
 export function viewMatrix(camera: CameraState, layout: RecordingLayout, output: Size): Matrix {
   const s = camera.depth
   const focusX = layout.content.x + camera.focus.x * layout.scale
@@ -48,10 +46,10 @@ export function shutterTimes(t: number, fps: number, blur: number, samples: numb
   return Array.from({ length: samples }, (_, i) => t - halfShutter + (2 * halfShutter * i) / (samples - 1))
 }
 
-function drawSample(ctx: Ctx, scene: RecordingScene, layout: RecordingLayout, ti: number, k: number): void {
+function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout, ti: number, k: number): void {
   const { video, videoSize, track, zooms, path, doc, settings, style, backdrop } = scene
   const { content } = layout
-  const canvas = ctx as CanvasRenderingContext2D
+  const ctx = target as CanvasRenderingContext2D
   const camera = cameraAt(ti, zooms, videoSize, settings.zoomSpeed)
   const [a, b, c, d, e, f] = viewMatrix(camera, layout, doc.size)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -59,17 +57,17 @@ function drawSample(ctx: Ctx, scene: RecordingScene, layout: RecordingLayout, ti
   ctx.fillRect(0, 0, doc.size.width * k, doc.size.height * k)
   ctx.setTransform(a * k, b * k, c * k, d * k, e * k, f * k)
 
-  drawBackground(canvas, doc, style, backdrop)
+  drawBackground(ctx, doc, style, backdrop)
   const radius = Math.min(style.radius, content.w / 2, content.h / 2)
-  drawFrameShadow(canvas, content, radius, style, k)
+  drawFrameShadow(ctx, content, radius, style, k * a)
 
   ctx.save()
-  roundRectPath(canvas, content, radius)
+  roundRectPath(ctx, content, radius)
   ctx.clip()
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(video, content.x, content.y, content.w, content.h)
   ctx.restore()
-  drawBorder(canvas, content, radius, style)
+  drawBorder(ctx, content, radius, style)
 
   const toComposition = (point: { x: number; y: number }) => ({
     x: content.x + point.x * layout.scale,
@@ -79,13 +77,13 @@ function drawSample(ctx: Ctx, scene: RecordingScene, layout: RecordingLayout, ti
   if (settings.clickEffect !== 'off') {
     for (const click of activeClicks(track.clicks, ti, settings.clickEffect, videoSize)) {
       const at = toComposition(click)
-      drawClickEffect(canvas, { ...click, ...at }, settings.clickEffect, style.accent, CLICK_EFFECT_RADIUS_PX * sizeScale)
+      drawClickEffect(ctx, { ...click, ...at }, settings.clickEffect, style.accent, CLICK_EFFECT_RADIUS_PX * sizeScale)
     }
   }
   const cursor = cursorAt(path, ti, settings.hideWhenStill, videoSize)
   if (cursor) {
     const heightPx = CURSOR_BASE_PX * settings.cursorSize * sizeScale
-    drawCursor(canvas, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(track.clicks, ti))
+    drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(track.clicks, ti))
   }
 }
 

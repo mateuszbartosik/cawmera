@@ -7,7 +7,7 @@ import type { CursorLook } from '../recording/cursor-art'
 import type { ZoomSpeed } from '../recording/camera'
 import { getRecording } from '../recording/registry'
 import { defaultsFor, differsFromDefault, type RecordingDoc } from '../recording/settings'
-import { Section, Segmented, Slider, Switch } from '../ui/controls'
+import { percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
 const CURSOR_KEYS = ['cursorSize', 'smoothing', 'look', 'clickEffect', 'hideWhenStill'] as const
@@ -27,7 +27,6 @@ const ZOOM_SPEED_OPTIONS: { value: ZoomSpeed; label: string }[] = [
   { value: 'quick', label: 'Quick' }
 ]
 
-const percent = (value: number) => `${Math.round(value * 100)}%`
 const times = (value: number) => `${value.toFixed(1)}×`
 
 function formatLength(ms: number) {

@@ -14,6 +14,8 @@ import { ArrowCounterClockwise, CaretDown, Check, Question } from '@phosphor-ico
 
 export const cn = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ')
 
+export const percent = (value: number) => `${Math.round(value * 100)}%`
+
 // ---------------------------------------------------------------------------
 // Tooltip: portalled so the scrolling panel never clips it.
 

@@ -23,6 +23,12 @@ describe('auto trim', () => {
     expect(autoTrim(track([...still(2000, 4000), ...moves], 4800, clicks)).end).toBe(4800)
   })
 
+  it('ignores clicks outside the frame after the last rest', () => {
+    const trip = Array.from({ length: 50 }, (_, i) => ({ t: 4000 + i * 16, x: 800 + i * 30, y: 400, shape: 'arrow' as const }))
+    const outside: Click[] = [{ t: 4700, x: 2200, y: 400, button: 'left', up: 4750 }]
+    expect(autoTrim(track([...still(2000, 4000), ...trip], 4800, outside)).end).toBe(4000)
+  })
+
   it('keeps everything when the cursor never rests', () => {
     const moves = Array.from({ length: 100 }, (_, i) => ({ t: i * 16, x: 100 + i * 10, y: 400, shape: 'arrow' as const }))
     expect(autoTrim(track(moves, 1600))).toEqual({ start: 0, end: 1600 })

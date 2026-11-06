@@ -451,7 +451,7 @@ export function registerSource(entry: SourceEntry) {
     sources.get(id)?.bitmap.close()
     sources.delete(id)
   }
-  const alive = (doc: Doc) => doc.sourceId === null || sources.has(doc.sourceId)
+  const alive = (doc: Doc) => doc.sourceId === null || doc.recording !== null || sources.has(doc.sourceId)
   store.set((s) => ({
     past: s.past.filter(alive),
     future: s.future.filter(alive),

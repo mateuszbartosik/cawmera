@@ -36,7 +36,7 @@ import { exportPercent, exportRecording, setRecording, startRecordingPicker } fr
 import type { RecordingFps } from '../recording/settings'
 import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
-import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
+import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, percent, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
 import { BackdropField } from './BackdropField'
 import { EdgePicker } from './EdgePicker'
 import { FileDrop } from './FileDrop'
@@ -78,7 +78,6 @@ const FILL_OPTIONS: { value: Fill; label: string }[] = [
   { value: 'image', label: 'Image' }
 ]
 
-const percent = (value: number) => `${Math.round(value * 100)}%`
 const px = (value: number) => `${Math.round(value)}px`
 
 function EdgeField({ doc, style }: { doc: Doc; style: HouseStyle }) {

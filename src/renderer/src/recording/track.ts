@@ -1,3 +1,6 @@
+import type { RecordingFinished } from '@shared/types'
+import type { Size } from '../render/geometry'
+
 export const CURSOR_SHAPES = ['arrow', 'hand', 'ibeam', 'wait', 'progress', 'crosshair', 'not-allowed', 'move',
   'resize-ew', 'resize-ns', 'resize-nwse', 'resize-nesw', 'help', 'other'] as const
 export type CursorShape = (typeof CURSOR_SHAPES)[number]
@@ -12,6 +15,7 @@ const CURSOR_ROW_LENGTH = 4
 const CLICK_ROW_LENGTH = 5
 const HIDDEN_SHAPE_INDEX = -1
 const NO_RELEASE = -1
+const STOP_CLICK_WITHIN_MS = 1000
 
 function invalidTrack(): never {
   throw new Error('Not a Cawmera recording track')
@@ -68,4 +72,15 @@ export function parseTrack(json: unknown): RecordingTrack {
     .sort((a, b) => a.t - b.t)
 
   return { kind: raw.kind, width: raw.width, height: raw.height, fps: raw.fps, durationMs: raw.durationMs, scale: raw.scale, cursor, clicks }
+}
+
+export function isInFrame(click: Click, frame: Size): boolean {
+  return click.x >= 0 && click.x <= frame.width && click.y >= 0 && click.y <= frame.height
+}
+
+export function withoutStopClick(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): RecordingTrack {
+  const last = track.clicks.at(-1)
+  const stoppedFromTaskbar = stoppedBy === 'window'
+  const isStopClick = stoppedFromTaskbar && last !== undefined && last.t >= track.durationMs - STOP_CLICK_WITHIN_MS
+  return isStopClick ? { ...track, clicks: track.clicks.slice(0, -1) } : track
 }

@@ -25,7 +25,6 @@ const entry: RecordingEntry = {
   id: 'rec1',
   name: 'Recording',
   track: { kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 2000, scale: 1, cursor: [], clicks: [] },
-  zooms: [],
   poster: null
 }
 

@@ -17,6 +17,8 @@ export interface Size {
 
 export const rect = (x: number, y: number, w: number, h: number): Rect => ({ x, y, w, h })
 
+export const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
+
 export function intersect(a: Rect, b: Rect): Rect | null {
   const x = Math.max(a.x, b.x)
   const y = Math.max(a.y, b.y)

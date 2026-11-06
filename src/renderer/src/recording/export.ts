@@ -17,7 +17,6 @@ export function frameTimes(trim: Trim, fps: number): number[] {
   return Array.from({ length: count }, (_, i) => trim.start + (i * MS_PER_SECOND) / fps)
 }
 
-/** The finished MP4 file. */
 export async function exportRecordingVideo(
   entry: RecordingEntry,
   doc: Doc & { recording: RecordingDoc },

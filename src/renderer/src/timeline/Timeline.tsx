@@ -5,9 +5,10 @@ import { commitFrom, store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
 import { setRecording } from '../recording/actions'
 import { applyTrim, scrubTo, togglePlayback, usePlayhead } from '../recording/playback'
-import { getRecording } from '../recording/registry'
+import { getRecording, zoomsFor } from '../recording/registry'
 import type { Trim } from '../recording/trim'
-import { cn, IconButton } from '../ui/controls'
+import { clamp } from '../render/geometry'
+import { IconButton } from '../ui/controls'
 import { dragTrim, formatClock, formatRulerLabel, tickStep, timeToX, xToTime } from './scale'
 
 const LABEL_WIDTH = 56
@@ -24,7 +25,6 @@ const PANEL_BOTTOM = 12
 
 type Edge = 'start' | 'end'
 
-const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
 const rowColumns = { gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }
 
 function useWidth() {
@@ -60,8 +60,9 @@ function TimelinePanel() {
   const { ref: trackRef, width } = useWidth()
   if (!recording || !entry) return null
 
-  const { track, zooms } = entry
+  const { track } = entry
   const { trim } = recording
+  const zooms = zoomsFor(entry, trim, recording.zoomSpeed)
   const duration = track.durationMs
   const startX = timeToX(trim.start, duration, width)
   const endX = timeToX(trim.end, duration, width)
@@ -130,14 +131,10 @@ function TimelinePanel() {
           <div className="relative">
             {zooms.map((zoom) => {
               const left = timeToX(zoom.start, duration, width)
-              const outside = zoom.end <= trim.start || zoom.start >= trim.end
               return (
                 <span
                   key={zoom.start}
-                  className={cn(
-                    'absolute top-1/2 grid h-6 -translate-y-1/2 place-items-center rounded-md border border-(--tc-accent)/60 bg-(--tc-accent)/15 text-[11px] font-semibold text-(--tc-fg) tabular-nums',
-                    outside && 'opacity-40'
-                  )}
+                  className="absolute top-1/2 grid h-6 -translate-y-1/2 place-items-center rounded-md border border-(--tc-accent)/60 bg-(--tc-accent)/15 text-[11px] font-semibold text-(--tc-fg) tabular-nums"
                   style={{ left, width: Math.max(MIN_ZOOM_BLOCK_PX, timeToX(zoom.end, duration, width) - left) }}
                 >
                   {zoom.depth.toFixed(1)}×

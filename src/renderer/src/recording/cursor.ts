@@ -168,13 +168,13 @@ function clamp01(value: number): number {
 }
 
 function opacityWithin(span: ActiveSpan, t: number): number {
-  const fadeIn = clamp01((t - span.start) / CURSOR_RULES.fadeMs)
+  const fadeIn = clamp01((t - (span.start - CURSOR_RULES.fadeMs)) / CURSOR_RULES.fadeMs)
   const fadeOut = clamp01((span.end + CURSOR_RULES.fadeMs - t) / CURSOR_RULES.fadeMs)
   return Math.min(fadeIn, fadeOut)
 }
 
 function opacityAt(spans: ActiveSpan[], t: number): number {
-  const index = lastIndexWhere(spans.length, (i) => spans[i].start <= t)
+  const index = lastIndexWhere(spans.length, (i) => spans[i].start - CURSOR_RULES.fadeMs <= t)
   const candidates = [spans[index], spans[index - 1]].filter((span) => span !== undefined)
   return Math.max(0, ...candidates.map((span) => opacityWithin(span, t)))
 }

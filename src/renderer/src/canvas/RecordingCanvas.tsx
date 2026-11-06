@@ -6,7 +6,7 @@ import { store } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
 import { attachPlayer, setPlayhead, setPlaying } from '../recording/playback'
 import { RecordingPlayer } from '../recording/player'
-import { getRecording } from '../recording/registry'
+import { POSTER_TIME_MS, useRecording } from '../recording/registry'
 import { recordingScene } from '../recording/scene'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
@@ -30,7 +30,7 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawRef = useRef<(sourceMs: number) => void>(() => undefined)
   const [player, setPlayer] = useState<RecordingPlayer | null>(null)
-  const entry = getRecording(doc.sourceId)
+  const entry = useRecording(doc.sourceId)
   const entryId = entry?.id ?? null
   const trim = doc.recording?.trim
 
@@ -85,7 +85,7 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
     const draw = (sourceMs: number) => {
       const playable = scene !== null && player !== null && player.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
       const shown = playable ? scene : posterScene
-      if (shown) drawRecordingFrame(ctx, shown, playable ? sourceMs : shown.settings.trim.start, 'preview', k)
+      if (shown) drawRecordingFrame(ctx, shown, playable ? sourceMs : POSTER_TIME_MS, 'preview', k)
     }
     drawRef.current = draw
     draw(player ? player.time : 0)

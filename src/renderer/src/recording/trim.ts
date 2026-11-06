@@ -1,4 +1,4 @@
-import type { CursorSample, RecordingTrack } from './track'
+import { isInFrame, type CursorSample, type RecordingTrack } from './track'
 
 export interface Trim { start: number; end: number }
 
@@ -24,7 +24,7 @@ export function autoTrim(track: RecordingTrack): Trim {
   const rest = lastRest(track.cursor, track.durationMs)
   let end = track.durationMs
   if (rest?.lastsToEnd) end = track.durationMs - TRIM_RULES.shortcutTailMs
-  else if (rest && !track.clicks.some((click) => click.t >= rest.end)) end = rest.end
+  else if (rest && !track.clicks.some((click) => click.t >= rest.end && isInFrame(click, track))) end = rest.end
   return clampTrim({ start: 0, end }, track.durationMs)
 }
 

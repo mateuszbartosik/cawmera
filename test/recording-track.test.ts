@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTrack } from '../src/renderer/src/recording/track'
+import { parseTrack, withoutStopClick, type Click, type RecordingTrack } from '../src/renderer/src/recording/track'
 
 const raw = {
   version: 1,
@@ -44,5 +44,31 @@ describe('parseTrack', () => {
     const track = parseTrack({ ...raw, cursor: [[0, 1, 2, 0], [1, null, 2, 0]], clicks: [[1, 2, 3, 0, -1], [null, 2, 3, 0, -1]] })
     expect(track.cursor).toHaveLength(1)
     expect(track.clicks).toHaveLength(1)
+  })
+})
+
+describe('withoutStopClick', () => {
+  const take = (clicks: Click[]): RecordingTrack =>
+    ({ kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 10_000, scale: 1, cursor: [], clicks })
+  const next: Click = { t: 6000, x: 1000, y: 700, button: 'left', up: 6080 }
+  const taskbar: Click = { t: 9200, x: 900, y: 1060, button: 'left', up: null }
+
+  it('drops the taskbar click that stopped the take', () => {
+    expect(withoutStopClick(take([next, taskbar]), 'window').clicks).toEqual([next])
+  })
+
+  it('keeps a last click from before the final second', () => {
+    const earlier = { ...taskbar, t: 8900 }
+    expect(withoutStopClick(take([next, earlier]), 'window').clicks).toEqual([next, earlier])
+  })
+
+  it('keeps every click when the take stopped another way', () => {
+    for (const stoppedBy of ['shortcut', 'target-gone'] as const) {
+      expect(withoutStopClick(take([next, taskbar]), stoppedBy).clicks).toEqual([next, taskbar])
+    }
+  })
+
+  it('leaves a take without clicks as it is', () => {
+    expect(withoutStopClick(take([]), 'window').clicks).toEqual([])
   })
 })

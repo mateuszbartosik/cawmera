@@ -95,6 +95,15 @@ describe('drawRecordingFrame', () => {
     expect(fake.alphaAtCall['drawImage']).toEqual([1])
   })
 
+  it('zooms the frame shadow with the camera', () => {
+    const frameShadowBlur = (t: number) => {
+      const fake = fakeContext()
+      drawRecordingFrame(fake.ctx, scene, t, 'export')
+      return Number(fake.calls.find((c) => c.startsWith('shadowBlur='))!.split('=')[1])
+    }
+    expect(frameShadowBlur(4000)).toBeCloseTo(2 * frameShadowBlur(1000))
+  })
+
   it('paints every sample over an opaque base before the background', () => {
     const fake = fakeContext()
     drawRecordingFrame(fake.ctx, scene, 2700, 'preview')

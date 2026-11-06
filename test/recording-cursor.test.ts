@@ -72,14 +72,31 @@ describe('cursor path', () => {
     const path = buildCursorPath(track({ cursor: still, clicks: [], durationMs: 5000 }), 0)
     expect(cursorAt(path, 3000, true, frame)).toBeNull()
     expect(cursorAt(path, 4890, true, frame)!.opacity).toBeGreaterThan(0)
+    expect(cursorAt(path, 4500, true, frame)!.opacity).toBeGreaterThan(0)
+    expect(cursorAt(path, 4500, true, frame)!.opacity).toBeLessThan(1)
     expect(cursorAt(path, 3000, false, frame)!.opacity).toBe(1)
+  })
+
+  it('is fully visible by the time it starts moving', () => {
+    const still = [...Array.from({ length: 300 }, (_, i) => ({ t: i * 16, x: 800, y: 400, shape: 'arrow' as const })),
+      { t: 4900, x: 900, y: 400, shape: 'arrow' as const }]
+    const path = buildCursorPath(track({ cursor: still, clicks: [], durationMs: 5000 }), 0)
+    expect(cursorAt(path, 4784, true, frame)!.opacity).toBe(1)
+  })
+
+  it('is fully visible on the first frame', () => {
+    const path = buildCursorPath(track(), 0)
+    expect(cursorAt(path, 0, true, frame)!.opacity).toBe(1)
   })
 
   it('stays visible around a click while still', () => {
     const still = Array.from({ length: 300 }, (_, i) => ({ t: i * 16, x: 800, y: 400, shape: 'arrow' as const }))
     const clicks = [{ t: 3000, x: 800, y: 400, button: 'left' as const, up: 3050 }]
     const path = buildCursorPath(track({ cursor: still, clicks, durationMs: 5000 }), 0)
+    expect(cursorAt(path, 3000, true, frame)!.opacity).toBe(1)
     expect(cursorAt(path, 3100, true, frame)!.opacity).toBe(1)
     expect(cursorAt(path, 2900, true, frame)!.opacity).toBeGreaterThan(0)
+    expect(cursorAt(path, 2700, true, frame)!.opacity).toBeGreaterThan(0)
+    expect(cursorAt(path, 2700, true, frame)!.opacity).toBeLessThan(1)
   })
 })
