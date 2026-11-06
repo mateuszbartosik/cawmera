@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "failure.h"
-#include "geometry.h"
 
 namespace {
 
@@ -22,17 +21,16 @@ void check(HRESULT hr, std::string_view step) {
 Compositor::Compositor(ID3D11Device* device, int outW, int outH) : outW_(outW), outH_(outH) {
     winrt::com_ptr<ID3D11Device> sharedDevice;
     sharedDevice.copy_from(device);
-    winrt::com_ptr<ID3D11DeviceContext> context;
-    device->GetImmediateContext(context.put());
+    device->GetImmediateContext(context_.put());
     videoDevice_ = sharedDevice.try_as<ID3D11VideoDevice>();
-    videoContext_ = context.try_as<ID3D11VideoContext>();
+    videoContext_ = context_.try_as<ID3D11VideoContext>();
     if (!videoDevice_ || !videoContext_)
         throw Failure(FailureCode::unsupported, "The graphics device can't convert frames to video");
 
-    // NV12 is a full-size plane of luma followed by a half-height plane of interleaved chroma.
-    const size_t lumaSize = static_cast<size_t>(outW) * outH;
-    std::vector<uint8_t> black(lumaSize * 3 / 2, NEUTRAL_CHROMA);
-    std::fill_n(black.begin(), lumaSize, BLACK_LUMA);
+    const size_t lumaPlaneSize = static_cast<size_t>(outW) * outH;
+    const size_t chromaPlaneSize = lumaPlaneSize / 2;
+    std::vector<uint8_t> black(lumaPlaneSize + chromaPlaneSize, NEUTRAL_CHROMA);
+    std::fill_n(black.begin(), lumaPlaneSize, BLACK_LUMA);
     const D3D11_SUBRESOURCE_DATA initial{.pSysMem = black.data(), .SysMemPitch = static_cast<UINT>(outW)};
     const D3D11_TEXTURE2D_DESC desc{.Width = static_cast<UINT>(outW),
                                     .Height = static_cast<UINT>(outH),
@@ -43,20 +41,23 @@ Compositor::Compositor(ID3D11Device* device, int outW, int outH) : outW_(outW), 
                                     .Usage = D3D11_USAGE_DEFAULT,
                                     .BindFlags = D3D11_BIND_RENDER_TARGET};
     check(device->CreateTexture2D(&desc, &initial, output_.put()), "Creating the video frame");
+    check(device->CreateTexture2D(&desc, &initial, black_.put()), "Creating the video frame");
 }
 
-ID3D11Texture2D* Compositor::compose(ID3D11Texture2D* monitor, RECT crop) {
+ID3D11Texture2D* Compositor::compose(ID3D11Texture2D* monitor, const Mapping& mappingOnMonitor) {
+    if (!mappingOnMonitor.shown) return output_.get();
     D3D11_TEXTURE2D_DESC desc;
     monitor->GetDesc(&desc);
-    const RECT onMonitor = clampTo(crop, {0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)});
-    const Fit fit = fitInside(crop.right - crop.left, crop.bottom - crop.top, outW_, outH_);
-    const RECT destination = clampTo(placeInVideo(onMonitor, crop, fit), {0, 0, outW_, outH_});
-    // A minimized window, or one moved off the monitor, has nothing to show, so the video holds its last frame.
-    if (IsRectEmpty(&onMonitor) || IsRectEmpty(&destination)) return output_.get();
+    const RECT monitorRect{0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)};
+    const Blit blit = blitOf(mappingOnMonitor, monitorRect, outW_, outH_);
+    if (IsRectEmpty(&blit.destination)) {
+        context_->CopyResource(output_.get(), black_.get());
+        return output_.get();
+    }
 
     prepareFor(monitor, desc.Width, desc.Height);
-    videoContext_->VideoProcessorSetStreamSourceRect(processor_.get(), 0, TRUE, &onMonitor);
-    videoContext_->VideoProcessorSetStreamDestRect(processor_.get(), 0, TRUE, &destination);
+    videoContext_->VideoProcessorSetStreamSourceRect(processor_.get(), 0, TRUE, &blit.source);
+    videoContext_->VideoProcessorSetStreamDestRect(processor_.get(), 0, TRUE, &blit.destination);
     D3D11_VIDEO_PROCESSOR_STREAM stream{.Enable = TRUE, .pInputSurface = inputView_.get()};
     check(videoContext_->VideoProcessorBlt(processor_.get(), outputView_.get(), 0, 1, &stream),
           "Composing a video frame");

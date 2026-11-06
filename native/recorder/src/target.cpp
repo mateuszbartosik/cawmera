@@ -15,8 +15,8 @@ double densityOf(HMONITOR monitor) {
     return static_cast<double>(dpiX) / USER_DEFAULT_SCREEN_DPI;
 }
 
-// Minimized, hidden or on another virtual desktop, a window keeps bounds on the screen but none of it shows there.
-bool isOnScreen(HWND window) {
+// Minimized, hidden or on another virtual desktop, a window keeps bounds on the screen but shows nothing there.
+bool isShowing(HWND window) {
     DWORD cloaked = 0;
     DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
     return IsWindowVisible(window) && !IsIconic(window) && !cloaked;
@@ -37,33 +37,34 @@ RecordingTarget::RecordingTarget(const Args& args) {
     monitorRect_ = info.rcMonitor;
     density_ = densityOf(monitor_);
 
-    RECT shown = monitorRect_;
+    RECT onMonitor = monitorRect_;
     if (window_) {
         const RECT bounds = windowBounds();
-        shown = clampTo(bounds, monitorRect_);
-        if (!isOnScreen(*window_) || IsRectEmpty(&shown))
+        onMonitor = clampTo(bounds, monitorRect_);
+        if (!isShowing(*window_) || IsRectEmpty(&onMonitor))
             throw Failure(FailureCode::targetGone, "The window to record is minimized or off screen");
         offMonitorAtStart_ = overhang(bounds, monitorRect_);
     }
-    lastCrop_ = shown;
-    width_ = evenUp(shown.right - shown.left);
-    height_ = evenUp(shown.bottom - shown.top);
+    lastCrop_ = onMonitor;
+    width_ = evenDown(onMonitor.right - onMonitor.left);
+    height_ = evenDown(onMonitor.bottom - onMonitor.top);
 }
 
 Mapping RecordingTarget::current() {
-    RECT crop = monitorRect_;
-    bool shown = true;
-    if (window_) {
-        crop = insetBy(windowBounds(), offMonitorAtStart_);
-        const RECT onMonitor = clampTo(crop, monitorRect_);
-        shown = isOnScreen(*window_) && !IsRectEmpty(&onMonitor);
+    if (!window_) return mappingFor(monitorRect_, width_, height_);
+
+    RECT crop = insetBy(windowBounds(), offMonitorAtStart_);
+    const bool shown = isShowing(*window_) && !IsRectEmpty(&crop);
+    {
         std::scoped_lock lock(mutex_);
         if (shown)
             lastCrop_ = crop;
         else
             crop = lastCrop_;
     }
-    return {crop, fitInside(crop.right - crop.left, crop.bottom - crop.top, width_, height_), shown};
+    Mapping mapping = mappingFor(crop, width_, height_);
+    mapping.shown = shown;
+    return mapping;
 }
 
 RECT RecordingTarget::windowBounds() const {

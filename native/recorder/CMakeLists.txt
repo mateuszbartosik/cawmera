@@ -26,8 +26,7 @@ add_executable(cawmera-recorder
     src/main.cpp
     src/target.cpp
     app.manifest)
-# kernel32 and user32 come before windowsapp, which would otherwise import their functions through API-set DLLs and
-# hide them in the import table that build-recorder.mjs and reviewers check.
+# kernel32 and user32 go first, or windowsapp hides their imports behind API-set DLLs the import check can't see.
 target_link_libraries(cawmera-recorder PRIVATE
     recorder_core kernel32 user32 d3d11 dxgi mfplat mfreadwrite mfuuid dwmapi shcore windowsapp)
 

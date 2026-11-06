@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,15 +28,22 @@ namespace {
 
 constexpr DWORD CONSOLE_CLOSE_GRACE_MS = 4000;
 
-// Set by a stop line, the end of stdin, the console closing, or a capture failure.
 HANDLE stopRequested;
-// Set once the last line is out, so a closing console can wait for the files to be saved.
 HANDLE lastLinePrinted;
+
+struct Recorded {
+    int64_t frames;
+    double durationMs;
+};
 
 void printLine(std::string line) {
     line += '\n';
     DWORD written = 0;
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+}
+
+bool isStopRequested() {
+    return WaitForSingleObject(stopRequested, 0) == WAIT_OBJECT_0;
 }
 
 void watchStdin() {
@@ -66,84 +72,11 @@ BOOL WINAPI onConsoleEvent(DWORD event) {
     return TRUE;
 }
 
-// The newest monitor image, copied out of the capture's frame pool so that every tick can compose it again, or the
-// failure that ended the capture.
-class LatestFrame {
-public:
-    explicit LatestFrame(ID3D11Device* device) : arrived_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
-        if (!arrived_) throwLastError(FailureCode::internal, "Creating an event");
-        device_.copy_from(device);
-        device->GetImmediateContext(context_.put());
-    }
-
-    HANDLE arrived() const { return arrived_.get(); }
-
-    void store(ID3D11Texture2D* frame, int64_t qpcTime) {
-        D3D11_TEXTURE2D_DESC desc;
-        frame->GetDesc(&desc);
-        std::scoped_lock lock(mutex_);
-        if (!image_ || !sameSize(desc)) image_ = textureLike(desc);
-        context_->CopyResource(image_.get(), frame);
-        capturedAt_ = qpcTime;
-        SetEvent(arrived_.get());
-    }
-
-    void fail(std::exception_ptr failure) {
-        std::scoped_lock lock(mutex_);
-        if (!failure_) failure_ = failure;
-    }
-
-    void rethrowFailure() {
-        std::scoped_lock lock(mutex_);
-        if (failure_) std::rethrow_exception(failure_);
-    }
-
-    std::pair<winrt::com_ptr<ID3D11Texture2D>, int64_t> newest() {
-        std::scoped_lock lock(mutex_);
-        return {image_, capturedAt_};
-    }
-
-private:
-    bool sameSize(const D3D11_TEXTURE2D_DESC& desc) const {
-        D3D11_TEXTURE2D_DESC current;
-        image_->GetDesc(&current);
-        return current.Width == desc.Width && current.Height == desc.Height;
-    }
-
-    winrt::com_ptr<ID3D11Texture2D> textureLike(const D3D11_TEXTURE2D_DESC& frame) const {
-        const D3D11_TEXTURE2D_DESC desc{.Width = frame.Width,
-                                        .Height = frame.Height,
-                                        .MipLevels = 1,
-                                        .ArraySize = 1,
-                                        .Format = frame.Format,
-                                        .SampleDesc = {1, 0},
-                                        .Usage = D3D11_USAGE_DEFAULT,
-                                        .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET};
-        winrt::com_ptr<ID3D11Texture2D> texture;
-        throwIfFailed(device_->CreateTexture2D(&desc, nullptr, texture.put()), FailureCode::internal,
-                      "Keeping the latest frame");
-        return texture;
-    }
-
-    winrt::handle arrived_;
-    winrt::com_ptr<ID3D11Device> device_;
-    winrt::com_ptr<ID3D11DeviceContext> context_;
-    std::mutex mutex_;
-    winrt::com_ptr<ID3D11Texture2D> image_;
-    int64_t capturedAt_ = 0;
-    std::exception_ptr failure_;
-};
-
-void record(const Args& args) {
-    winrt::init_apartment(winrt::apartment_type::multi_threaded);
-    MonitorCapture::requireSupport();
-    RecordingTarget target(args);
-    const std::filesystem::path folder(args.outDir);
-    std::filesystem::create_directories(folder);
-
+Recorded recordVideo(const Args& args, RecordingTarget& target, TrackWriter& track) {
     const auto device = createDeviceFor(target.monitor());
     Compositor compositor(device.get(), target.width(), target.height());
-    Mp4Writer video(device.get(), folder / L"video.mp4", target.width(), target.height(), args.fps);
+    Mp4Writer video(device.get(), std::filesystem::path(args.outDir) / L"video.mp4", target.width(), target.height(),
+                    args.fps);
     LatestFrame latest(device.get());
     std::optional<MonitorCapture> capture(
         std::in_place, device.get(), target.monitor(),
@@ -151,7 +84,8 @@ void record(const Args& args) {
         [&latest](std::exception_ptr failure) {
             latest.fail(failure);
             SetEvent(stopRequested);
-        });
+        },
+        [] { SetEvent(stopRequested); });
 
     const HANDLE startWaits[] = {stopRequested, latest.arrived()};
     if (WaitForMultipleObjects(2, startWaits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) {
@@ -163,16 +97,13 @@ void record(const Args& args) {
     const RECT monitor = target.monitorRect();
     const auto composeNewest = [&] {
         const auto [image, capturedAt] = latest.newest();
-        const Mapping now = target.current();
-        // With nothing of the window on screen, an empty crop has the compositor hold the last frame.
-        RECT crop = now.shown ? now.crop : RECT{};
-        OffsetRect(&crop, -monitor.left, -monitor.top);
-        return std::pair{compositor.compose(image.get(), crop), capturedAt};
+        Mapping mapping = target.current();
+        OffsetRect(&mapping.crop, -monitor.left, -monitor.top);
+        return std::pair{compositor.compose(image.get(), mapping), capturedAt};
     };
 
     Metronome frameClock(qpcNow(), args.fps);
     const auto [firstFrame, origin] = composeNewest();
-    TrackWriter track;
     InputTracker mouse(track, [&target] { return target.current(); }, origin);
     video.write(firstFrame, 0);
     int64_t frames = 1;
@@ -182,22 +113,33 @@ void record(const Args& args) {
         const DWORD woke = WaitForMultipleObjects(2, frameWaits, FALSE, INFINITE);
         if (woke == WAIT_OBJECT_0) break;
         if (woke != WAIT_OBJECT_0 + 1) throwLastError(FailureCode::internal, "Waiting for the next frame");
-        const int64_t due = frameClock.rearm();
+        const int64_t due = frameClock.latestBeat();
+        frameClock.armAfter(due);
         if (target.isGone()) break;
         ID3D11Texture2D* frame = composeNewest().first;
         // Ticks missed while the encoder was busy get the same picture, so every frame keeps its place in time.
-        for (; frames <= due; ++frames) video.write(frame, frames);
+        for (; frames <= due && !isStopRequested(); ++frames) video.write(frame, frames);
     }
 
     latest.rethrowFailure();
     capture.reset();
     mouse.finish();
     video.finish();
-    const double durationMs = frames * 1000.0 / args.fps;
-    if (!track.write(folder / L"track.json", target.kind(), target.width(), target.height(), args.fps, durationMs,
-                     target.density()))
+    return {frames, frames * 1000.0 / args.fps};
+}
+
+void record(const Args& args) {
+    winrt::init_apartment(winrt::apartment_type::multi_threaded);
+    MonitorCapture::requireSupport();
+    RecordingTarget target(args);
+    std::filesystem::create_directories(args.outDir);
+    TrackWriter track;
+    // Returning releases the capture, the encoder, the GPU and video.mp4, so Cawmera never finds them in use.
+    const Recorded recorded = recordVideo(args, target, track);
+    if (!track.write(std::filesystem::path(args.outDir) / L"track.json", target.kind(), target.width(),
+                     target.height(), args.fps, recorded.durationMs, target.density()))
         throw Failure(FailureCode::internal, "Writing track.json failed");
-    printLine(doneLine(durationMs, frames));
+    printLine(doneLine(recorded.durationMs, recorded.frames));
 }
 
 }  // namespace
@@ -212,7 +154,7 @@ int wmain(int argc, wchar_t** argv) {
     try {
         const auto parsed = parseArgs(argc, argv);
         if (const auto* problem = std::get_if<std::string>(&parsed)) throw Failure(FailureCode::internal, *problem);
-        // The manifest already asks for this; the call only matters if the helper ever loses its manifest.
+        // The manifest already asks for this, so the call fails; it only matters if the manifest is ever lost.
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         record(std::get<Args>(parsed));
         exitCode = 0;

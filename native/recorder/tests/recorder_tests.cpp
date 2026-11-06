@@ -116,9 +116,46 @@ void clampsRectsToBounds() {
     CHECK(sameRect(clampTo({2000, 100, 2400, 300}, monitor), {1920, 100, 1920, 300}));
 }
 
-void roundsSizesUpToEven() {
-    CHECK(evenUp(1081) == 1082);
-    CHECK(evenUp(1080) == 1080);
+void roundsVideoSizesDownToEven() {
+    CHECK(evenDown(1081) == 1080);
+    CHECK(evenDown(1080) == 1080);
+    CHECK(evenDown(1) == 2);
+}
+
+void drawsAWindowOnePixelLargerOneToOne() {
+    const RECT monitor{0, 0, 2560, 1440};
+    const RECT window{100, 50, 607, 385};
+    const int videoW = evenDown(507);
+    const int videoH = evenDown(335);
+    CHECK(videoW == 506 && videoH == 334);
+
+    const Mapping mapping = mappingFor(window, videoW, videoH);
+    const Blit blit = blitOf(mapping, monitor, videoW, videoH);
+    CHECK(sameRect(blit.source, {100, 50, 606, 384}));
+    CHECK(sameRect(blit.destination, {0, 0, 506, 334}));
+    const auto [x, y] = screenToVideo(110, 70, mapping.crop, mapping.fit);
+    CHECK(nearly(x, 10) && nearly(y, 20));
+}
+
+void drawsACropOnePixelSmallerOneToOne() {
+    const Mapping mapping = mappingFor({100, 50, 605, 383}, 506, 334);
+    CHECK(sameRect(blitOf(mapping, {0, 0, 2560, 1440}, 506, 334).destination, {0, 0, 505, 333}));
+    const auto [x, y] = screenToVideo(110, 70, mapping.crop, mapping.fit);
+    CHECK(nearly(x, 10) && nearly(y, 20));
+}
+
+void scalesACropTwoPixelsSmaller() {
+    CHECK(mappingFor({100, 50, 604, 382}, 506, 334).fit.scale > 1);
+}
+
+void blitsOnlyWhatIsOnTheMonitor() {
+    const RECT monitor{0, 0, 1920, 1080};
+    const Blit halfOff = blitOf(mappingFor({1600, 100, 2240, 460}, 640, 360), monitor, 640, 360);
+    CHECK(sameRect(halfOff.source, {1600, 100, 1920, 460}));
+    CHECK(sameRect(halfOff.destination, {0, 0, 320, 360}));
+
+    const Blit away = blitOf(mappingFor({2000, 100, 2640, 460}, 640, 360), monitor, 640, 360);
+    CHECK(IsRectEmpty(&away.destination));
 }
 
 void measuresHowFarAWindowOverhangsItsMonitor() {
@@ -262,7 +299,11 @@ int main() {
     fitsAnEmptySourceToTheCentre();
     mapsScreenPointsIntoTheVideo();
     clampsRectsToBounds();
-    roundsSizesUpToEven();
+    roundsVideoSizesDownToEven();
+    drawsAWindowOnePixelLargerOneToOne();
+    drawsACropOnePixelSmallerOneToOne();
+    scalesACropTwoPixelsSmaller();
+    blitsOnlyWhatIsOnTheMonitor();
     measuresHowFarAWindowOverhangsItsMonitor();
     insetsWithoutInverting();
     placesPartsOfTheCropInTheVideo();

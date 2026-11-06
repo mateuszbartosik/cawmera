@@ -48,7 +48,72 @@ HRESULT createDevice(IDXGIAdapter* adapter, winrt::com_ptr<ID3D11Device>& device
     return hr;
 }
 
+bool sameSize(ID3D11Texture2D* texture, const D3D11_TEXTURE2D_DESC& desc) {
+    D3D11_TEXTURE2D_DESC current;
+    texture->GetDesc(&current);
+    return current.Width == desc.Width && current.Height == desc.Height;
+}
+
+winrt::com_ptr<ID3D11Texture2D> textureLike(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& frame) {
+    const D3D11_TEXTURE2D_DESC desc{.Width = frame.Width,
+                                    .Height = frame.Height,
+                                    .MipLevels = 1,
+                                    .ArraySize = 1,
+                                    .Format = frame.Format,
+                                    .SampleDesc = {1, 0},
+                                    .Usage = D3D11_USAGE_DEFAULT,
+                                    .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET};
+    winrt::com_ptr<ID3D11Texture2D> texture;
+    throwIfFailed(device->CreateTexture2D(&desc, nullptr, texture.put()), FailureCode::internal,
+                  "Keeping the latest frame");
+    return texture;
+}
+
 }  // namespace
+
+// WinRT can still be running a handler when the capture is destroyed, so the handlers hold this instead.
+struct MonitorCapture::Delivery {
+    FrameHandler onFrame;
+    FailureHandler onFailure;
+    ClosedHandler onClosed;
+    IDirect3DDevice device{nullptr};
+    winrt::Windows::Graphics::SizeInt32 size{};
+    std::mutex mutex;
+    bool open = true;
+
+    void frameArrived(Direct3D11CaptureFramePool const& pool) {
+        std::scoped_lock lock(mutex);
+        if (!open) return;
+        try {
+            const auto frame = pool.TryGetNextFrame();
+            if (!frame) return;
+            if (frame.ContentSize() != size) {
+                size = frame.ContentSize();
+                pool.Recreate(device, PIXEL_FORMAT, FRAME_BUFFERS, size);
+                return;
+            }
+            winrt::com_ptr<ID3D11Texture2D> texture;
+            winrt::check_hresult(
+                frame.Surface().as<IDirect3DDxgiInterfaceAccess>()->GetInterface(IID_PPV_ARGS(texture.put())));
+            onFrame(texture.get(), qpcFromHundredNs(frame.SystemRelativeTime().count()));
+        } catch (...) {
+            open = false;
+            onFailure(std::current_exception());
+        }
+    }
+
+    void itemClosed() {
+        std::scoped_lock lock(mutex);
+        if (!open) return;
+        open = false;
+        onClosed();
+    }
+
+    void close() {
+        std::scoped_lock lock(mutex);
+        open = false;
+    }
+};
 
 winrt::com_ptr<ID3D11Device> createDeviceFor(HMONITOR monitor) {
     winrt::com_ptr<ID3D11Device> device;
@@ -77,27 +142,34 @@ void MonitorCapture::requireSupport() {
 }
 
 MonitorCapture::MonitorCapture(ID3D11Device* device, HMONITOR monitor, FrameHandler onFrame,
-                               FailureHandler onFailure)
-    : onFrame_(std::move(onFrame)), onFailure_(std::move(onFailure)) {
+                               FailureHandler onFailure, ClosedHandler onClosed)
+    : delivery_(std::make_shared<Delivery>()) {
+    delivery_->onFrame = std::move(onFrame);
+    delivery_->onFailure = std::move(onFailure);
+    delivery_->onClosed = std::move(onClosed);
     try {
         winrt::com_ptr<IDXGIDevice> dxgiDevice;
         winrt::check_hresult(device->QueryInterface(IID_PPV_ARGS(dxgiDevice.put())));
         winrt::com_ptr<::IInspectable> inspectable;
         winrt::check_hresult(CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put()));
-        device_ = inspectable.as<IDirect3DDevice>();
+        delivery_->device = inspectable.as<IDirect3DDevice>();
 
         const auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
-        GraphicsCaptureItem item{nullptr};
         winrt::check_hresult(
-            interop->CreateForMonitor(monitor, winrt::guid_of<GraphicsCaptureItem>(), winrt::put_abi(item)));
-        size_ = item.Size();
+            interop->CreateForMonitor(monitor, winrt::guid_of<GraphicsCaptureItem>(), winrt::put_abi(item_)));
+        delivery_->size = item_.Size();
 
-        pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(device_, PIXEL_FORMAT, FRAME_BUFFERS, size_);
-        frameArrived_ = pool_.FrameArrived(winrt::auto_revoke, {this, &MonitorCapture::onFrameArrived});
-        session_ = pool_.CreateCaptureSession(item);
+        pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(delivery_->device, PIXEL_FORMAT, FRAME_BUFFERS,
+                                                              delivery_->size);
+        frameArrived_ = pool_.FrameArrived(
+            winrt::auto_revoke,
+            [delivery = delivery_](Direct3D11CaptureFramePool const& pool, auto&&) { delivery->frameArrived(pool); });
+        closed_ = item_.Closed(winrt::auto_revoke, [delivery = delivery_](auto&&, auto&&) { delivery->itemClosed(); });
+        session_ = pool_.CreateCaptureSession(item_);
         session_.IsCursorCaptureEnabled(false);
         session_.StartCapture();
     } catch (const winrt::hresult_error& error) {
+        delivery_->close();
         const HRESULT hr = error.code();
         throw failureFor(hr, hr == E_ACCESSDENIED ? FailureCode::accessDenied : FailureCode::internal,
                          "Starting screen capture");
@@ -105,38 +177,44 @@ MonitorCapture::MonitorCapture(ID3D11Device* device, HMONITOR monitor, FrameHand
 }
 
 MonitorCapture::~MonitorCapture() {
-    {
-        std::scoped_lock lock(deliveryMutex_);
-        delivering_ = false;
-    }
+    delivery_->close();
     frameArrived_.revoke();
+    closed_.revoke();
     try {
         session_.Close();
         pool_.Close();
     } catch (const winrt::hresult_error&) {
-        // The recording is over either way.
+        // A destructor can't throw, and the capture is ending either way.
     }
 }
 
-void MonitorCapture::onFrameArrived(Direct3D11CaptureFramePool const& pool,
-                                    winrt::Windows::Foundation::IInspectable const&) {
-    std::scoped_lock lock(deliveryMutex_);
-    if (!delivering_) return;
-    try {
-        const auto frame = pool.TryGetNextFrame();
-        if (!frame) return;
-        if (frame.ContentSize() != size_) {
-            size_ = frame.ContentSize();
-            pool.Recreate(device_, PIXEL_FORMAT, FRAME_BUFFERS, size_);
-            return;
-        }
+LatestFrame::LatestFrame(ID3D11Device* device) : arrived_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
+    if (!arrived_) throwLastError(FailureCode::internal, "Creating an event");
+    device_.copy_from(device);
+    device->GetImmediateContext(context_.put());
+}
 
-        winrt::com_ptr<ID3D11Texture2D> texture;
-        winrt::check_hresult(
-            frame.Surface().as<IDirect3DDxgiInterfaceAccess>()->GetInterface(IID_PPV_ARGS(texture.put())));
-        onFrame_(texture.get(), qpcFromHundredNs(frame.SystemRelativeTime().count()));
-    } catch (...) {
-        delivering_ = false;
-        onFailure_(std::current_exception());
-    }
+void LatestFrame::store(ID3D11Texture2D* frame, int64_t qpcTime) {
+    D3D11_TEXTURE2D_DESC desc;
+    frame->GetDesc(&desc);
+    std::scoped_lock lock(mutex_);
+    if (!image_ || !sameSize(image_.get(), desc)) image_ = textureLike(device_.get(), desc);
+    context_->CopyResource(image_.get(), frame);
+    capturedAt_ = qpcTime;
+    SetEvent(arrived_.get());
+}
+
+void LatestFrame::fail(std::exception_ptr failure) {
+    std::scoped_lock lock(mutex_);
+    if (!failure_) failure_ = failure;
+}
+
+void LatestFrame::rethrowFailure() {
+    std::scoped_lock lock(mutex_);
+    if (failure_) std::rethrow_exception(failure_);
+}
+
+std::pair<winrt::com_ptr<ID3D11Texture2D>, int64_t> LatestFrame::newest() {
+    std::scoped_lock lock(mutex_);
+    return {image_, capturedAt_};
 }

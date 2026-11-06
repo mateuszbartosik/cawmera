@@ -16,15 +16,11 @@
 #include "geometry.h"
 #include "track.h"
 
-// Logs the mouse while recording: the cursor 120 times a second, and every left and right button press and release.
-// Positions go through the current mapping into video pixels, and times are ms after `originQpc`.
-// It reads the mouse alone, through Raw Input on a message-only window, and never the keyboard.
 class InputTracker {
 public:
     InputTracker(TrackWriter& track, std::function<Mapping()> currentMapping, int64_t originQpc);
     ~InputTracker();
 
-    // Stops logging, and throws if logging failed.
     void finish();
 
 private:

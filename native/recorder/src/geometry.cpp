@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 Fit fitInside(int srcW, int srcH, int dstW, int dstH) {
     if (srcW <= 0 || srcH <= 0) return {0, dstW / 2.0, dstH / 2.0};
@@ -19,8 +20,8 @@ RECT clampTo(RECT r, RECT bounds) {
     return {left, top, std::clamp(r.right, left, bounds.right), std::clamp(r.bottom, top, bounds.bottom)};
 }
 
-int evenUp(int v) {
-    return v + (v & 1);
+int evenDown(int v) {
+    return std::max(2, v - (v & 1));
 }
 
 RECT overhang(RECT r, RECT bounds) {
@@ -39,4 +40,18 @@ RECT placeInVideo(RECT part, RECT crop, Fit fit) {
     const LONG top = std::lround(fit.y + (part.top - crop.top) * fit.scale);
     return {left, top, left + std::lround((part.right - part.left) * fit.scale),
             top + std::lround((part.bottom - part.top) * fit.scale)};
+}
+
+Mapping mappingFor(RECT crop, int videoW, int videoH) {
+    const int width = crop.right - crop.left;
+    const int height = crop.bottom - crop.top;
+    if (std::abs(width - videoW) > 1 || std::abs(height - videoH) > 1)
+        return {crop, fitInside(width, height, videoW, videoH)};
+    const RECT trimmed{crop.left, crop.top, crop.left + std::min(width, videoW), crop.top + std::min(height, videoH)};
+    return {trimmed, {1, 0, 0}};
+}
+
+Blit blitOf(const Mapping& mapping, RECT monitor, int videoW, int videoH) {
+    const RECT source = clampTo(mapping.crop, monitor);
+    return {source, clampTo(placeInVideo(source, mapping.crop, mapping.fit), {0, 0, videoW, videoH})};
 }

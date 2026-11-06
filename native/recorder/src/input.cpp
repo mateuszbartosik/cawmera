@@ -36,7 +36,6 @@ const std::pair<LPCWSTR, std::string_view> SYSTEM_CURSORS[] = {
 };
 constexpr std::string_view OTHER_SHAPE = knownShape("other");
 
-// A message-only window that gets the mouse's Raw Input, even while other apps are in front, for as long as it lives.
 class MouseListener {
 public:
     MouseListener() {
@@ -120,7 +119,7 @@ void InputTracker::listen(Metronome& sampler) {
         const DWORD woke = MsgWaitForMultipleObjectsEx(2, waits, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         if (woke == WAIT_OBJECT_0) return;
         if (woke == WAIT_OBJECT_0 + 1) {
-            sampler.rearm();
+            sampler.armAfter(sampler.latestBeat());
             sampleCursor();
         } else if (woke == WAIT_OBJECT_0 + 2) {
             MSG message;
@@ -140,7 +139,7 @@ void InputTracker::sampleCursor() {
     if (!GetCursorInfo(&cursor)) return;
     const Mapping mapping = currentMapping_();
     const auto [x, y] = screenToVideo(cursor.ptScreenPos.x, cursor.ptScreenPos.y, mapping.crop, mapping.fit);
-    // While the recorded window is off screen, the video holds a frame the cursor isn't over.
+    // While the window is hidden, the video holds an old frame the cursor isn't over.
     track_.addCursor(t, x, y, mapping.shown ? shapeOf(cursor) : TrackWriter::HIDDEN_SHAPE);
 }
 
@@ -155,13 +154,13 @@ void InputTracker::onRawInput(HRAWINPUT input) {
     POINT position;
     if (!(buttons & BUTTON_FLAGS) || !GetCursorPos(&position)) return;
 
-    // Raw Input names the physical buttons. With them swapped for the left hand, the right one is the primary click.
+    // Raw Input reports physical buttons; with them swapped for the left hand, the right one is the primary click.
     const bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
     const MouseButton physicalLeft = swapped ? MouseButton::right : MouseButton::left;
     const MouseButton physicalRight = swapped ? MouseButton::left : MouseButton::right;
     const Mapping mapping = currentMapping_();
     const auto [x, y] = screenToVideo(position.x, position.y, mapping.crop, mapping.fit);
-    // A press can't land on a recorded window that's off screen, but a release still ends a press made before.
+    // A press can't land on a hidden window, but a release still ends a press made before it hid.
     if (mapping.shown && (buttons & RI_MOUSE_LEFT_BUTTON_DOWN)) track_.addClick(t, x, y, physicalLeft);
     if (buttons & RI_MOUSE_LEFT_BUTTON_UP) track_.release(physicalLeft, t);
     if (mapping.shown && (buttons & RI_MOUSE_RIGHT_BUTTON_DOWN)) track_.addClick(t, x, y, physicalRight);

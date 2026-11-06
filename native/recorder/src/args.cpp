@@ -3,6 +3,8 @@
 #include <charconv>
 #include <string_view>
 
+#include "failure.h"
+
 namespace {
 
 template <typename Integer>
@@ -26,14 +28,6 @@ std::optional<POINT> parsePoint(std::wstring_view text) {
     const auto y = parseInteger<LONG>(text.substr(comma + 1));
     if (!x || !y) return std::nullopt;
     return POINT{*x, *y};
-}
-
-std::string toUtf8(std::wstring_view text) {
-    const int wideLength = static_cast<int>(text.size());
-    const int length = WideCharToMultiByte(CP_UTF8, 0, text.data(), wideLength, nullptr, 0, nullptr, nullptr);
-    std::string utf8(length, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), wideLength, utf8.data(), length, nullptr, nullptr);
-    return utf8;
 }
 
 }  // namespace
@@ -60,7 +54,7 @@ std::variant<Args, std::string> parseArgs(int argc, wchar_t** argv) {
             if (value.empty()) return "--out needs a folder";
             outDir = value;
         } else {
-            return "unknown argument: " + toUtf8(flag);
+            return "unknown argument: " + utf8FromWide(flag);
         }
     }
 
