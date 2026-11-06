@@ -78,9 +78,16 @@ export function isInFrame(click: Click, frame: Size): boolean {
   return click.x >= 0 && click.x <= frame.width && click.y >= 0 && click.y <= frame.height
 }
 
-export function withoutStopClick(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): RecordingTrack {
+export function isShownClick(click: Click, frame: Size): boolean {
+  return click.button === 'left' && isInFrame(click, frame)
+}
+
+export function stopClickOf(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): Click | null {
   const last = track.clicks.at(-1)
   const stoppedFromTaskbar = stoppedBy === 'window'
-  const isStopClick = stoppedFromTaskbar && last !== undefined && last.t >= track.durationMs - STOP_CLICK_WITHIN_MS
-  return isStopClick ? { ...track, clicks: track.clicks.slice(0, -1) } : track
+  return stoppedFromTaskbar && last !== undefined && last.t >= track.durationMs - STOP_CLICK_WITHIN_MS ? last : null
+}
+
+export function withoutStopClick(track: RecordingTrack, stoppedBy: RecordingFinished['stoppedBy']): RecordingTrack {
+  return stopClickOf(track, stoppedBy) ? { ...track, clicks: track.clicks.slice(0, -1) } : track
 }

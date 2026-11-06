@@ -1,6 +1,6 @@
 import { clamp, type Point, type Size } from '../render/geometry'
 import { ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
-import { isInFrame, type Click } from './track'
+import { isShownClick, type Click } from './track'
 import type { Trim } from './trim'
 
 /** The camera is fully zoomed in from `start` to `end` (source ms). Transitions happen outside this window. */
@@ -94,9 +94,7 @@ function resolveOverlaps(zooms: ClickedZoom[], frame: Size, holdLimits: Span, ru
 export function autoZooms(clicks: Click[], frame: Size, trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): ZoomSegment[] {
   const wideAndTransitionMs = rules.wideEdgeMs + ZOOM_TRANSITION_MS[speed]
   const holdLimits = { start: trim.start + wideAndTransitionMs, end: trim.end - wideAndTransitionMs }
-  const shownClicks = clicks.filter(
-    (click) => click.button === 'left' && isInFrame(click, frame) && click.t >= trim.start && click.t <= trim.end
-  )
+  const shownClicks = clicks.filter((click) => isShownClick(click, frame) && click.t >= trim.start && click.t <= trim.end)
   const holdsLongEnough = (zoom: ZoomSegment) => zoom.end - zoom.start >= rules.minHoldMs
   const zooms = groupClicks(shownClicks, frame, rules)
     .map((group) => zoomAround(group, frame, holdLimits, rules))

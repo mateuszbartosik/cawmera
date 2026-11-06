@@ -11,7 +11,7 @@ import { getRecording, registerRecording, setPoster } from './registry'
 import { runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { unavailableReason } from './support'
-import { parseTrack, withoutStopClick } from './track'
+import { parseTrack, stopClickOf, withoutStopClick } from './track'
 
 const POSTER_TIMEOUT_MS = 5000
 const DEFAULT_RECORDING_NAME = 'Recording'
@@ -122,9 +122,11 @@ function grabFirstFrame(id: string): Promise<ImageBitmap | null> {
 
 export async function finishRecording(result: RecordingFinished) {
   try {
-    const track = withoutStopClick(parseTrack(JSON.parse(result.track)), result.stoppedBy)
+    const recorded = parseTrack(JSON.parse(result.track))
+    const track = withoutStopClick(recorded, result.stoppedBy)
     registerRecording({ id: result.id, name: recordingName, track, poster: null })
-    addRecordingShot(result.id, recordingDocFor(track, lastRecordingDoc()?.recording ?? null))
+    const settings = recordingDocFor(track, lastRecordingDoc()?.recording ?? null, stopClickOf(recorded, result.stoppedBy))
+    addRecordingShot(result.id, settings)
     const poster = await grabFirstFrame(result.id)
     if (poster) setPoster(result.id, poster)
   } catch (error) {

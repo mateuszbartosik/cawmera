@@ -48,9 +48,12 @@ describe('finishing a take', () => {
     expect(mocks.restoreWindow).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves out the taskbar click that stopped the take, so the trim cuts the trip to the taskbar', async () => {
+  it('leaves out the taskbar click that stopped the take and the wait before it, so the trim cuts the trip to the taskbar', async () => {
     const video = posterVideo()
-    const restThenTrip = [[0, 500, 400, 0], [1000, 500, 400, 0], [2000, 500, 400, 0], [3000, 500, 400, 0], [3400, 700, 730, 0], [3800, 900, 1060, 0]]
+    const restThenTrip = [
+      [0, 500, 400, 0], [1000, 500, 400, 0], [2000, 500, 400, 0], [3000, 500, 400, 0],
+      [3100, 700, 730, 0], [3200, 900, 1060, 0], [3500, 900, 1060, 0], [3800, 900, 1060, 0]
+    ]
     const clicks = [[1000, 500, 400, 0, 1090], [3800, 900, 1060, 0, -1]]
     const finished = finishRecording({ id: 'take-2', stoppedBy: 'window', track: trackJson(restThenTrip, clicks) })
     video.loaded()

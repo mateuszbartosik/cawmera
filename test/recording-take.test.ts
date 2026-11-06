@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { cameraAt } from '../src/renderer/src/recording/camera'
 import { activeClicks } from '../src/renderer/src/recording/effects'
 import { frameTimes } from '../src/renderer/src/recording/export'
-import { withoutStopClick, type Click, type CursorSample, type RecordingTrack } from '../src/renderer/src/recording/track'
+import { isShownClick, stopClickOf, withoutStopClick, type Click, type CursorSample, type RecordingTrack } from '../src/renderer/src/recording/track'
 import { autoTrim } from '../src/renderer/src/recording/trim'
 import { autoZooms } from '../src/renderer/src/recording/zooms'
 
@@ -55,6 +55,19 @@ const takes = {
       9100
     )
   },
+  'a taskbar stop after waiting on the button': {
+    stoppedBy: 'window' as const,
+    raw: track(
+      [
+        ...work,
+        ...rest(next, lookAtResult.startMs, lookAtResult.endMs),
+        ...glide(next, taskbarButton, lookAtResult.endMs, 8900),
+        ...rest(taskbarButton, 8900, 9700)
+      ],
+      [...workClicks, { t: 9500, ...taskbarButton, button: 'left', up: null }],
+      9700
+    )
+  },
   'a shortcut stop': {
     stoppedBy: 'shortcut' as const,
     raw: track([...work, ...rest(next, lookAtResult.startMs, 8600)], workClicks, 8600)
@@ -63,7 +76,7 @@ const takes = {
 
 describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { stoppedBy, raw }) => {
   const clean = withoutStopClick(raw, stoppedBy)
-  const trim = autoTrim(clean)
+  const trim = autoTrim(clean, stopClickOf(raw, stoppedBy))
   const exportedFrames = frameTimes(trim, FPS)
 
   it('ends the video when the look at the result ends', () => {
@@ -74,6 +87,10 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
     const atTaskbar = (spot: Spot) => spot.y > 1000
     expect(clean.clicks.some(atTaskbar)).toBe(false)
     for (const t of exportedFrames) expect(activeClicks(clean.clicks, t, 'ring', frame).some(atTaskbar)).toBe(false)
+  })
+
+  it('marks the clicks with rings and zooms on the Clip row, and no others', () => {
+    expect(clean.clicks.filter((click) => isShownClick(click, frame)).map((click) => click.t)).toEqual(workClicks.map((click) => click.t))
   })
 
   it.each(['calm', 'quick'] as const)('zooms on the real clicks only and is wide for the first and last second (%s)', (speed) => {

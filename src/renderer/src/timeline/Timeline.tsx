@@ -6,6 +6,7 @@ import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas
 import { setRecording } from '../recording/actions'
 import { applyTrim, scrubTo, togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording, zoomsFor } from '../recording/registry'
+import { isShownClick } from '../recording/track'
 import type { Trim } from '../recording/trim'
 import { clamp } from '../render/geometry'
 import { IconButton } from '../ui/controls'
@@ -69,7 +70,7 @@ function TimelinePanel() {
   const step = tickStep(duration, width)
   const ticks = Array.from({ length: Math.floor(duration / step) + 1 }, (_, i) => i * step)
   const playheadX = timeToX(clamp(time, trim.start, trim.end), duration, width)
-  const leftClicks = track.clicks.filter((click) => click.button === 'left')
+  const shownClicks = track.clicks.filter((click) => isShownClick(click, track))
 
   const scrubToPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -114,7 +115,7 @@ function TimelinePanel() {
         <div className="grid" style={rowColumns}>
           <RowLabel>Clip</RowLabel>
           <div className="relative overflow-hidden rounded-md border border-(--tc-line) bg-(--tc-control)" style={{ marginBlock: CLIP_INSET }}>
-            {leftClicks.map((click) => (
+            {shownClicks.map((click) => (
               <span
                 key={click.t}
                 className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-(--tc-accent) bg-(--tc-chip)"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTrack, withoutStopClick, type Click, type RecordingTrack } from '../src/renderer/src/recording/track'
+import { parseTrack, stopClickOf, withoutStopClick, type Click, type RecordingTrack } from '../src/renderer/src/recording/track'
 
 const raw = {
   version: 1,
@@ -47,7 +47,7 @@ describe('parseTrack', () => {
   })
 })
 
-describe('withoutStopClick', () => {
+describe('the click that stopped a take', () => {
   const take = (clicks: Click[]): RecordingTrack =>
     ({ kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 10_000, scale: 1, cursor: [], clicks })
   const next: Click = { t: 6000, x: 1000, y: 700, button: 'left', up: 6080 }
@@ -70,5 +70,12 @@ describe('withoutStopClick', () => {
 
   it('leaves a take without clicks as it is', () => {
     expect(withoutStopClick(take([]), 'window').clicks).toEqual([])
+  })
+
+  it('is found only for a taskbar stop, in the final second', () => {
+    expect(stopClickOf(take([next, taskbar]), 'window')).toEqual(taskbar)
+    expect(stopClickOf(take([next, { ...taskbar, t: 8900 }]), 'window')).toBeNull()
+    expect(stopClickOf(take([next, taskbar]), 'shortcut')).toBeNull()
+    expect(stopClickOf(take([]), 'window')).toBeNull()
   })
 })

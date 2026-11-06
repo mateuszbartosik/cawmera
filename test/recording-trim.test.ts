@@ -40,3 +40,42 @@ describe('auto trim', () => {
     expect(clampTrim({ start: 200, end: 400 }, 5000)).toEqual({ start: 200, end: 700 })
   })
 })
+
+describe('auto trim of a take stopped from the taskbar', () => {
+  interface Spot { x: number; y: number }
+  const content: Spot = { x: 800, y: 400 }
+  const button: Spot = { x: 900, y: 1060 }
+  const stay = (at: Spot, from: number, to: number) => still(from, to).map((sample) => ({ ...sample, ...at }))
+  const glide = (from: Spot, to: Spot, startMs: number): CursorSample[] =>
+    Array.from({ length: 30 }, (_, i) => ({
+      t: startMs + i * 16,
+      x: from.x + ((to.x - from.x) * i) / 30,
+      y: from.y + ((to.y - from.y) * i) / 30,
+      shape: 'arrow' as const
+    }))
+  const stopClickOn = (at: Spot): Click => ({ t: 4900, ...at, button: 'left', up: null })
+
+  it('cuts the wait on Cawmera’s taskbar button along with the trip there', () => {
+    const cursor = [...stay(content, 2000, 4000), ...glide(content, button, 4000), ...stay(button, 4480, 5000)]
+    expect(autoTrim(track(cursor, 5000), stopClickOn(button)).end).toBe(4000)
+  })
+
+  it('cuts a wait outside the frame the same way', () => {
+    const belowFrame: Spot = { x: 900, y: 1150 }
+    const cursor = [...stay(content, 2000, 4000), ...glide(content, belowFrame, 4000), ...stay(belowFrame, 4480, 5000)]
+    expect(autoTrim(track(cursor, 5000), stopClickOn(belowFrame)).end).toBe(4000)
+  })
+
+  it('ends where the cursor left its last rest, even when that rest was just above the button', () => {
+    const aboveButton: Spot = { x: 900, y: 990 }
+    const cursor = [...stay(aboveButton, 2000, 4000), ...stay(button, 4000, 5000)]
+    expect(autoTrim(track(cursor, 5000), stopClickOn(button)).end).toBe(3984)
+  })
+
+  it('ends at the last content click when the trip follows it without a rest', () => {
+    const onTheWay: Spot = { x: 1000, y: 400 }
+    const cursor = [...stay(content, 2000, 3000), ...glide(content, onTheWay, 3000), ...glide(onTheWay, button, 3480), ...stay(button, 3960, 5000)]
+    const clickOnTheWay: Click = { t: 3300, x: 925, y: 400, button: 'left', up: 3380 }
+    expect(autoTrim(track(cursor, 5000, [clickOnTheWay]), stopClickOn(button)).end).toBe(3300)
+  })
+})

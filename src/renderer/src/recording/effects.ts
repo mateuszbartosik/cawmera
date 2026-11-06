@@ -1,5 +1,5 @@
 import type { Size } from '../render/geometry'
-import { isInFrame, type Click } from './track'
+import { isShownClick, type Click } from './track'
 
 export type ClickEffect = 'off' | 'ring' | 'ripple'
 export const CLICK_EFFECT_MS = { ring: 450, ripple: 650 }
@@ -19,7 +19,7 @@ export function activeClicks(clicks: Click[], t: number, effect: ClickEffect, fr
   const active: ActiveClick[] = []
   for (const click of clicks) {
     const elapsed = t - click.t
-    if (click.button !== 'left' || elapsed < 0 || elapsed >= duration || !isInFrame(click, frame)) continue
+    if (!isShownClick(click, frame) || elapsed < 0 || elapsed >= duration) continue
     active.push({ x: click.x, y: click.y, progress: elapsed / duration })
   }
   return active
