@@ -18,6 +18,8 @@ win:
   extraResources:
     - from: native/recorder/build/Release/cawmera-recorder.exe
       to: cawmera-recorder.exe
+    - from: THIRD_PARTY_NOTICES.txt
+      to: THIRD_PARTY_NOTICES.txt
   # No code-signing certificate yet. Skips signing only; the icon and version info are still written.
   signExecutable: false
 portable:

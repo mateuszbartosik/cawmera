@@ -155,6 +155,7 @@ export function createTakeLifecycle(host: TakeHost) {
       send('recording:failed', result.error)
       await removeFiles(take)
     } else {
+      take.stopReason ??= 'target-gone'
       // Still current while its track is read, so a close in that moment is held instead of losing the take.
       await deliver(take)
       release(take)

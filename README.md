@@ -24,11 +24,11 @@ Every image gets the same background and shows the UI at the same scale, at 1600
 - **One scale for the UI.** Cawmera never shrinks a screenshot to fit. Its scale comes from how it was captured, so text reads the same in every image.
 - **One look for a product.** Background, light, frame and shadow come from a house style that a team shares as a single file.
 - **Any size.** 1600 × 1000 by default, Article (OG) for link previews, presets for slides and social posts, or your own width and height.
-- **Private.** Screenshots stay on your computer: Cawmera never stores them and makes no network requests.
+- **Private.** Screenshots and recordings stay on your computer: Cawmera never stores them and makes no network requests.
 
 ## Download
 
-Get the Windows zip from the [latest release](https://github.com/mateuszbartosik/cawmera/releases/latest), unzip it and run `Cawmera.exe`. The app isn't code-signed, so Windows may warn the first time you open it. For macOS or Linux, [build it from source](#develop).
+Get the Windows zip from the [latest release](https://github.com/mateuszbartosik/cawmera/releases/latest), unzip it and run `Cawmera.exe`. The app isn't code-signed, so Windows may warn the first time you open it. Recording needs Windows 10 version 2004 or newer. For macOS or Linux, [build it from source](#develop).
 
 ## Use
 
@@ -43,6 +43,14 @@ Get the Windows zip from the [latest release](https://github.com/mateuszbartosik
 
 Shots sit side by side on the canvas. `Shift`- or `Ctrl`-click them, or drag a box on empty canvas, to select several; `Delete` removes them and Undo brings them back.
 
+## Record
+
+**Record** a window or screen and Cawmera turns it into an MP4 with the same framing as a screenshot. It zooms in on your clicks, redraws the cursor smoothly, adds click effects and motion blur, and trims the quiet ends. Check the result in the preview, adjust the trim on its timeline, then export.
+
+Press `Ctrl+Shift+2` to stop, or click Cawmera on the taskbar. Clicking it during the countdown cancels the recording. If you close Cawmera while recording, it stops and keeps the take. Recordings are deleted when Cawmera closes, so export what you want to keep. Export is MP4 without sound.
+
+Recording limits: monitors wider than 4096 px may fail to record, because of H.264 encoder limits. Windows N editions need the Media Feature Pack.
+
 ## House styles
 
 The background, light, frame and scale come from a house style, and so does the background image that **Fill: Image** uses. Open it with `Ctrl+Alt+H`, adjust it, give it a name and **Export style**. Others load the `.json` with **Import style**, or by dropping it onto Cawmera.
@@ -56,6 +64,7 @@ The background, light, frame and scale come from a house style, and so does the 
 | --- | --- |
 | Open images | `Ctrl+O` |
 | Capture | `Ctrl+Shift+2` |
+| Stop recording | `Ctrl+Shift+2` or click Cawmera on the taskbar |
 | New shot / next / previous | `Ctrl+N` / `Ctrl+PageDown` / `Ctrl+PageUp` |
 | Crop on / off | `C` or double-click the shot (`Enter` or `Esc` to finish) |
 | Shuffle the edge and light | `R` |
@@ -78,9 +87,12 @@ The background, light, frame and scale come from a house style, and so does the 
 npm install
 npm run dev          # run with hot reload
 npm test             # unit tests
+npm run build:recorder  # the recording helper, Windows only
 npm run dist:win     # Windows .exe and zip in release/
 npm run build:web    # the same UI as a single HTML file
 ```
+
+`npm run build:recorder` needs Visual Studio Build Tools with the C++ workload and Windows SDK 10.0.19041 or newer. `npm run dist:win` runs it first.
 
 ## License
 

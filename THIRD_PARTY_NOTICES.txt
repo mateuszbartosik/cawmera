@@ -1,0 +1,9 @@
+Third-party notices
+
+Cawmera is MIT licensed (see LICENSE).
+
+mediabunny 1.62.1
+  Licence: Mozilla Public License 2.0 (MPL-2.0)
+  Source:  https://github.com/Vanilagy/mediabunny
+  Use:     MP4 muxing for recordings.
+  It is bundled unmodified. The licence text is at https://www.mozilla.org/MPL/2.0/

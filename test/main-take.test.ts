@@ -331,6 +331,25 @@ describe('take lifecycle', () => {
       expect(t.takes.stopLiveTake()).toBe(false)
     })
 
+    it('keeps target-gone when a close arrives while the track of that take is read', async () => {
+      const t = await setup()
+      const session = await warmUp(t)
+      t.takes.begin()
+      await session.writeTrack()
+      let finishReading = () => {}
+      const reading = new Promise<void>((resolve) => (finishReading = resolve))
+      vi.mocked(readFile).mockClear()
+      vi.mocked(readFile).mockImplementationOnce(async () => {
+        await reading
+        return TRACK
+      })
+      session.end(DONE)
+      await vi.waitFor(() => expect(readFile).toHaveBeenCalled())
+      expect(t.takes.stopLiveTake()).toBe(true)
+      finishReading()
+      await vi.waitFor(() => expect(sentOn(t, 'recording:finished')).toEqual([expect.objectContaining({ stoppedBy: 'target-gone' })]))
+    })
+
     it('holds a close while the finished take’s track is still being read', async () => {
       const t = await setup()
       await warmUp(t)
