@@ -11,13 +11,25 @@ add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_library(recorder_core STATIC
     src/args.cpp
+    src/failure.cpp
     src/geometry.cpp
     src/json.cpp
     src/track.cpp)
 target_include_directories(recorder_core PUBLIC src)
 
-add_executable(cawmera-recorder src/main.cpp app.manifest)
-target_link_libraries(cawmera-recorder PRIVATE recorder_core)
+add_executable(cawmera-recorder
+    src/capture.cpp
+    src/clock.cpp
+    src/compositor.cpp
+    src/encoder.cpp
+    src/input.cpp
+    src/main.cpp
+    src/target.cpp
+    app.manifest)
+# kernel32 and user32 come before windowsapp, which would otherwise import their functions through API-set DLLs and
+# hide them in the import table that build-recorder.mjs and reviewers check.
+target_link_libraries(cawmera-recorder PRIVATE
+    recorder_core kernel32 user32 d3d11 dxgi mfplat mfreadwrite mfuuid dwmapi shcore windowsapp)
 
 add_executable(recorder-tests tests/recorder_tests.cpp)
 target_link_libraries(recorder-tests PRIVATE recorder_core)

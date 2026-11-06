@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "args.h"
+#include "failure.h"
 #include "geometry.h"
 #include "json.h"
 #include "shapes.h"
@@ -120,6 +121,27 @@ void roundsSizesUpToEven() {
     CHECK(evenUp(1080) == 1080);
 }
 
+void measuresHowFarAWindowOverhangsItsMonitor() {
+    const RECT monitor{0, 0, 1920, 1080};
+    CHECK(sameRect(overhang({-10, 20, 500, 1200}, monitor), {10, 0, 0, 120}));
+    CHECK(sameRect(overhang({100, 100, 500, 400}, monitor), {0, 0, 0, 0}));
+}
+
+void insetsWithoutInverting() {
+    CHECK(sameRect(insetBy({100, 100, 500, 400}, {10, 0, 0, 120}), {110, 100, 500, 280}));
+    CHECK(sameRect(insetBy({0, 0, 50, 50}, {0, 0, 0, 80}), {0, 0, 50, 0}));
+}
+
+void placesPartsOfTheCropInTheVideo() {
+    const RECT oddWidth{0, 0, 1279, 720};
+    CHECK(sameRect(placeInVideo(oddWidth, oddWidth, fitInside(1279, 720, 1280, 720)), {1, 0, 1280, 720}));
+
+    const RECT window{100, 50, 1380, 770};
+    const Fit scaledUp = fitInside(1280, 720, 1920, 1080);
+    CHECK(sameRect(placeInVideo({100, 50, 740, 410}, window, scaledUp), {0, 0, 960, 540}));
+    CHECK(sameRect(placeInVideo({740, 50, 1380, 770}, window, scaledUp), {960, 0, 1920, 1080}));
+}
+
 void acceptsAWindowTarget() {
     const auto args = parsed({L"--window", L"1234", L"--fps", L"60", L"--out", L"C:\\t"});
     CHECK(args.has_value());
@@ -157,6 +179,36 @@ void buildsProtocolLines() {
 
 void escapesJsonStrings() {
     CHECK(jsonEscape("C:\\t\r\n\t\x01 ok") == R"(C:\\t\r\n\t\u0001 ok)");
+}
+
+void recognizesTheStopLine() {
+    CHECK(isStopLine(R"({"type":"stop"})"));
+    CHECK(isStopLine("{ \"type\": \"stop\" }\r"));
+    CHECK(!isStopLine(R"({"type":"start"})"));
+    CHECK(!isStopLine(""));
+}
+
+void namesFailureCodesLikeTheProtocol() {
+    CHECK(codeName(FailureCode::unsupported) == "unsupported");
+    CHECK(codeName(FailureCode::accessDenied) == "access-denied");
+    CHECK(codeName(FailureCode::targetGone) == "target-gone");
+    CHECK(codeName(FailureCode::encoder) == "encoder");
+    CHECK(codeName(FailureCode::internal) == "internal");
+}
+
+void describesFailuresInUtf8() {
+    CHECK(utf8FromWide(L"Zażółć gęślą") == "Zażółć gęślą");
+    CHECK(utf8FromAnsi("plain text") == "plain text");
+    CHECK(hresultText(E_ACCESSDENIED).ends_with("(0x80070005)"));
+
+    throwIfFailed(S_OK, FailureCode::internal, "Nothing");
+    try {
+        throwIfFailed(E_ACCESSDENIED, FailureCode::accessDenied, "Capturing");
+        CHECK(false);
+    } catch (const Failure& failure) {
+        CHECK(failure.code() == FailureCode::accessDenied);
+        CHECK(std::string_view(failure.what()).starts_with("Capturing failed: "));
+    }
 }
 
 void writesTheTrackWithAReleasedClick() {
@@ -211,11 +263,17 @@ int main() {
     mapsScreenPointsIntoTheVideo();
     clampsRectsToBounds();
     roundsSizesUpToEven();
+    measuresHowFarAWindowOverhangsItsMonitor();
+    insetsWithoutInverting();
+    placesPartsOfTheCropInTheVideo();
     acceptsAWindowTarget();
     acceptsAMonitorPoint();
     rejectsBadCommandLines();
     buildsProtocolLines();
     escapesJsonStrings();
+    recognizesTheStopLine();
+    namesFailureCodesLikeTheProtocol();
+    describesFailuresInUtf8();
     writesTheTrackWithAReleasedClick();
     writesTheHeaderHiddenCursorAndHeldButton();
     writesNullForNumbersThatAreNotFinite();

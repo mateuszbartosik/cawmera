@@ -1,6 +1,7 @@
 #include "geometry.h"
 
 #include <algorithm>
+#include <cmath>
 
 Fit fitInside(int srcW, int srcH, int dstW, int dstH) {
     if (srcW <= 0 || srcH <= 0) return {0, dstW / 2.0, dstH / 2.0};
@@ -20,4 +21,22 @@ RECT clampTo(RECT r, RECT bounds) {
 
 int evenUp(int v) {
     return v + (v & 1);
+}
+
+RECT overhang(RECT r, RECT bounds) {
+    return {std::max(0L, bounds.left - r.left), std::max(0L, bounds.top - r.top), std::max(0L, r.right - bounds.right),
+            std::max(0L, r.bottom - bounds.bottom)};
+}
+
+RECT insetBy(RECT r, RECT amounts) {
+    const LONG left = r.left + amounts.left;
+    const LONG top = r.top + amounts.top;
+    return {left, top, std::max(left, r.right - amounts.right), std::max(top, r.bottom - amounts.bottom)};
+}
+
+RECT placeInVideo(RECT part, RECT crop, Fit fit) {
+    const LONG left = std::lround(fit.x + (part.left - crop.left) * fit.scale);
+    const LONG top = std::lround(fit.y + (part.top - crop.top) * fit.scale);
+    return {left, top, left + std::lround((part.right - part.left) * fit.scale),
+            top + std::lround((part.bottom - part.top) * fit.scale)};
 }
