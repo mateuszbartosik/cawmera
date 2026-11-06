@@ -9,9 +9,15 @@ export function useRecordingSupport(): RecordingSupport | null {
   const [support, setSupport] = useState<RecordingSupport | null>(null)
   useEffect(() => {
     if (!bridge) return
-    known ??= bridge.recordingSupport()
+    known ??= bridge.recordingSupport().catch((error: unknown) => {
+      known = null
+      throw error
+    })
     let alive = true
-    void known.then((result) => alive && setSupport(result))
+    known.then(
+      (result) => alive && setSupport(result),
+      () => alive && setSupport({ ok: false, reason: 'helper-missing' })
+    )
     return () => {
       alive = false
     }

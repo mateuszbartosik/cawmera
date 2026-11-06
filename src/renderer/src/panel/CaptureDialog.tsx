@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { AppWindow, Camera, Monitor, Record, X } from '@phosphor-icons/react'
 import type { CaptureSource } from '@shared/types'
 import { cancelCapture, captureSource } from '../app/actions'
-import { recordSource } from '../recording/actions'
-import { useRecordingSupport } from '../recording/support'
 import { store, useApp } from '../app/store'
 import { bridge } from '../platform/bridge'
+import { recordSource } from '../recording/actions'
+import { useRecordingSupport } from '../recording/support'
 import { cn } from '../ui/controls'
 
 type Kind = CaptureSource['kind']

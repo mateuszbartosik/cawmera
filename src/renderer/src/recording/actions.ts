@@ -7,6 +7,7 @@ import { addShot, emptyDoc, liveShots, store, updateDoc } from '../app/store'
 import { revealActive } from '../canvas/view'
 import { bridge } from '../platform/bridge'
 import { registerRecording } from './registry'
+import { runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { parseTrack } from './track'
 import { autoZooms } from './zooms'
@@ -44,65 +45,52 @@ function toastFor(error: RecordingError) {
 }
 
 let recordingName = DEFAULT_RECORDING_NAME
+let recordSourceRunning = false
 
-/**
- * The helper warms up while the countdown runs, so the take starts with the countdown's last
- * second instead of losing its first two.
- */
 export async function recordSource(source: CaptureSource) {
-  if (!bridge) return
+  if (!bridge || recordSourceRunning) return
+  const target = bridge
   const { delay, doc, style } = store.get()
+  recordSourceRunning = true
   resetCancellation()
   recordingName = source.name
-  let countdownShown = false
-  const start: { error: RecordingError | null } = { error: null }
-  let recording = false
+  store.set({ capture: { phase: 'grabbing', remaining: 0 } })
   try {
-    store.set({ capture: { phase: 'grabbing', remaining: 0 } })
-    await bridge.hideWindow()
-    const warmedUp = bridge.startRecording({ sourceId: source.id, displayId: source.displayId }).then((error) => {
-      if (error) {
-        start.error = error
-        interruptCountdown()
-      }
+    const began = await runStartFlow({
+      hideWindow: () => target.hideWindow(),
+      restoreWindow: () => target.restoreWindow(),
+      startRecording: () => target.startRecording({ sourceId: source.id, displayId: source.displayId }),
+      beginRecording: () => target.beginRecording(),
+      stopRecording: () => target.stopRecording(),
+      countdown:
+        delay > 0
+          ? {
+              show: () => target.showCountdown({ displayId: source.displayId, seconds: delay, color: doc.lightColor ?? style.glow }),
+              run: async () => {
+                const finished = await countdown(delay, (remaining) => {
+                  target.tickCountdown(remaining)
+                  target.setProgress((delay - remaining + 1) / (delay + 1))
+                })
+                // Cancel already set the phase to idle; stay busy until the cleanup is done.
+                if (!finished) store.set({ capture: { phase: 'grabbing', remaining: 0 } })
+                return finished
+              },
+              interrupt: interruptCountdown,
+              hide: () => target.hideCountdown()
+            }
+          : null,
+      showError: toastFor
     })
-    let counted = true
-    if (delay > 0) {
-      countdownShown = true
-      await bridge.showCountdown({ displayId: source.displayId, seconds: delay, color: doc.lightColor ?? style.glow })
-      counted = await countdown(delay, (remaining) => {
-        bridge?.tickCountdown(remaining)
-        bridge?.setProgress((delay - remaining + 1) / (delay + 1))
-      })
-    }
-    if (!counted && !start.error) await bridge.stopRecording()
-    await warmedUp
-    if (countdownShown) {
-      // It must be off the screen before the take begins, or it would be in the video.
-      await bridge.hideCountdown()
-      countdownShown = false
-    }
-    if (start.error) return toastFor(start.error)
-    if (!counted) return
-    const beginError = await bridge.beginRecording()
-    if (beginError) return toastFor(beginError)
-    recording = true
-    store.set({ capture: { phase: 'recording', remaining: 0 } })
-  } catch (error) {
-    console.error('Recording failed', error)
-    toast.error('Recording failed', { description: error instanceof Error ? error.message : String(error) })
+    store.set({ capture: { phase: began ? 'recording' : 'idle', remaining: 0 } })
   } finally {
-    if (countdownShown) await bridge.hideCountdown()
-    if (!recording) {
-      idle()
-      await bridge.restoreWindow()
-    }
+    recordSourceRunning = false
   }
 }
 
 /** Reports a take that broke after it began. */
 export async function recordingFailed(error: RecordingError) {
   idle()
+  recordingName = DEFAULT_RECORDING_NAME
   await bridge?.restoreWindow()
   toastFor(error)
 }
@@ -110,20 +98,28 @@ export async function recordingFailed(error: RecordingError) {
 function grabPoster(id: string, atMs: number): Promise<ImageBitmap | null> {
   return new Promise((resolve) => {
     const video = document.createElement('video')
+    let settled = false
     const finish = (poster: ImageBitmap | null) => {
+      if (settled) return poster?.close()
+      settled = true
       clearTimeout(timer)
+      video.onerror = video.onloadeddata = video.onseeked = null
       video.removeAttribute('src')
       video.load()
       resolve(poster)
     }
+    const grab = () => createImageBitmap(video).then(finish, () => finish(null))
     const timer = setTimeout(() => finish(null), POSTER_TIMEOUT_MS)
     video.muted = true
     video.preload = 'auto'
     video.crossOrigin = 'anonymous'
     video.onerror = () => finish(null)
     video.onloadeddata = () => {
-      video.onseeked = () => createImageBitmap(video).then(finish, () => finish(null))
-      video.currentTime = atMs / 1000
+      const at = atMs / 1000
+      // Seeking to the time the video is already at fires no `seeked`.
+      if (video.currentTime === at) return void grab()
+      video.onseeked = () => void grab()
+      video.currentTime = at
     }
     video.src = recordingUrl(id)
   })
