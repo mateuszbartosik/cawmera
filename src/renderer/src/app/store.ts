@@ -12,6 +12,13 @@ export const boxKey = (box: BoxRef) => (box.kind === 'redaction' ? box.id : 'spo
 export const hasBox = (selection: Selection, box: BoxRef) => selection.some((candidate) => boxKey(candidate) === boxKey(box))
 export type Theme = 'dark' | 'light'
 export type CaptureDelay = 0 | 3 | 5 | 10
+export type CaptureMode = 'screenshot' | 'recording'
+
+/** Playback of the active recording shot: the playhead is in source time (ms). */
+export interface Playback {
+  playing: boolean
+  time: number
+}
 
 /** One camera per canvas: the shots canvas and the crop view keep their own. */
 export interface Camera {
@@ -26,7 +33,7 @@ export interface Camera {
 export const FIT_ALL: Camera = { fit: 'all', zoom: 1, cx: 0, cy: 0 }
 
 export interface CaptureState {
-  phase: 'idle' | 'picking' | 'countdown' | 'grabbing'
+  phase: 'idle' | 'picking' | 'countdown' | 'grabbing' | 'recording'
   remaining: number
 }
 
@@ -70,6 +77,10 @@ export interface AppState {
   delay: CaptureDelay
   format: ExportFormat
   capture: CaptureState
+  captureMode: CaptureMode
+  playback: Playback
+  /** Share of the video export done (0..1); null when no export runs. */
+  exportProgress: number | null
   houseStyleOpen: boolean
   style: HouseStyle
   /** The house background image, decoded; null when the style has none, or while it decodes. */
@@ -179,6 +190,9 @@ let state: AppState = {
   delay: prefs.delay,
   format: prefs.format,
   capture: { phase: 'idle', remaining: 0 },
+  captureMode: 'screenshot',
+  playback: { playing: false, time: 0 },
+  exportProgress: null,
   houseStyleOpen: false,
   style: loadStoredStyle(),
   backdrop: null,

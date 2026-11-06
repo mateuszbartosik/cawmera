@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Record, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
 import { EDGE_NAMES, FORMAT_LABEL, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import {
@@ -32,6 +32,8 @@ import {
 } from '../app/actions'
 import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
+import { startRecordingPicker } from '../recording/actions'
+import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
 import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
 import { BackdropField } from './BackdropField'
@@ -113,9 +115,11 @@ function ScreenshotSection() {
   const dragOver = useApp((s) => s.dragOver)
   const source = getSource(doc.sourceId)
   const section = useSection('screenshot')
+  const support = useRecordingSupport()
   const busy = capture.phase !== 'idle'
   const captureLabel =
     capture.phase === 'countdown' ? `In ${capture.remaining}…` : capture.phase === 'grabbing' ? 'Capturing…' : capture.phase === 'picking' ? 'Picking…' : 'Capture'
+  const canRecord = !source && isDesktop
 
   return (
     <Section title="Screenshot" testId="section-screenshot" {...section} onReset={source ? resetScreenshotSection : undefined}>
@@ -126,11 +130,22 @@ function ScreenshotSection() {
           onClick={startCapture}
           disabled={busy}
           data-testid="capture"
-          className={source ? undefined : 'col-span-2'}
+          className={source || canRecord ? undefined : 'col-span-2'}
           hint={isDesktop ? 'Pick a window or a screen (Ctrl+Shift+2)' : 'Pick the tab or window in the browser dialog'}
         >
           {captureLabel}
         </Button>
+        {canRecord && (
+          <Button
+            icon={<Record size={14} />}
+            onClick={startRecordingPicker}
+            disabled={busy || support?.ok !== true}
+            data-testid="record"
+            hint={support && !support.ok ? unavailableReason(support) : 'Record a window or a screen. Stop with Ctrl+Shift+2'}
+          >
+            Record
+          </Button>
+        )}
         {source && (
           <Button
             icon={<Crop size={14} />}
@@ -414,6 +429,7 @@ function ExportSection() {
 
 export function Panel() {
   const hasSource = useApp((s) => s.doc.sourceId !== null)
+  const isRecording = useApp((s) => s.doc.recording !== null)
   const houseStyleOpen = useApp((s) => s.houseStyleOpen)
   const narrow = useApp((s) => isNarrow(s))
   const format = useApp((s) => s.format)
@@ -444,10 +460,10 @@ export function Panel() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-(--tc-divider) [scrollbar-width:thin]">
-        <ScreenshotSection />
+        {!isRecording && <ScreenshotSection />}
         <BackgroundSection />
-        {hasSource && <RedactSection />}
-        {hasSource && <SpotlightSection />}
+        {hasSource && !isRecording && <RedactSection />}
+        {hasSource && !isRecording && <SpotlightSection />}
         {houseStyleOpen && <HouseStyleSection />}
         <ExportSection />
       </div>

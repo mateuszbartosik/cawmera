@@ -209,10 +209,18 @@ export function shotFileName(record: ShotRecord, index: number) {
 /** Set by Cancel (on screen or in the app) while a capture waits. */
 let captureCancelled = false
 
+/** Ends a waiting countdown the way Cancel does, without touching the capture state. */
+export const interruptCountdown = () => {
+  captureCancelled = true
+}
+export const resetCancellation = () => {
+  captureCancelled = false
+}
+
 export function startCapture() {
   if (store.get().capture.phase !== 'idle') return
   if (bridge) {
-    store.set({ capture: { phase: 'picking', remaining: 0 } })
+    store.set({ captureMode: 'screenshot', capture: { phase: 'picking', remaining: 0 } })
     return
   }
   void captureInBrowser()
@@ -227,7 +235,7 @@ export function cancelCapture() {
  * Counts down in whole seconds, by the clock: a late timer never stretches a second. False when the
  * capture was cancelled meanwhile.
  */
-async function countdown(seconds: number, onTick?: (remaining: number) => void): Promise<boolean> {
+export async function countdown(seconds: number, onTick?: (remaining: number) => void): Promise<boolean> {
   const end = performance.now() + seconds * 1000
   let shown = 0
   for (;;) {

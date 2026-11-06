@@ -407,7 +407,7 @@ function registerIpc() {
       defaultId: 1,
       cancelId: 1,
       message: n === 1 ? 'One shot hasn’t been exported.' : `${n} shots haven’t been exported.`,
-      detail: 'Cawmera doesn’t keep screenshots after it closes.'
+      detail: 'Cawmera doesn’t keep screenshots or recordings after it closes.'
     })
     return response === 0
   })

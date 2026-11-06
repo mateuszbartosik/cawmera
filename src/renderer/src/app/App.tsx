@@ -8,6 +8,7 @@ import { isNarrow, PANEL_GAP, shotAt, toWorld, workspaceGeometry, zoomFit, zoomS
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge } from '../platform/bridge'
+import { finishRecording, recordingFailed } from '../recording/actions'
 import { Toolbar } from '../toolbar/Toolbar'
 import {
   cancelCapture,
@@ -211,6 +212,8 @@ export function App() {
     window.addEventListener('beforeunload', onBeforeUnload)
     const offMenu = bridge?.onMenuCommand(runCommand)
     const offCancel = bridge?.onCaptureCancel(cancelCapture)
+    const offFinished = bridge?.onRecordingFinished((result) => void finishRecording(result))
+    const offFailed = bridge?.onRecordingFailed((error) => void recordingFailed(error))
     // Desktop: closing with shots that were never exported asks first.
     const offClose = bridge?.onCloseRequest(async () => {
       const count = unsavedCount()
@@ -227,6 +230,8 @@ export function App() {
       window.removeEventListener('beforeunload', onBeforeUnload)
       offMenu?.()
       offCancel?.()
+      offFinished?.()
+      offFailed?.()
       offClose?.()
     }
   }, [])

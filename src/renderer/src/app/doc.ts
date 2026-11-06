@@ -1,4 +1,5 @@
 import type { Rect, Size } from '../render/geometry'
+import type { RecordingDoc } from '../recording/settings'
 import { DEFAULT_SIZE } from './size'
 
 /** Pixel density a screenshot was taken at (OS display scaling). */
@@ -85,6 +86,8 @@ export interface Doc {
   lightIntensity: number
   fill: Fill
   fileName: string
+  /** Set for a recording shot (its `sourceId` is the recording id); screenshots have none. */
+  recording: RecordingDoc | null
 }
 
 export const DEFAULT_SPOTLIGHT: Spotlight = { on: false, rect: null, dim: 0.55, outline: true }
@@ -103,7 +106,8 @@ export const DEFAULT_DOC: Doc = {
   lightColor: null,
   lightIntensity: 1,
   fill: 'gradient',
-  fileName: ''
+  fileName: '',
+  recording: null
 }
 
 export function snapDensity(value: number): Density {

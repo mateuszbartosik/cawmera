@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { AppWindow, Monitor, X } from '@phosphor-icons/react'
+import { AppWindow, Camera, Monitor, Record, X } from '@phosphor-icons/react'
 import type { CaptureSource } from '@shared/types'
 import { cancelCapture, captureSource } from '../app/actions'
-import { useApp } from '../app/store'
+import { recordSource } from '../recording/actions'
+import { useRecordingSupport } from '../recording/support'
+import { store, useApp } from '../app/store'
 import { bridge } from '../platform/bridge'
 import { cn } from '../ui/controls'
 
@@ -12,6 +14,9 @@ type Kind = CaptureSource['kind']
 export function CaptureDialog() {
   const open = useApp((s) => s.capture.phase === 'picking') && bridge !== null
   const delay = useApp((s) => s.delay)
+  const mode = useApp((s) => s.captureMode)
+  const recording = mode === 'recording'
+  const recordingAvailable = useRecordingSupport()?.ok === true
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [sources, setSources] = useState<CaptureSource[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,8 +63,28 @@ export function CaptureDialog() {
         <div className="flex max-h-[min(640px,calc(100vh-80px))] flex-col">
           <header className="flex h-12 shrink-0 items-center gap-3 border-b border-(--tc-divider) pr-2 pl-4">
             <h2 id="capture-title" className="text-[13px] font-medium">
-              Capture
+              {recording ? 'Record' : 'Capture'}
             </h2>
+            {recordingAvailable && (
+              <div role="tablist" aria-label="What to capture" className="flex h-7 gap-0.5 rounded-lg bg-(--tc-control) p-0.5">
+                {(['screenshot', 'recording'] as const).map((value) => (
+                  <button
+                    key={value}
+                    role="tab"
+                    type="button"
+                    aria-selected={mode === value}
+                    onClick={() => store.set({ captureMode: value })}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-md px-2.5 text-xs font-medium',
+                      mode === value ? 'bg-(--tc-chip) text-(--tc-fg)' : 'text-(--tc-label) hover:text-(--tc-fg)'
+                    )}
+                  >
+                    {value === 'screenshot' ? <Camera size={13} /> : <Record size={13} />}
+                    {value === 'screenshot' ? 'Screenshot' : 'Recording'}
+                  </button>
+                ))}
+              </div>
+            )}
             <div role="tablist" aria-label="Source type" className="flex h-7 gap-0.5 rounded-lg bg-(--tc-control) p-0.5">
               {(['window', 'screen'] as const).map((value) => (
                 <button
@@ -78,7 +103,7 @@ export function CaptureDialog() {
                 </button>
               ))}
             </div>
-            <span className="ml-auto text-xs text-(--tc-value)">{delay ? `Captures ${delay} s after you pick` : 'Captures right away'}</span>
+            <span className="ml-auto text-xs text-(--tc-value)">{delay ? `${recording ? 'Starts' : 'Captures'} ${delay} s after you pick` : recording ? 'Starts right away' : 'Captures right away'}</span>
             <button
               type="button"
               aria-label="Close"
@@ -100,7 +125,7 @@ export function CaptureDialog() {
                 <li key={source.id}>
                   <button
                     type="button"
-                    onClick={() => void captureSource(source)}
+                    onClick={() => void (recording ? recordSource(source) : captureSource(source))}
                     className="group flex w-full flex-col gap-2 rounded-lg p-1.5 text-left outline-none hover:bg-(--tc-control) focus-visible:ring-2 focus-visible:ring-(--tc-accent)"
                   >
                     <span className="grid aspect-[16/10] w-full place-items-center overflow-hidden rounded-md bg-black/40 ring-1 ring-(--tc-line) group-hover:ring-(--tc-accent)">
