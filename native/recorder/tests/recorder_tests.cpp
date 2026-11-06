@@ -218,11 +218,15 @@ void escapesJsonStrings() {
     CHECK(jsonEscape("C:\\t\r\n\t\x01 ok") == R"(C:\\t\r\n\t\u0001 ok)");
 }
 
-void recognizesTheStopLine() {
-    CHECK(isStopLine(R"({"type":"stop"})"));
-    CHECK(isStopLine("{ \"type\": \"stop\" }\r"));
-    CHECK(!isStopLine(R"({"type":"start"})"));
-    CHECK(!isStopLine(""));
+void readsCommandLines() {
+    CHECK(parseCommand(R"({"type":"start"})") == Command::start);
+    CHECK(parseCommand("{ \"type\" : \"start\" }\r") == Command::start);
+    CHECK(parseCommand("\t{\"type\":\"start\"}  ") == Command::start);
+    CHECK(parseCommand(R"({"type":"stop"})") == Command::stop);
+    CHECK(parseCommand("{ \"type\": \"stop\" }\r") == Command::stop);
+    CHECK(parseCommand(R"({"type":"pause"})") == Command::none);
+    CHECK(parseCommand(R"({"type":"starts"})") == Command::none);
+    CHECK(parseCommand("") == Command::none);
 }
 
 void namesFailureCodesLikeTheProtocol() {
@@ -312,7 +316,7 @@ int main() {
     rejectsBadCommandLines();
     buildsProtocolLines();
     escapesJsonStrings();
-    recognizesTheStopLine();
+    readsCommandLines();
     namesFailureCodesLikeTheProtocol();
     describesFailuresInUtf8();
     writesTheTrackWithAReleasedClick();

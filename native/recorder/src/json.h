@@ -16,4 +16,5 @@ std::string readyLine(int width, int height);
 std::string doneLine(double durationMs, int64_t frames);
 std::string errorLine(std::string_view code, std::string_view message);
 
-bool isStopLine(std::string_view line);
+enum class Command { none, start, stop };
+Command parseCommand(std::string_view line);

@@ -55,9 +55,11 @@ std::string errorLine(std::string_view code, std::string_view message) {
     return std::format(R"({{"type":"error","code":"{}","message":"{}"}})", jsonEscape(code), jsonEscape(message));
 }
 
-bool isStopLine(std::string_view line) {
+Command parseCommand(std::string_view line) {
     std::string compact;
     for (const char c : line)
         if (c != ' ' && c != '\t' && c != '\r' && c != '\n') compact += c;
-    return compact == R"({"type":"stop"})";
+    if (compact == R"({"type":"start"})") return Command::start;
+    if (compact == R"({"type":"stop"})") return Command::stop;
+    return Command::none;
 }

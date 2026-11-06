@@ -13,7 +13,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <utility>
 
 winrt::com_ptr<ID3D11Device> createDeviceFor(HMONITOR monitor);
 
@@ -47,10 +46,10 @@ public:
     explicit LatestFrame(ID3D11Device* device);
 
     HANDLE arrived() const { return arrived_.get(); }
-    void store(ID3D11Texture2D* frame, int64_t qpcTime);
+    void store(ID3D11Texture2D* frame);
     void fail(std::exception_ptr failure);
     void rethrowFailure();
-    std::pair<winrt::com_ptr<ID3D11Texture2D>, int64_t> newest();
+    winrt::com_ptr<ID3D11Texture2D> newest();
 
 private:
     winrt::handle arrived_;
@@ -58,6 +57,5 @@ private:
     winrt::com_ptr<ID3D11DeviceContext> context_;
     std::mutex mutex_;
     winrt::com_ptr<ID3D11Texture2D> image_;
-    int64_t capturedAt_ = 0;
     std::exception_ptr failure_;
 };

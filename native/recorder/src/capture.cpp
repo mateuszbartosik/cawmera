@@ -194,13 +194,12 @@ LatestFrame::LatestFrame(ID3D11Device* device) : arrived_(CreateEventW(nullptr, 
     device->GetImmediateContext(context_.put());
 }
 
-void LatestFrame::store(ID3D11Texture2D* frame, int64_t qpcTime) {
+void LatestFrame::store(ID3D11Texture2D* frame) {
     D3D11_TEXTURE2D_DESC desc;
     frame->GetDesc(&desc);
     std::scoped_lock lock(mutex_);
     if (!image_ || !sameSize(image_.get(), desc)) image_ = textureLike(device_.get(), desc);
     context_->CopyResource(image_.get(), frame);
-    capturedAt_ = qpcTime;
     SetEvent(arrived_.get());
 }
 
@@ -214,7 +213,7 @@ void LatestFrame::rethrowFailure() {
     if (failure_) std::rethrow_exception(failure_);
 }
 
-std::pair<winrt::com_ptr<ID3D11Texture2D>, int64_t> LatestFrame::newest() {
+winrt::com_ptr<ID3D11Texture2D> LatestFrame::newest() {
     std::scoped_lock lock(mutex_);
-    return {image_, capturedAt_};
+    return image_;
 }
