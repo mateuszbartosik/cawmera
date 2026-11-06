@@ -1,8 +1,11 @@
+import { CLICK_EFFECT_MS } from './effects'
 import { isInFrame, type Click, type CursorSample, type RecordingTrack } from './track'
 
 export interface Trim { start: number; end: number }
 
-export const TRIM_RULES = { restMs: 300, shortcutTailMs: 200, stillPx: 2, minLengthMs: 500, stopHoverPx: 48 }
+export const TRIM_RULES = { restMs: 300, shortcutTailMs: 200, stillPx: 2, minLengthMs: 500, stopWaitPx: 200 }
+
+const LONGEST_CLICK_EFFECT_MS = Math.max(...Object.values(CLICK_EFFECT_MS))
 
 interface Rest { start: number; end: number; lastsToEnd: boolean }
 
@@ -20,21 +23,22 @@ function lastRest(cursor: CursorSample[], endMs: number): Rest | null {
   return last
 }
 
-function tripToTaskbarStart(track: RecordingTrack, stopClick: Click): number {
-  const nearPx = TRIM_RULES.stopHoverPx * track.scale
+function endBeforeTaskbarStop(track: RecordingTrack, stopClick: Click): number {
+  const nearPx = TRIM_RULES.stopWaitPx * track.scale
   const isNearStopClick = (sample: CursorSample) => Math.hypot(sample.x - stopClick.x, sample.y - stopClick.y) <= nearPx
-  let hoverStart = track.cursor.length
-  while (hoverStart > 0 && isNearStopClick(track.cursor[hoverStart - 1])) hoverStart--
-  const arrivedMs = hoverStart < track.cursor.length ? Math.min(track.cursor[hoverStart].t, stopClick.t) : stopClick.t
-  const beforeArrival = track.cursor.filter((sample) => sample.t < arrivedMs)
-  const rest = lastRest(beforeArrival, beforeArrival.at(-1)?.t ?? 0)
-  const lastClick = track.clicks.filter((click) => click.t < arrivedMs && isInFrame(click, track)).at(-1)
-  if (!rest && !lastClick) return arrivedMs
-  return Math.max(rest?.end ?? 0, lastClick?.t ?? 0)
+  let waitStart = track.cursor.length
+  while (waitStart > 0 && isNearStopClick(track.cursor[waitStart - 1])) waitStart--
+  const waitStartMs = waitStart < track.cursor.length ? Math.min(track.cursor[waitStart].t, stopClick.t) : stopClick.t
+  const beforeWait = track.cursor.filter((sample) => sample.t < waitStartMs)
+  const rest = lastRest(beforeWait, beforeWait.at(-1)?.t ?? 0)
+  const lastClick = track.clicks.filter((click) => click.t < waitStartMs && isInFrame(click, track)).at(-1)
+  if (!rest && !lastClick) return waitStartMs
+  const lastClickLanded = lastClick ? Math.min(lastClick.t + LONGEST_CLICK_EFFECT_MS, waitStartMs) : 0
+  return Math.max(rest?.end ?? 0, lastClickLanded)
 }
 
 export function autoTrim(track: RecordingTrack, stopClick: Click | null = null): Trim {
-  if (stopClick) return clampTrim({ start: 0, end: tripToTaskbarStart(track, stopClick) }, track.durationMs)
+  if (stopClick) return clampTrim({ start: 0, end: endBeforeTaskbarStop(track, stopClick) }, track.durationMs)
   const rest = lastRest(track.cursor, track.durationMs)
   let end = track.durationMs
   if (rest?.lastsToEnd) end = track.durationMs - TRIM_RULES.shortcutTailMs

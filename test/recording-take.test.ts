@@ -17,6 +17,7 @@ const search: Spot = { x: 480, y: 300 }
 const filter: Spot = { x: 520, y: 320 }
 const next: Spot = { x: 1000, y: 700 }
 const taskbarButton: Spot = { x: 900, y: 1060 }
+const thumbnail: Spot = { x: 900, y: 910 }
 
 function glide(from: Spot, to: Spot, startMs: number, endMs: number): CursorSample[] {
   const samples: CursorSample[] = []
@@ -68,6 +69,21 @@ const takes = {
       9700
     )
   },
+  'a taskbar stop on the button’s thumbnail': {
+    stoppedBy: 'window' as const,
+    raw: track(
+      [
+        ...work,
+        ...rest(next, lookAtResult.startMs, lookAtResult.endMs),
+        ...glide(next, taskbarButton, lookAtResult.endMs, 8900),
+        ...rest(taskbarButton, 8900, 9500),
+        ...glide(taskbarButton, thumbnail, 9500, 9650),
+        ...rest(thumbnail, 9650, 9850)
+      ],
+      [...workClicks, { t: 9650, ...thumbnail, button: 'left', up: null }],
+      9850
+    )
+  },
   'a shortcut stop': {
     stoppedBy: 'shortcut' as const,
     raw: track([...work, ...rest(next, lookAtResult.startMs, 8600)], workClicks, 8600)
@@ -83,8 +99,8 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
     expect(trim).toEqual({ start: 0, end: lookAtResult.endMs })
   })
 
-  it('shows no click on the taskbar', () => {
-    const atTaskbar = (spot: Spot) => spot.y > 1000
+  it('shows no click on the taskbar or its thumbnail', () => {
+    const atTaskbar = (spot: Spot) => spot.y >= thumbnail.y
     expect(clean.clicks.some(atTaskbar)).toBe(false)
     for (const t of exportedFrames) expect(activeClicks(clean.clicks, t, 'ring', frame).some(atTaskbar)).toBe(false)
   })

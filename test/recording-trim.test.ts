@@ -45,12 +45,13 @@ describe('auto trim of a take stopped from the taskbar', () => {
   interface Spot { x: number; y: number }
   const content: Spot = { x: 800, y: 400 }
   const button: Spot = { x: 900, y: 1060 }
+  const thumbnail: Spot = { x: 900, y: 910 }
   const stay = (at: Spot, from: number, to: number) => still(from, to).map((sample) => ({ ...sample, ...at }))
-  const glide = (from: Spot, to: Spot, startMs: number): CursorSample[] =>
-    Array.from({ length: 30 }, (_, i) => ({
+  const glide = (from: Spot, to: Spot, startMs: number, count = 30): CursorSample[] =>
+    Array.from({ length: count }, (_, i) => ({
       t: startMs + i * 16,
-      x: from.x + ((to.x - from.x) * i) / 30,
-      y: from.y + ((to.y - from.y) * i) / 30,
+      x: from.x + ((to.x - from.x) * i) / count,
+      y: from.y + ((to.y - from.y) * i) / count,
       shape: 'arrow' as const
     }))
   const stopClickOn = (at: Spot): Click => ({ t: 4900, ...at, button: 'left', up: null })
@@ -66,16 +67,42 @@ describe('auto trim of a take stopped from the taskbar', () => {
     expect(autoTrim(track(cursor, 5000), stopClickOn(belowFrame)).end).toBe(4000)
   })
 
-  it('ends where the cursor left its last rest, even when that rest was just above the button', () => {
-    const aboveButton: Spot = { x: 900, y: 990 }
-    const cursor = [...stay(aboveButton, 2000, 4000), ...stay(button, 4000, 5000)]
+  it('cuts a wait on the button that ends with a click on its thumbnail', () => {
+    const cursor = [
+      ...stay(content, 2000, 4000),
+      ...glide(content, button, 4000),
+      ...stay(button, 4480, 4800),
+      ...glide(button, thumbnail, 4800, 5),
+      ...stay(thumbnail, 4880, 5000)
+    ]
+    expect(autoTrim(track(cursor, 5000), stopClickOn(thumbnail)).end).toBe(4000)
+  })
+
+  it('ends where the cursor left its last rest, even when that rest was just outside the wait', () => {
+    const outsideWait: Spot = { x: 900, y: 840 }
+    const cursor = [...stay(outsideWait, 2000, 4000), ...stay(button, 4000, 5000)]
     expect(autoTrim(track(cursor, 5000), stopClickOn(button)).end).toBe(3984)
   })
 
-  it('ends at the last content click when the trip follows it without a rest', () => {
-    const onTheWay: Spot = { x: 1000, y: 400 }
-    const cursor = [...stay(content, 2000, 3000), ...glide(content, onTheWay, 3000), ...glide(onTheWay, button, 3480), ...stay(button, 3960, 5000)]
-    const clickOnTheWay: Click = { t: 3300, x: 925, y: 400, button: 'left', up: 3380 }
-    expect(autoTrim(track(cursor, 5000, [clickOnTheWay]), stopClickOn(button)).end).toBe(3300)
+  describe('when the trip starts right after a content click', () => {
+    const clicked: Spot = { x: 900, y: 300 }
+    const outsideWait: Spot = { x: 900, y: 840 }
+    const click: Click = { t: 2480, ...clicked, button: 'left', up: 2560 }
+
+    it('lets the click land, ending 650 ms after it', () => {
+      const cursor = [...glide({ x: 700, y: 300 }, clicked, 2000), ...glide(clicked, outsideWait, 2480, 60), ...stay(button, 3440, 5000)]
+      expect(autoTrim(track(cursor, 5000, [click]), stopClickOn(button)).end).toBe(2480 + 650)
+    })
+
+    it('ends where the wait starts if that comes sooner', () => {
+      const cursor = [...glide({ x: 700, y: 300 }, clicked, 2000), ...glide(clicked, outsideWait, 2480, 20), ...stay(button, 2800, 5000)]
+      expect(autoTrim(track(cursor, 5000, [click]), stopClickOn(button)).end).toBe(2800)
+    })
+
+    it('lets the click land even when a short rest ended just after it', () => {
+      const restingClick: Click = { ...click, t: 2500 }
+      const cursor = [...stay(clicked, 2000, 2600), ...glide(clicked, outsideWait, 2600, 60), ...stay(button, 3560, 5000)]
+      expect(autoTrim(track(cursor, 5000, [restingClick]), stopClickOn(button)).end).toBe(2500 + 650)
+    })
   })
 })
