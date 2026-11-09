@@ -4,9 +4,12 @@ import * as effects from '../src/renderer/src/recording/effects'
 import { recordingLayout } from '../src/renderer/src/recording/layout'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
-import { buildCursorPath } from '../src/renderer/src/recording/cursor'
-import { drawRecordingFrame, shutterTimes, viewMatrix } from '../src/renderer/src/recording/frame'
-import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
+import { drawRecordingFrame, shutterTimes, viewMatrix, type RecordingScene } from '../src/renderer/src/recording/frame'
+import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
+import { takeViewFor } from '../src/renderer/src/recording/take-view'
+import { wholeTake } from '../src/renderer/src/recording/timemap'
+import type { RecordingTrack } from '../src/renderer/src/recording/track'
+import type { Rect } from '../src/renderer/src/render/geometry'
 import { fakeContext } from './fake-canvas'
 
 vi.mock('../src/renderer/src/recording/cursor-art', async (importOriginal) => {
@@ -53,15 +56,16 @@ describe('shutterTimes', () => {
 describe('drawRecordingFrame', () => {
   const video = { tag: 'video' } as unknown as CanvasImageSource
   const still = Array.from({ length: 400 }, (_, i) => ({ t: i * 16, x: 1280, y: 720, shape: 'arrow' as const }))
-  const track = { kind: 'window' as const, width: 2560, height: 1440, fps: 60, durationMs: 6400, scale: 1, cursor: still, clicks: [] }
-  const scene = {
+  const track: RecordingTrack = { kind: 'window', width: 2560, height: 1440, fps: 60, durationMs: 6400, scale: 1, cursor: still, clicks: [] }
+  const settings: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 }, pieces: wholeTake(6400) }
+  const viewOf = (take: RecordingTrack, crop: Rect | null = null) =>
+    takeViewFor({ id: 'frame', name: 'Recording', poster: null, track: take }, settings, crop)
+  const scene: RecordingScene = {
     video,
     videoSize: { width: 2560, height: 1440 },
-    track,
-    zooms: [{ start: 3000, end: 5000, depth: 2, focus: { x: 1280, y: 720 } }],
-    path: buildCursorPath(track, 0),
+    view: { ...viewOf(track), zooms: [{ start: 3000, end: 5000, depth: 2, focus: { x: 1280, y: 720 } }] },
     doc: { ...DEFAULT_DOC, size: output },
-    settings: { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 } },
+    settings,
     style: DEFAULT_HOUSE_STYLE,
     backdrop: null
   }
@@ -113,10 +117,23 @@ describe('drawRecordingFrame', () => {
     expect(baseFills[0]).toBeLessThan(fake.calls.indexOf('createLinearGradient'))
   })
 
+  it('draws the cropped part of the video into the frame', () => {
+    const cropped = { ...scene, view: viewOf(track, { x: 640, y: 360, w: 1280, h: 720 }), settings: { ...settings, motionBlur: 0 } }
+    const { content } = recordingLayout(cropped.view.frame, output, DEFAULT_HOUSE_STYLE)
+    const fake = fakeContext()
+    const videoDraws: unknown[][] = []
+    const recordVideoDraws = (...args: unknown[]) => {
+      if (args[0] === video) videoDraws.push(args.slice(1))
+    }
+    const ctx = new Proxy(fake.ctx, { get: (target, name) => (name === 'drawImage' ? recordVideoDraws : Reflect.get(target, name)) })
+    drawRecordingFrame(ctx, cropped, 1000, 'export')
+    expect(videoDraws).toEqual([[640, 360, 1280, 720, content.x, content.y, content.w, content.h]])
+  })
+
   it('draws the click effect and the cursor where they happened, in composition px', () => {
     const click = { t: 1000, x: 640, y: 360, button: 'left' as const, up: 1090 }
     const resting = { ...track, scale: 1.5, clicks: [click], cursor: still.map((s) => ({ ...s, x: 640, y: 360 })) }
-    const clicked = { ...scene, track: resting, zooms: [], path: buildCursorPath(resting, 0), settings: { ...scene.settings, motionBlur: 0 } }
+    const clicked = { ...scene, view: { ...viewOf(resting), zooms: [] }, settings: { ...settings, motionBlur: 0 } }
     const { content, scale } = recordingLayout(clicked.videoSize, output, DEFAULT_HOUSE_STYLE)
     const expected = { x: content.x + 640 * scale, y: content.y + 360 * scale }
     vi.mocked(effects.drawClickEffect).mockClear()

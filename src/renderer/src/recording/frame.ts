@@ -4,19 +4,16 @@ import { drawBackground, drawBorder, drawFrameShadow, roundRectPath } from '../r
 import { clamp, type Size } from '../render/geometry'
 import { cameraAt, type CameraState } from './camera'
 import { CURSOR_BASE_PX, drawCursor } from './cursor-art'
-import { cursorAt, type CursorPath } from './cursor'
+import { cursorAt } from './cursor'
 import { activeClicks, drawClickEffect, pressScale } from './effects'
 import { recordingLayout, type RecordingLayout } from './layout'
 import type { RecordingDoc } from './settings'
-import type { RecordingTrack } from './track'
-import type { ZoomSegment } from './zooms'
+import type { TakeView } from './take-view'
 
 export interface RecordingScene {
   video: CanvasImageSource
   videoSize: Size
-  track: RecordingTrack
-  zooms: ZoomSegment[]
-  path: CursorPath
+  view: TakeView
   doc: Doc
   settings: RecordingDoc
   style: HouseStyle
@@ -47,10 +44,11 @@ export function shutterTimes(t: number, fps: number, blur: number, samples: numb
 }
 
 function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout, ti: number, k: number): void {
-  const { video, videoSize, track, zooms, path, doc, settings, style, backdrop } = scene
+  const { video, view, doc, settings, style, backdrop } = scene
+  const { crop, frame, track } = view
   const { content } = layout
   const ctx = target as CanvasRenderingContext2D
-  const camera = cameraAt(ti, zooms, videoSize, settings.zoomSpeed)
+  const camera = cameraAt(ti, view.zooms, frame, settings.zoomSpeed)
   const [a, b, c, d, e, f] = viewMatrix(camera, layout, doc.size)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = OPAQUE_BASE
@@ -65,7 +63,7 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   roundRectPath(ctx, content, radius)
   ctx.clip()
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(video, content.x, content.y, content.w, content.h)
+  ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, content.x, content.y, content.w, content.h)
   ctx.restore()
   drawBorder(ctx, content, radius, style)
 
@@ -75,12 +73,12 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   })
   const sizeScale = layout.scale * track.scale
   if (settings.clickEffect !== 'off') {
-    for (const click of activeClicks(track.clicks, ti, settings.clickEffect, videoSize)) {
+    for (const click of activeClicks(track.clicks, ti, settings.clickEffect, frame)) {
       const at = toComposition(click)
       drawClickEffect(ctx, { ...click, ...at }, settings.clickEffect, style.accent, CLICK_EFFECT_RADIUS_PX * sizeScale)
     }
   }
-  const cursor = cursorAt(path, ti, settings.hideWhenStill, videoSize)
+  const cursor = cursorAt(view.cursor, ti, settings.hideWhenStill, frame)
   if (cursor) {
     const heightPx = CURSOR_BASE_PX * settings.cursorSize * sizeScale
     drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(track.clicks, ti))
@@ -88,12 +86,12 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
 }
 
 function lookOf(scene: RecordingScene, t: number) {
-  const { videoSize, zooms, settings, track, path } = scene
+  const { view, settings } = scene
   return JSON.stringify([
-    cameraAt(t, zooms, videoSize, settings.zoomSpeed),
-    cursorAt(path, t, settings.hideWhenStill, videoSize),
-    activeClicks(track.clicks, t, settings.clickEffect, videoSize),
-    pressScale(track.clicks, t)
+    cameraAt(t, view.zooms, view.frame, settings.zoomSpeed),
+    cursorAt(view.cursor, t, settings.hideWhenStill, view.frame),
+    activeClicks(view.track.clicks, t, settings.clickEffect, view.frame),
+    pressScale(view.track.clicks, t)
   ])
 }
 
@@ -124,9 +122,9 @@ function layerFor(target: Ctx): Layer {
  * alpha 1/(i+1): that is the running mean. Drawing the elements straight onto the target would
  * blend each of them separately and leave earlier samples with too much weight.
  */
-export function drawRecordingFrame(ctx: Ctx, scene: RecordingScene, t: number, quality: 'preview' | 'export', k = 1): void {
-  const layout = recordingLayout(scene.videoSize, scene.doc.size, scene.style)
-  const times = sampleTimes(scene, t, quality)
+export function drawRecordingFrame(ctx: Ctx, scene: RecordingScene, outputMs: number, quality: 'preview' | 'export', k = 1): void {
+  const layout = recordingLayout(scene.view.frame, scene.doc.size, scene.style)
+  const times = sampleTimes(scene, outputMs, quality)
   ctx.save()
   if (times.length === 1) {
     ctx.globalAlpha = 1

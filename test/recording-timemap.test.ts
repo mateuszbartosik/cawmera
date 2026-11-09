@@ -114,6 +114,44 @@ describe('time map', () => {
     expect(mapped.cursor.map((s) => [s.t, s.x, s.y])).toEqual([[1000, 0, 50], [5000, 600, 650]])
     expect(mapped.clicks.map((c) => [c.t, c.up])).toEqual([[3900, 4000], [5000, 5050]])
   })
+  it('never maps a later source time to an earlier output time', () => {
+    const pieces = [piece(0, 1000, 2), piece(1000, 2000, 1, true), piece(2000, 4000, 4), piece(4000, 5000, 1, true), piece(5000, 9000, 8)]
+    const map = timeMapOf({ start: 300, end: 8700 }, pieces)
+    let previous = -1
+    for (let s = 0; s <= 10_000; s += 7) {
+      const o = sourceToOutput(map, s)
+      if (o === null) continue
+      expect(o).toBeGreaterThanOrEqual(previous)
+      previous = o
+    }
+  })
+  it('round-trips every output time through a map with cuts and speed-ups', () => {
+    const map = timeMapOf({ start: 500, end: 9500 }, [piece(0, 2000), piece(2000, 3000, 1, true), piece(3000, 6000, 8), piece(6000, 10_000, 2)])
+    for (let o = 0; o <= map.outputMs; o += 3) expect(sourceToOutput(map, outputToSource(map, o))).toBeCloseTo(o, 6)
+    expect(sourceToOutput(map, outputToSource(map, map.outputMs))).toBe(map.outputMs)
+  })
+  it('ends the video at a cut when the trim ends inside it', () => {
+    const map = timeMapOf({ start: 0, end: 5000 }, [piece(0, 4000), piece(4000, 7000, 1, true), piece(7000, 10_000)])
+    expect(map.outputMs).toBe(4000)
+    expect(map.spans).toHaveLength(1)
+    expect([sourceToOutput(map, 4000), sourceToOutput(map, 4500), sourceToOutput(map, 7500)]).toEqual([4000, null, null])
+    expect([snapToOutput(map, 4500), snapToOutput(map, 8000)]).toEqual([4000, 4000])
+    expect(outputToSource(map, 4000)).toBe(4000)
+    expect(outputFrameTimes(map, 60)).toHaveLength(240)
+  })
+  it('joins two adjacent cuts into one seam', () => {
+    const map = timeMapOf({ start: 0, end: 8000 }, [piece(0, 2000), piece(2000, 3000, 1, true), piece(3000, 5000, 1, true), piece(5000, 8000)])
+    expect(map.outputMs).toBe(5000)
+    expect([sourceToOutput(map, 2500), sourceToOutput(map, 3000), sourceToOutput(map, 4999), sourceToOutput(map, 5000)]).toEqual([null, null, null, 2000])
+    expect([snapToOutput(map, 2000), snapToOutput(map, 3000), snapToOutput(map, 4999)]).toEqual([2000, 2000, 2000])
+    expect([outputToSource(map, 1999), outputToSource(map, 2000)]).toEqual([1999, 5000])
+  })
+  it('maps a track onto nothing when nothing plays', () => {
+    const track: RecordingTrack = { kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 4000, scale: 1,
+      cursor: [{ t: 1000, x: 100, y: 100, shape: 'arrow' }], clicks: [{ t: 2000, x: 300, y: 300, button: 'left', up: 2100 }] }
+    const mapped = mapTrack(track, timeMapOf({ start: 0, end: 4000 }, [piece(0, 4000, 1, true)]), { x: 0, y: 0, w: 1920, h: 1080 })
+    expect(mapped).toMatchObject({ width: 1920, height: 1080, durationMs: 0, cursor: [], clicks: [] })
+  })
   it('keeps an unreleased click unreleased and shortens a release inside a speed-up', () => {
     const track: RecordingTrack = { kind: 'window', width: 100, height: 100, fps: 60, durationMs: 4000, scale: 1, cursor: [],
       clicks: [{ t: 1000, x: 1, y: 2, button: 'right', up: null }, { t: 2000, x: 3, y: 4, button: 'left', up: 2400 }] }

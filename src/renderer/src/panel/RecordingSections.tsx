@@ -7,6 +7,7 @@ import type { CursorLook } from '../recording/cursor-art'
 import type { ZoomSpeed } from '../recording/camera'
 import { getRecording } from '../recording/registry'
 import { defaultsFor, differsFromDefault, type RecordingDoc } from '../recording/settings'
+import { takeViewFor } from '../recording/take-view'
 import { percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
@@ -62,15 +63,16 @@ function Readout({ label, value }: { label: string; value: ReactNode }) {
 
 export function RecordingSection() {
   const sourceId = useApp((s) => s.doc.sourceId)
-  const trim = useApp((s) => s.doc.recording?.trim)
+  const recording = useApp((s) => s.doc.recording)
+  const crop = useApp((s) => s.doc.crop)
   const section = useSection('recording')
   const entry = getRecording(sourceId)
-  if (!entry || !trim) return null
+  if (!entry || !recording) return null
   const { track } = entry
   return (
     <Section title="Recording" testId="section-recording" {...section}>
       <Readout label="Source" value={entry.name} />
-      <Readout label="Length" value={formatLength(trim.end - trim.start)} />
+      <Readout label="Length" value={formatLength(takeViewFor(entry, recording, crop).map.outputMs)} />
       <Readout label="Video" value={`${track.width} × ${track.height}`} />
       <Readout label="Captured at" value={`${snapDensity(track.scale)}×`} />
     </Section>

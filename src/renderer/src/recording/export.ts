@@ -6,16 +6,9 @@ import { drawRecordingFrame } from './frame'
 import type { RecordingEntry } from './registry'
 import { recordingScene } from './scene'
 import type { RecordingDoc } from './settings'
-import type { Trim } from './trim'
+import { outputFrameTimes, outputToSource } from './timemap'
 
 const MS_PER_SECOND = 1000
-const FRAME_COUNT_TOLERANCE = 1e-9
-
-/** Source time in ms of each output frame; a trim shorter than one frame still yields one. */
-export function frameTimes(trim: Trim, fps: number): number[] {
-  const count = Math.max(1, Math.ceil(((trim.end - trim.start) * fps) / MS_PER_SECOND - FRAME_COUNT_TOLERANCE))
-  return Array.from({ length: count }, (_, i) => trim.start + (i * MS_PER_SECOND) / fps)
-}
 
 export async function exportRecordingVideo(
   entry: RecordingEntry,
@@ -24,8 +17,7 @@ export async function exportRecordingVideo(
   backdrop: ImageBitmap | null,
   onProgress: (share: number) => void
 ): Promise<Uint8Array> {
-  const { fps, trim } = doc.recording
-  const times = frameTimes(trim, fps)
+  const { fps } = doc.recording
   const input = new Input({
     source: new UrlSource(recordingUrl(entry.id), { getRetryDelay: () => null }),
     formats: ALL_FORMATS
@@ -39,6 +31,8 @@ export async function exportRecordingVideo(
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('The browser could not create a canvas for the export.')
     const scene = recordingScene(entry, doc, style, backdrop, canvas)!
+    const { map } = scene.view
+    const times = outputFrameTimes(map, fps)
     const target = new BufferTarget()
     const output = new Output({ format: new Mp4OutputFormat(), target })
     const encoder = new CanvasSource(canvas, { codec: 'avc', quality: new Quality('high') })
@@ -46,7 +40,7 @@ export async function exportRecordingVideo(
     await output.start()
 
     try {
-      const sourceSeconds = times.map((ms) => Math.max(ms / MS_PER_SECOND, firstFrameSeconds))
+      const sourceSeconds = times.map((outputMs) => Math.max(outputToSource(map, outputMs) / MS_PER_SECOND, firstFrameSeconds))
       const samples = new VideoSampleSink(track).samplesAtTimestamps(sourceSeconds)
       let index = 0
       for await (const sample of samples) {

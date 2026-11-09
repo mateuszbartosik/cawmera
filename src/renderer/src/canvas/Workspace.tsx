@@ -24,7 +24,7 @@ import {
 } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
 import { recordingScene } from '../recording/scene'
-import { POSTER_TIME_MS, useRecording } from '../recording/registry'
+import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
 import {
   clipTo,
@@ -193,7 +193,7 @@ const ShotCanvas = memo(function ShotCanvas({
     ctx.clearRect(0, 0, backingWidth, canvas.height)
     if (recording) {
       const scene = recording.poster && recordingScene(recording, doc, style, backdrop, recording.poster)
-      if (scene) drawRecordingFrame(ctx, scene, POSTER_TIME_MS, 'preview', backingWidth / doc.size.width)
+      if (scene) drawRecordingFrame(ctx, scene, POSTER_OUTPUT_MS, 'preview', backingWidth / doc.size.width)
       return
     }
     const source = getSource(doc.sourceId)

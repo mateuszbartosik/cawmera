@@ -5,7 +5,9 @@ import { commitFrom, store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
 import { setRecording } from '../recording/actions'
 import { applyTrim, scrubTo, togglePlayback, usePlayhead } from '../recording/playback'
-import { getRecording, zoomsFor } from '../recording/registry'
+import { getRecording } from '../recording/registry'
+import { takeViewFor } from '../recording/take-view'
+import { outputToSource, snapToOutput } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
 import type { Trim } from '../recording/trim'
 import { clamp } from '../render/geometry'
@@ -55,6 +57,7 @@ export function Timeline() {
 function TimelinePanel() {
   const recording = useApp((s) => s.doc.recording)
   const recordingId = useApp((s) => s.doc.sourceId)
+  const crop = useApp((s) => s.doc.crop)
   const playing = useApp((s) => s.playback.playing)
   const time = usePlayhead()
   const entry = getRecording(recordingId)
@@ -63,7 +66,7 @@ function TimelinePanel() {
 
   const { track } = entry
   const { trim } = recording
-  const zooms = zoomsFor(entry, trim, recording.zoomSpeed)
+  const { map, zooms } = takeViewFor(entry, recording, crop)
   const duration = track.durationMs
   const startX = timeToX(trim.start, duration, width)
   const endX = timeToX(trim.end, duration, width)
@@ -89,7 +92,7 @@ function TimelinePanel() {
           {playing ? <Pause size={15} weight="fill" /> : <Play size={15} weight="fill" />}
         </IconButton>
         <span className="text-xs font-semibold tabular-nums" data-testid="timeline-time">
-          {formatClock(time - trim.start)} <span className="font-normal text-(--tc-value)">/ {formatClock(trim.end - trim.start)}</span>
+          {formatClock(snapToOutput(map, time))} <span className="font-normal text-(--tc-value)">/ {formatClock(map.outputMs)}</span>
         </span>
       </header>
 
@@ -131,12 +134,13 @@ function TimelinePanel() {
           <RowLabel>Zoom</RowLabel>
           <div className="relative">
             {zooms.map((zoom) => {
-              const left = timeToX(zoom.start, duration, width)
+              const left = timeToX(outputToSource(map, zoom.start), duration, width)
+              const right = timeToX(outputToSource(map, zoom.end), duration, width)
               return (
                 <span
                   key={zoom.start}
                   className="absolute top-1/2 grid h-6 -translate-y-1/2 place-items-center rounded-md border border-(--tc-accent)/60 bg-(--tc-accent)/15 text-[11px] font-semibold text-(--tc-fg) tabular-nums"
-                  style={{ left, width: Math.max(MIN_ZOOM_BLOCK_PX, timeToX(zoom.end, duration, width) - left) }}
+                  style={{ left, width: Math.max(MIN_ZOOM_BLOCK_PX, right - left) }}
                 >
                   {zoom.depth.toFixed(1)}×
                 </span>

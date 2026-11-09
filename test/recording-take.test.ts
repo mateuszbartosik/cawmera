@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { cameraAt } from '../src/renderer/src/recording/camera'
-import { buildCursorPath, cursorAt } from '../src/renderer/src/recording/cursor'
+import { cursorAt } from '../src/renderer/src/recording/cursor'
 import { activeClicks } from '../src/renderer/src/recording/effects'
-import { frameTimes } from '../src/renderer/src/recording/export'
+import type { RecordingEntry } from '../src/renderer/src/recording/registry'
+import { DEFAULT_RECORDING, recordingDocFor, type RecordingDoc } from '../src/renderer/src/recording/settings'
+import { takeViewFor } from '../src/renderer/src/recording/take-view'
+import { outputFrameTimes, outputToSource, wholeTake } from '../src/renderer/src/recording/timemap'
 import { isShownClick, stopClickOf, withoutStopClick, type Click, type CursorSample, type RecordingTrack } from '../src/renderer/src/recording/track'
-import { autoTrim } from '../src/renderer/src/recording/trim'
-import { autoZooms } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
 const SAMPLE_MS = 8
@@ -42,6 +43,8 @@ const lookAtResult = { startMs: 5800, endMs: 8400 }
 
 const track = (cursor: CursorSample[], clicks: Click[], durationMs: number): RecordingTrack =>
   ({ kind: 'monitor', ...frame, fps: FPS, durationMs, scale: 1, cursor, clicks })
+
+const entryOf = (take: RecordingTrack): RecordingEntry => ({ id: 'realistic-take', name: 'Recording', poster: null, track: take })
 
 const takes = {
   'a taskbar stop': {
@@ -107,32 +110,42 @@ const takes = {
 
 describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { stoppedBy, raw }) => {
   const clean = withoutStopClick(raw, stoppedBy)
-  const trim = autoTrim(clean, stopClickOf(raw, stoppedBy))
-  const exportedFrames = frameTimes(trim, FPS)
+  const recording = recordingDocFor(clean, null, stopClickOf(raw, stoppedBy))
+  const viewWith = (patch: Partial<RecordingDoc> = {}) => takeViewFor(entryOf(clean), { ...recording, ...patch }, null)
+  const { map } = viewWith()
+  const exportedFrames = outputFrameTimes(map, FPS)
 
   it('ends the video when the look at the result ends', () => {
-    expect(trim).toEqual({ start: 0, end: lookAtResult.endMs })
+    expect(recording.trim).toEqual({ start: 0, end: lookAtResult.endMs })
+    expect(map.outputMs).toBe(lookAtResult.endMs)
+    expect(outputToSource(map, map.outputMs)).toBe(lookAtResult.endMs)
   })
 
   it('shows no click on the taskbar or its thumbnail', () => {
     const atTaskbar = (spot: Spot) => spot.y >= thumbnail.y
+    const view = viewWith()
     expect(clean.clicks.some(atTaskbar)).toBe(false)
-    for (const t of exportedFrames) expect(activeClicks(clean.clicks, t, 'ring', frame).some(atTaskbar)).toBe(false)
+    expect(view.track.clicks.some(atTaskbar)).toBe(false)
+    for (const t of exportedFrames) expect(activeClicks(view.track.clicks, t, 'ring', view.frame).some(atTaskbar)).toBe(false)
   })
 
   it('marks the clicks with rings and zooms on the Clip row, and no others', () => {
-    expect(clean.clicks.filter((click) => isShownClick(click, frame)).map((click) => click.t)).toEqual(workClicks.map((click) => click.t))
+    const workClickTimes = workClicks.map((click) => click.t)
+    expect(clean.clicks.filter((click) => isShownClick(click, frame)).map((click) => click.t)).toEqual(workClickTimes)
+    const view = viewWith()
+    const drivingClicks = view.track.clicks.filter((click) => isShownClick(click, view.frame))
+    expect(drivingClicks.map((click) => outputToSource(view.map, click.t))).toEqual(workClickTimes)
   })
 
   it.each(['calm', 'quick'] as const)('zooms on the real clicks only and is wide for the first and last second (%s)', (speed) => {
-    const zooms = autoZooms(clean.clicks, frame, trim, speed)
-    expect(zooms.map(({ depth, focus }) => ({ depth, focus }))).toEqual([
+    const view = viewWith({ zoomSpeed: speed })
+    expect(view.zooms.map(({ depth, focus }) => ({ depth, focus }))).toEqual([
       { depth: 2.5, focus: { x: 500, y: 310 } },
       { depth: 2.5, focus: next }
     ])
-    const edgeFrames = exportedFrames.filter((t) => t <= trim.start + 1000 || t >= trim.end - 1000)
-    for (const t of edgeFrames) expect(cameraAt(t, zooms, frame, speed)).toEqual(wide)
-    expect(cameraAt(exportedFrames.at(-1)!, zooms, frame, speed)).toEqual(wide)
+    const edgeFrames = exportedFrames.filter((t) => t <= 1000 || t >= view.map.outputMs - 1000)
+    for (const t of edgeFrames) expect(cameraAt(t, view.zooms, view.frame, speed)).toEqual(wide)
+    expect(cameraAt(exportedFrames.at(-1)!, view.zooms, view.frame, speed)).toEqual(wide)
   })
 })
 
@@ -145,18 +158,19 @@ describe('a taskbar stop right after the last click', () => {
     9200
   )
   const clean = withoutStopClick(raw, 'window')
-  const trim = autoTrim(clean, stopClickOf(raw, 'window'))
+  const recording = recordingDocFor(clean, null, stopClickOf(raw, 'window'))
 
   it('ends the video when the last click’s ring has played', () => {
-    expect(trim.end).toBe(finalClick.t + 650)
+    expect(recording.trim.end).toBe(finalClick.t + 650)
+    expect(takeViewFor(entryOf(clean), recording, null).map.outputMs).toBe(finalClick.t + 650)
   })
 
   it.each([0, 0.6, 1])('keeps the cursor on the last click from the click to the end of the video (smoothing %s)', (smoothing) => {
-    const path = buildCursorPath(clean, smoothing, trim.end)
-    const landing = frameTimes(trim, FPS).filter((t) => t >= finalClick.t)
+    const view = takeViewFor(entryOf(clean), { ...recording, smoothing }, null)
+    const landing = outputFrameTimes(view.map, FPS).filter((t) => outputToSource(view.map, t) >= finalClick.t)
     expect(landing.length).toBeGreaterThan(30)
     for (const t of landing) {
-      const at = cursorAt(path, t, false, frame)!
+      const at = cursorAt(view.cursor, t, false, view.frame)!
       expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeLessThan(0.01)
     }
   })
@@ -164,16 +178,19 @@ describe('a taskbar stop right after the last click', () => {
   const endingAfterLastClick = (afterMs: number) => {
     const cursor = [...rest(next, 0, 1000), ...glide(next, taskbarButton, 1000, 2000)]
     const clicks = [{ t: 1000 - 1, ...next, button: 'left' as const, up: 1050 }]
-    return buildCursorPath(track(cursor, clicks, 3000), 0.6, 999 + afterMs)
+    const recordingEnding = { ...DEFAULT_RECORDING, smoothing: 0.6, trim: { start: 0, end: 999 + afterMs }, pieces: wholeTake(3000) }
+    return takeViewFor(entryOf(track(cursor, clicks, 3000)), recordingEnding, null)
   }
 
   it('holds when the video ends exactly 650 ms after the last click', () => {
-    const at = cursorAt(endingAfterLastClick(650), 1648, false, frame)!
+    const view = endingAfterLastClick(650)
+    const at = cursorAt(view.cursor, 1648, false, view.frame)!
     expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeLessThan(0.01)
   })
 
   it('lets the cursor leave when the video ends 651 ms after the last click', () => {
-    const at = cursorAt(endingAfterLastClick(651), 1648, false, frame)!
+    const view = endingAfterLastClick(651)
+    const at = cursorAt(view.cursor, 1648, false, view.frame)!
     expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeGreaterThan(50)
   })
 })

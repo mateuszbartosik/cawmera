@@ -19,6 +19,7 @@ const { exportRecording } = await import('../src/renderer/src/recording/actions'
 const { setSize } = await import('../src/renderer/src/app/actions')
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
+const { wholeTake } = await import('../src/renderer/src/recording/timemap')
 const { emptyDoc, isUnsaved, store, updateDoc, liveShots } = await import('../src/renderer/src/app/store')
 
 const entry: RecordingEntry = {
@@ -33,7 +34,7 @@ const activeShot = () => liveShots().find((record) => record.id === store.get().
 beforeEach(() => {
   vi.clearAllMocks()
   registerRecording(entry)
-  updateDoc({ ...emptyDoc(), sourceId: entry.id, size: { width: 1920, height: 1080 }, recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 1000 } }, fileName: '' })
+  updateDoc({ ...emptyDoc(), sourceId: entry.id, size: { width: 1920, height: 1080 }, recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 1000 }, pieces: wholeTake(2000) }, fileName: '' })
   store.set({ exportProgress: null })
   mocks.exportVideo.mockResolvedValue(new Uint8Array([1, 2, 3]))
   mocks.saveVideo.mockResolvedValue({ path: ['C:', 'Videos', 'clip.mp4'].join(String.fromCharCode(92)) })
