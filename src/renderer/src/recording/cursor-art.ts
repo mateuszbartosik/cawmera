@@ -1,4 +1,4 @@
-import type { Point } from '../render/geometry'
+import { rect, type Point, type Rect } from '../render/geometry'
 import type { CursorFrame } from './cursor'
 import type { CursorShape } from './track'
 
@@ -9,6 +9,7 @@ export const CURSOR_BASE_PX = 22
 const ART_BOX = 32
 const OUTLINE_WIDTH = 1.5
 const SHADOW = { color: 'rgba(0,0,0,0.35)', blur: 3 }
+const SHADOW_REACH = SHADOW.blur * 2
 const LOOKS: Record<CursorLook, { fill: string; outline: string }> = {
   light: { fill: '#ffffff', outline: '#1a1a1a' },
   dark: { fill: '#000000', outline: '#ffffff' }
@@ -79,6 +80,20 @@ export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, ti
   const turnedHotspot = { x: cos * hotspot.x - sin * hotspot.y, y: sin * hotspot.x + cos * hotspot.y }
   // `0 - sin`, not `-sin`: upright, the matrix is exactly the untilted one, with no −0 in it.
   return [cos, sin, 0 - sin, cos, at.x - turnedHotspot.x, at.y - turnedHotspot.y]
+}
+
+/**
+ * What a cursor `heightPx` canvas px tall paints, its outline and shadow included, around its hotspot. The art and its
+ * outline stay inside the art box; a canvas shadow is a Gaussian of σ = blur / 2, gone within 4σ.
+ */
+export function cursorBounds(shape: CursorShape, heightPx: number, tilt = 0): Rect {
+  const [a, b, c, d, e, f] = cursorMatrix(shape, { x: 0, y: 0 }, heightPx, tilt)
+  const corners = [[0, 0], [ART_BOX, 0], [0, ART_BOX], [ART_BOX, ART_BOX]].map(([x, y]) => ({ x: a * x + c * y + e, y: b * x + d * y + f }))
+  const left = Math.min(...corners.map((corner) => corner.x)) - SHADOW_REACH
+  const top = Math.min(...corners.map((corner) => corner.y)) - SHADOW_REACH
+  const right = Math.max(...corners.map((corner) => corner.x)) + SHADOW_REACH
+  const bottom = Math.max(...corners.map((corner) => corner.y)) + SHADOW_REACH
+  return rect(left, top, right - left, bottom - top)
 }
 
 export function drawCursor(ctx: CanvasRenderingContext2D, frame: CursorFrame, look: CursorLook, heightPx: number, press: number, tilt = 0): void {

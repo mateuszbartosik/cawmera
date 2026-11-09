@@ -32,6 +32,12 @@ describe('recording document', () => {
   it('keeps screenshots free of recording settings', () => expect(DEFAULT_DOC.recording).toBeNull())
 
   it('tilts the cursor while it moves by default', () => expect(recordingDocFor(track, null).tilt).toBe(true))
+
+  it('blurs the cursor and the camera at half a frame each by default, with no single motion blur', () => {
+    const doc = recordingDocFor(track, null)
+    expect(doc).toMatchObject({ cursorBlur: 0.5, cameraBlur: 0.5 })
+    expect(doc).not.toHaveProperty('motionBlur')
+  })
 })
 
 describe('section resets', () => {
@@ -40,11 +46,13 @@ describe('section resets', () => {
   it('sees a section as customised only when one of its settings moved', () => {
     expect(differsFromDefault(doc, ['cursorSize', 'look'])).toBe(false)
     expect(differsFromDefault({ ...doc, look: 'dark' }, ['cursorSize', 'look'])).toBe(true)
-    expect(differsFromDefault({ ...doc, look: 'dark' }, ['motionBlur'])).toBe(false)
+    expect(differsFromDefault({ ...doc, look: 'dark' }, ['cursorBlur', 'cameraBlur'])).toBe(false)
+    expect(differsFromDefault({ ...doc, cameraBlur: 0.8 }, ['cursorBlur', 'cameraBlur'])).toBe(true)
   })
 
   it('restores only the named settings', () => {
-    const moved = { ...doc, look: 'dark' as const, motionBlur: 0 }
-    expect({ ...moved, ...defaultsFor(['look']) }).toEqual({ ...doc, motionBlur: 0 })
+    const moved = { ...doc, look: 'dark' as const, cursorBlur: 0, cameraBlur: 1 }
+    expect({ ...moved, ...defaultsFor(['look']) }).toEqual({ ...doc, cursorBlur: 0, cameraBlur: 1 })
+    expect({ ...moved, ...defaultsFor(['cursorBlur', 'cameraBlur']) }).toEqual({ ...doc, look: 'dark' })
   })
 })

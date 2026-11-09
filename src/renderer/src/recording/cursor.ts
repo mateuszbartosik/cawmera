@@ -1,4 +1,4 @@
-import { clamp, type Size } from '../render/geometry'
+import { clamp, type Point, type Size } from '../render/geometry'
 import { firstIndexWhere } from './binary-search'
 import { LONGEST_CLICK_EFFECT_MS } from './effects'
 import { springStep, type Spring } from './spring'
@@ -147,7 +147,7 @@ function valueAt(times: number[], values: number[], t: number): number {
   return values[index] + (values[index + 1] - values[index]) * progress
 }
 
-function positionAt(times: number[], xs: number[], ys: number[], t: number): { x: number; y: number } {
+function positionAt(times: number[], xs: number[], ys: number[], t: number): Point {
   return { x: valueAt(times, xs, t), y: valueAt(times, ys, t) }
 }
 
@@ -298,6 +298,11 @@ function opacityAt(spans: ActiveSpan[], t: number): number {
 function isFarOutside(x: number, y: number, frame: Size): boolean {
   const margin = CURSOR_RULES.offFramePx
   return x < -margin || y < -margin || x > frame.width + margin || y > frame.height + margin
+}
+
+/** Where the path has the cursor, whether it shows there or not. */
+export function cursorPositionAt(path: CursorPath, t: number): Point {
+  return positionAt(path.t, path.x, path.y, t)
 }
 
 export function cursorAt(path: CursorPath, t: number, hideWhenStill: boolean, frame: Size): CursorFrame | null {

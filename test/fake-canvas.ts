@@ -7,7 +7,10 @@ interface FakeLayer {
   alphaAtCall: Record<string, number[]>
 }
 
-/** Offscreen layers share the target's `calls` but keep their own alphas, listed in `layers`. */
+/**
+ * Offscreen layers share the target's `calls` but keep their own alphas, listed in `layers`. Drawing anything tagged, like a
+ * fake video or an offscreen canvas, also records `drawImage:<tag>`.
+ */
 function buildFake(calls: string[], width: number, height: number) {
   const alphaAtCall: Record<string, number[]> = {}
   let properties = new Map<string | symbol, unknown>([
@@ -25,7 +28,8 @@ function buildFake(calls: string[], width: number, height: number) {
         const alphas = alphaAtCall[method] ?? []
         alphas.push(properties.get('globalAlpha') as number)
         alphaAtCall[method] = alphas
-        if (method === 'drawImage' && (args[0] as { tag?: string } | undefined)?.tag === 'video') calls.push('drawImage:video')
+        const tag = (args[0] as { tag?: string } | undefined)?.tag
+        if (method === 'drawImage' && tag) calls.push(`drawImage:${tag}`)
         if (method === 'save') saved.push(new Map(properties))
         if (method === 'restore') properties = saved.pop() ?? properties
         return GRADIENT_METHODS.has(method) ? gradientStub() : args[0]
@@ -50,6 +54,7 @@ export function fakeContext(size = { width: 1920, height: 1080 }): {
   const layers: FakeLayer[] = []
   globalThis.Path2D = class {} as unknown as typeof Path2D
   globalThis.OffscreenCanvas = class {
+    readonly tag = 'offscreen'
     constructor(
       public width: number,
       public height: number

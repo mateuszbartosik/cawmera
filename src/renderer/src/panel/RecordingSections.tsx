@@ -12,7 +12,7 @@ import { percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
 const CURSOR_KEYS = ['cursorSize', 'smoothing', 'look', 'clickEffect', 'hideWhenStill', 'tilt'] as const
-const MOTION_KEYS = ['motionBlur', 'zoomSpeed'] as const
+const MOTION_KEYS = ['cursorBlur', 'cameraBlur', 'zoomSpeed'] as const
 
 const LOOK_OPTIONS: { value: CursorLook; label: string }[] = [
   { value: 'light', label: 'Light' },
@@ -141,14 +141,25 @@ export function MotionSection() {
       resetLabel="Back to the default motion"
     >
       <Slider
-        label="Motion blur"
-        help="Softens fast zooms and cursor moves."
-        value={recording.motionBlur}
+        label="Cursor blur"
+        help="Smears the cursor while it moves. A still cursor stays sharp."
+        value={recording.cursorBlur}
         min={0}
         max={1}
         step={0.05}
         format={percent}
-        onChange={(motionBlur) => drag.change({ motionBlur })}
+        onChange={(cursorBlur) => drag.change({ cursorBlur })}
+        onCommit={drag.commit}
+      />
+      <Slider
+        label="Camera blur"
+        help="Smears zooms and pans while they move. The picture is sharp at rest."
+        value={recording.cameraBlur}
+        min={0}
+        max={1}
+        step={0.05}
+        format={percent}
+        onChange={(cameraBlur) => drag.change({ cameraBlur })}
         onCommit={drag.commit}
       />
       <Segmented label="Zoom speed" value={recording.zoomSpeed} options={ZOOM_SPEED_OPTIONS} onChange={(zoomSpeed) => setRecording({ zoomSpeed })} testId="zoom-speed" />

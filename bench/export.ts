@@ -124,12 +124,13 @@ async function runBench(config: BenchConfig) {
   const bestRun = runs.reduce((best, run) => (run.totalMs < best.totalMs ? run : best))
   const { timing } = medianRun
   const factor = realtimeFactor(clipMs, medianRun.totalMs)
-  const settledTotals = `draw ${seconds(settled.timing.drawMs)} (blur frames ${seconds(settled.timing.blurDrawMs)}) · encode wait ${seconds(settled.timing.encodeWaitMs)}`
-  const line = `export ${config.width}×${config.height} @ ${config.fps} fps of a ${seconds(clipMs)} take: ${seconds(medianRun.totalMs)} (${factor.toFixed(2)}× real time)`
-    + ` · draw submit ${seconds(timing.drawMs)} · GPU and encode wait ${seconds(timing.encodeWaitMs)} · decode wait ${seconds(timing.decodeWaitMs)} · finalize ${seconds(timing.finalizeMs)} · other ${seconds(medianRun.otherMs)}`
-    + ` · median of ${runs.length} (upper middle), best ${seconds(bestRun.totalMs)} (${realtimeFactor(clipMs, bestRun.totalMs).toFixed(2)}×)`
+  const settledTotals = `draw ${seconds(settled.timing.drawMs)} (blur frames ${seconds(settled.timing.blurDrawMs)}) Â· encode wait ${seconds(settled.timing.encodeWaitMs)}`
+  const line = `export ${config.width}Ã—${config.height} @ ${config.fps} fps of a ${seconds(clipMs)} take: ${seconds(medianRun.totalMs)} (${factor.toFixed(2)}Ã— real time)`
+    + ` Â· draw submit ${seconds(timing.drawMs)} Â· GPU and encode wait ${seconds(timing.encodeWaitMs)} Â· decode wait ${seconds(timing.decodeWaitMs)} Â· finalize ${seconds(timing.finalizeMs)} Â· other ${seconds(medianRun.otherMs)}`
+    + ` Â· median of ${runs.length} (upper middle), best ${seconds(bestRun.totalMs)} (${realtimeFactor(clipMs, bestRun.totalMs).toFixed(2)}Ã—)`
     + ` | settled run (approximate, the per-frame flush adds up to ${seconds(settled.totalMs - medianRun.totalMs)}) ${seconds(settled.totalMs)}: ${settledTotals}`
-  window.bench.progress(`frames: ${medianRun.outputFrames} exported, ${expectedFrames} expected; ${timing.blurredFrames} of ${timing.frames} drawn from several blur samples (${timing.drawnSamples} samples in all)`)
+  window.bench.progress(`frames: ${medianRun.outputFrames} exported, ${expectedFrames} expected; ${timing.blurredFrames} of ${timing.frames} drawn from several blur samples`
+    + ` (${timing.cameraBlurredFrames} with the camera re-projected; ${timing.cameraSamples} camera and ${timing.cursorSamples} cursor samples in all)`)
 
   await window.bench.finish({
     line,

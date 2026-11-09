@@ -2,23 +2,27 @@ import { ALL_FORMATS, BufferTarget, CanvasSource, Input, Mp4OutputFormat, Output
 import { recordingUrl } from '@shared/media'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
-import { drawRecordingFrame, sampleTimes } from './frame'
+import { drawRecordingFrame, framePlan, type SampleCounts } from './frame'
 import type { RecordingEntry } from './registry'
 import { recordingScene } from './scene'
 import type { RecordingDoc } from './settings'
 import { outputFrameTimes, outputToSource } from './timemap'
 
 const MS_PER_SECOND = 1000
+const UNMEASURED_PLAN: SampleCounts = { camera: 1, cursor: 1 }
 
 export interface ExportTiming {
   frames: number
   decodeWaitMs: number
   drawMs: number
   encodeWaitMs: number
-  /** Part of `drawMs` spent on frames drawn from more than one blur sample. */
+  /** Part of `drawMs` spent on frames blending more than one sample of the camera or the cursor. */
   blurDrawMs: number
   blurredFrames: number
-  drawnSamples: number
+  /** Frames whose picture was re-projected along the camera’s shutter. */
+  cameraBlurredFrames: number
+  cameraSamples: number
+  cursorSamples: number
   /** Flushing the encoder and finishing the file. */
   finalizeMs: number
 }
@@ -74,7 +78,10 @@ export async function exportRecordingVideo(
     try {
       const sourceSeconds = times.map((outputMs) => Math.max(outputToSource(map, outputMs) / MS_PER_SECOND, firstFrameSeconds))
       const samples = new VideoSampleSink(track).samplesAtTimestamps(sourceSeconds)
-      const timing: ExportTiming = { frames: 0, decodeWaitMs: 0, drawMs: 0, encodeWaitMs: 0, blurDrawMs: 0, blurredFrames: 0, drawnSamples: 0, finalizeMs: 0 }
+      const timing: ExportTiming = {
+        frames: 0, decodeWaitMs: 0, drawMs: 0, encodeWaitMs: 0,
+        blurDrawMs: 0, blurredFrames: 0, cameraBlurredFrames: 0, cameraSamples: 0, cursorSamples: 0, finalizeMs: 0
+      }
       const settle = options.settleDraws ? drawSettler(canvas) : null
       const iterator = samples[Symbol.asyncIterator]()
       let index = 0
@@ -88,14 +95,16 @@ export async function exportRecordingVideo(
           try {
             if (!sample) throw new Error('The recording has no picture at this point.')
             const frameScene = { ...scene, video: sample.toCanvasImageSource() }
-            const sampleCount = options.onTiming ? sampleTimes(frameScene, times[index], 'export').length : 1
+            const plan = options.onTiming ? framePlan(frameScene, times[index], 'export') : UNMEASURED_PLAN
             const drawStart = performance.now()
             drawRecordingFrame(ctx, frameScene, times[index], 'export')
             if (settle) await settle()
             const drawMs = performance.now() - drawStart
             timing.drawMs += drawMs
-            timing.drawnSamples += sampleCount
-            if (sampleCount > 1) {
+            timing.cameraSamples += plan.camera
+            timing.cursorSamples += plan.cursor
+            if (plan.camera > 1) timing.cameraBlurredFrames++
+            if (plan.camera > 1 || plan.cursor > 1) {
               timing.blurDrawMs += drawMs
               timing.blurredFrames++
             }

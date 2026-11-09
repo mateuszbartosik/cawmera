@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CURSOR_ART, cursorMatrix, drawCursor, leansWhileMoving } from '../src/renderer/src/recording/cursor-art'
+import { CURSOR_ART, cursorBounds, cursorMatrix, drawCursor, leansWhileMoving } from '../src/renderer/src/recording/cursor-art'
 import { activeClicks, drawClickEffect, pressScale } from '../src/renderer/src/recording/effects'
 import { CURSOR_SHAPES } from '../src/renderer/src/recording/track'
 import { fakeContext } from './fake-canvas'
@@ -63,6 +63,21 @@ describe('cursor art', () => {
     drawCursor(watched, { x: 300, y: 200, shape: 'arrow', opacity: 1 }, 'light', 32, 0.85, 0.2)
     expect(transforms).toEqual([cursorMatrix('arrow', { x: 300, y: 200 }, 32 * 0.85, 0.2)])
     expect(transforms).not.toEqual([cursorMatrix('arrow', { x: 300, y: 200 }, 32 * 0.85)])
+  })
+
+  it('bounds what a cursor paints around its hotspot, its shadow included, upright or turned', () => {
+    const shadowReach = 6
+    expect(cursorBounds('arrow', 32)).toEqual({ x: -6 - shadowReach, y: -3 - shadowReach, w: 32 + 2 * shadowReach, h: 32 + 2 * shadowReach })
+    for (const shape of CURSOR_SHAPES) {
+      const [a, b, c, d, e, f] = cursorMatrix(shape, { x: 0, y: 0 }, 64, 0.2)
+      const bounds = cursorBounds(shape, 64, 0.2)
+      for (const [x, y] of [[0, 0], [32, 0], [0, 32], [32, 32]]) {
+        expect(a * x + c * y + e - shadowReach).toBeGreaterThanOrEqual(bounds.x - 1e-9)
+        expect(a * x + c * y + e + shadowReach).toBeLessThanOrEqual(bounds.x + bounds.w + 1e-9)
+        expect(b * x + d * y + f - shadowReach).toBeGreaterThanOrEqual(bounds.y - 1e-9)
+        expect(b * x + d * y + f + shadowReach).toBeLessThanOrEqual(bounds.y + bounds.h + 1e-9)
+      }
+    }
   })
 
   it('draws every shape in both looks', () => {

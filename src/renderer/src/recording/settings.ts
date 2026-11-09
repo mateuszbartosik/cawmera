@@ -17,7 +17,9 @@ export interface RecordingDoc {
   clickEffect: ClickEffect
   hideWhenStill: boolean
   tilt: boolean
-  motionBlur: number
+  /** Shares of a frame the shutter stays open for, per layer. */
+  cursorBlur: number
+  cameraBlur: number
   zoomSpeed: ZoomSpeed
   fps: RecordingFps
 }
@@ -29,7 +31,8 @@ export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces'> = {
   clickEffect: 'ring',
   hideWhenStill: true,
   tilt: true,
-  motionBlur: 0.5,
+  cursorBlur: 0.5,
+  cameraBlur: 0.5,
   zoomSpeed: 'calm',
   fps: 60
 }
