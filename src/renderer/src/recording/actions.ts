@@ -8,7 +8,7 @@ import { addShot, backdropReady, emptyDoc, liveShots, markSnapshotSaved, store, 
 import { revealActive } from '../canvas/view'
 import { bridge, saveVideo } from '../platform/bridge'
 import { getRecording, registerRecording, setPoster } from './registry'
-import { runStartFlow } from './start-flow'
+import { recordingCountdownSeconds, runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { unavailableReason } from './support'
 import { parseTrack, stopClickOf, withoutStopClick } from './track'
@@ -16,7 +16,8 @@ import { parseTrack, stopClickOf, withoutStopClick } from './track'
 const POSTER_TIMEOUT_MS = 5000
 const DEFAULT_RECORDING_NAME = 'Recording'
 
-export const PRIVACY_SETTING_PATH = 'Settings > Privacy & security > Screenshots and screen recording'
+export const PRIVACY_SETTING_PATH = 'Settings › Privacy & security › Screenshots and screen recording'
+export const DESKTOP_APPS_SWITCH = 'Let desktop apps take screenshots and record the screen'
 
 const idle = () => store.set({ capture: { phase: 'idle', remaining: 0 } })
 
@@ -31,7 +32,7 @@ function toastFor(error: RecordingError) {
       return
     case 'access-denied':
       toast.error('Windows blocked the recording', {
-        description: `In ${PRIVACY_SETTING_PATH}, allow desktop apps to capture the screen, then try again.`
+        description: `In ${PRIVACY_SETTING_PATH}, turn on “${DESKTOP_APPS_SWITCH}”, then try again.`
       })
       return
     case 'unsupported':
@@ -53,6 +54,7 @@ export async function recordSource(source: CaptureSource) {
   if (!bridge || recordSourceRunning) return
   const target = bridge
   const { delay, doc, style } = store.get()
+  const seconds = recordingCountdownSeconds(delay)
   recordSourceRunning = true
   resetCancellation()
   recordingName = source.name
@@ -64,23 +66,20 @@ export async function recordSource(source: CaptureSource) {
       startRecording: () => target.startRecording({ sourceId: source.id, displayId: source.displayId }),
       beginRecording: () => target.beginRecording(),
       stopRecording: () => target.stopRecording(),
-      countdown:
-        delay > 0
-          ? {
-              show: () => target.showCountdown({ displayId: source.displayId, seconds: delay, color: doc.lightColor ?? style.glow }),
-              run: async () => {
-                const finished = await countdown(delay, (remaining) => {
-                  target.tickCountdown(remaining)
-                  target.setProgress((delay - remaining + 1) / (delay + 1))
-                })
-                // Cancel already set the phase to idle; stay busy until the cleanup is done.
-                if (!finished) store.set({ capture: { phase: 'grabbing', remaining: 0 } })
-                return finished
-              },
-              interrupt: interruptCountdown,
-              hide: () => target.hideCountdown()
-            }
-          : null,
+      countdown: {
+        show: () => target.showCountdown({ displayId: source.displayId, seconds, color: doc.lightColor ?? style.glow }),
+        run: async () => {
+          const finished = await countdown(seconds, (remaining) => {
+            target.tickCountdown(remaining)
+            target.setProgress((seconds - remaining + 1) / (seconds + 1))
+          })
+          // Cancel already set the phase to idle; stay busy until the cleanup is done.
+          if (!finished) store.set({ capture: { phase: 'grabbing', remaining: 0 } })
+          return finished
+        },
+        interrupt: interruptCountdown,
+        hide: () => target.hideCountdown()
+      },
       showError: toastFor
     })
     store.set({ capture: { phase: began ? 'recording' : 'idle', remaining: 0 } })

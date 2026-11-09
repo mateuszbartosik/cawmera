@@ -141,7 +141,7 @@ function ScreenshotSection() {
             onClick={startRecordingPicker}
             disabled={busy || support?.ok !== true}
             data-testid="record"
-            hint={support && !support.ok ? unavailableReason(support.reason) : 'Record a window or a screen. Stop with Ctrl+Shift+2'}
+            hint={support && !support.ok ? unavailableReason(support.reason) : 'Counts down, then records a window or a screen. Stop with Ctrl+Shift+2'}
           >
             Record
           </Button>
@@ -160,7 +160,7 @@ function ScreenshotSection() {
       </ActionsRow>
       <Segmented
         label="Capture delay"
-        help="Waits before capturing, so a menu or dropdown can be open in the shot. A countdown shows on the screen."
+        help="Waits before capturing, so a menu or dropdown can be open in the shot. A countdown shows on the screen. Recordings always count down at least 3 s."
         value={delay}
         options={DELAYS}
         onChange={(value) => store.set({ delay: value })}
@@ -510,7 +510,7 @@ export function Panel() {
             </Button>
           </>
         )}
-        {ready > 1 && (
+        {!isRecording && ready > 1 && (
           <Button
             className="col-span-2"
             icon={<Stack size={14} />}

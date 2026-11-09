@@ -7,7 +7,11 @@ const bridge = vi.hoisted(() => ({
   restoreWindow: vi.fn(async () => {}),
   startRecording: vi.fn(),
   beginRecording: vi.fn(),
-  stopRecording: vi.fn(async () => {})
+  stopRecording: vi.fn(async () => {}),
+  showCountdown: vi.fn(async () => {}),
+  tickCountdown: vi.fn(),
+  hideCountdown: vi.fn(async () => {}),
+  setProgress: vi.fn()
 }))
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
@@ -40,5 +44,20 @@ describe('a recording that cannot start', () => {
     bridge.startRecording.mockResolvedValue({ code: 'unsupported', message: 'Windows can’t capture the screen on this PC' })
     await recordSource(source)
     expect(toast.error).toHaveBeenCalledWith('Recording isn’t available', { description: 'Windows can’t capture the screen on this PC' })
+  })
+
+  it('counts down 3 s even with the capture delay off', async () => {
+    bridge.startRecording.mockResolvedValue({ code: 'target-gone', message: 'gone' })
+    await recordSource(source)
+    expect(bridge.showCountdown).toHaveBeenCalledWith(expect.objectContaining({ seconds: 3 }))
+  })
+
+  it('names the Windows page and switch word for word when access is denied', async () => {
+    bridge.startRecording.mockResolvedValue({ code: 'access-denied', message: 'denied' })
+    await recordSource(source)
+    expect(toast.error).toHaveBeenCalledWith('Windows blocked the recording', {
+      description:
+        'In Settings › Privacy & security › Screenshots and screen recording, turn on “Let desktop apps take screenshots and record the screen”, then try again.'
+    })
   })
 })

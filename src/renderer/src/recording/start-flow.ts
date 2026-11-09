@@ -1,5 +1,9 @@
 import type { RecordingError } from '@shared/types'
 
+export const MIN_RECORDING_COUNTDOWN_S = 3
+
+export const recordingCountdownSeconds = (delay: number) => Math.max(MIN_RECORDING_COUNTDOWN_S, delay)
+
 export interface StartFlow {
   hideWindow(): Promise<void>
   restoreWindow(): Promise<void>

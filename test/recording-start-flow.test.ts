@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RecordingError } from '../src/shared/types'
-import { runStartFlow, type StartFlow } from '../src/renderer/src/recording/start-flow'
+import { recordingCountdownSeconds, runStartFlow, type StartFlow } from '../src/renderer/src/recording/start-flow'
 
 const targetGone: RecordingError = { code: 'target-gone', message: 'gone' }
 const accessDenied: RecordingError = { code: 'access-denied', message: 'denied' }
@@ -167,5 +167,11 @@ describe('recording start flow', () => {
     expect(await runStartFlow(flow)).toBe(false)
     expect(flow.showError).toHaveBeenCalledWith({ code: 'internal', message: 'ipc closed' })
     expect(count(calls, 'restoreWindow')).toBe(1)
+  })
+})
+
+describe('the recording countdown length', () => {
+  it('always counts down at least 3 s before a recording', () => {
+    expect([0, 3, 5, 10].map(recordingCountdownSeconds)).toEqual([3, 3, 5, 10])
   })
 })
