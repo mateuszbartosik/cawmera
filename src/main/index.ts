@@ -18,9 +18,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { CaptureSource, CountdownRequest, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
+import { connectDirectly, disableProxyResolution } from './no-network'
 import { cancelWarmTake, recordingVideoFile, registerRecording, stopLiveTake } from './recording'
 
 registerMediaScheme()
+disableProxyResolution(app.commandLine)
 
 let win: BrowserWindow | null = null
 /** Set once the renderer agreed to close (no unsaved shots, or the user chose to discard them). */
@@ -513,7 +515,9 @@ if (!app.requestSingleInstanceLock()) {
 
   // No spellchecking anywhere, so Chromium never fetches a dictionary from Google's CDN: Cawmera
   // makes no network requests at all. Done as each session is created, before any download starts.
+  // The same goes for proxies: Cawmera never makes a request, so it never looks for a proxy (WPAD, DNS).
   app.on('session-created', (created) => {
+    void connectDirectly(created)
     created.setSpellCheckerEnabled(false)
     created.setSpellCheckerLanguages([])
   })
