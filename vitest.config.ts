@@ -8,5 +8,5 @@ export default defineConfig({
       '@shared': resolve(__dirname, 'src/shared')
     }
   },
-  test: { include: ['test/**/*.test.ts'], environment: 'node' }
+  test: { include: ['test/**/*.test.ts'], exclude: ['**/*.perf.test.ts', '**/node_modules/**'], environment: 'node' }
 })

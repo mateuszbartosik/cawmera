@@ -254,31 +254,6 @@ describe('the take view', () => {
     expect(takeViewFor(entry, sameValues, { x: 0, y: 120, w: 1920, h: 960 })).toBe(cropped)
   })
 
-  it('rebuilds a ten-minute take in under 200 ms', () => {
-    const long = longEntry(600_000)
-    const trimmedTo = (trim: Trim) => recording({ trim, pieces: wholeTake(600_000) })
-    const trims = [{ start: 0, end: 600_000 }, { start: 500, end: 599_000 }]
-    takeViewFor(long, trimmedTo(trims[0]), null)
-    const rebuildsMs = Array.from({ length: 5 }, (_, i) => {
-      const started = performance.now()
-      takeViewFor(long, trimmedTo(trims[(i + 1) % 2]), null)
-      return performance.now() - started
-    })
-    expect(Math.min(...rebuildsMs)).toBeLessThan(200)
-  })
-
-  it('follows a drag of a ten-minute take’s trim start in steps under 200 ms', () => {
-    const long = longEntry(600_000)
-    const startingAt = (start: number) => recording({ trim: { start, end: 600_000 }, pieces: wholeTake(600_000) })
-    takeViewFor(long, startingAt(0), null)
-    const stepsMs = Array.from({ length: 5 }, (_, i) => {
-      const started = performance.now()
-      takeViewFor(long, startingAt((i + 1) * 40), null)
-      return performance.now() - started
-    })
-    expect(Math.min(...stepsMs)).toBeLessThan(200)
-  })
-
   it('keeps the camera continuous across a cut and a speed-up', () => {
     const seams = [
       recording({ pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)] }),
@@ -456,13 +431,3 @@ describe('cropOf', () => {
     expect(cropOf({ x: 0, y: 120, w: 1920, h: 960 }, frame)).toEqual({ x: 0, y: 120, w: 1920, h: 960 })
   })
 })
-
-function longEntry(durationMs: number): RecordingEntry {
-  const samplesPerSecond = 120
-  const cursor = Array.from({ length: (durationMs * samplesPerSecond) / 1000 }, (_, i): CursorSample => {
-    const t = (i * 1000) / samplesPerSecond
-    return { t, ...wanderAt(t), shape: 'arrow' }
-  })
-  const clicks = Array.from({ length: durationMs / 2000 }, (_, i) => clickOnPath(1000 + i * 2000))
-  return entryOf('long', monitorTake(durationMs, cursor, clicks))
-}
