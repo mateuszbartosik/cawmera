@@ -149,6 +149,33 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
   })
 })
 
+describe('the end of a video stopped from the taskbar reads only what plays', () => {
+  const { stoppedBy, raw } = takes['a taskbar stop']
+  const clean = withoutStopClick(raw, stoppedBy)
+  const recording = recordingDocFor(clean, null, stopClickOf(raw, stoppedBy))
+  const viewWith = (patch: Partial<RecordingDoc>) => takeViewFor(entryOf(clean), { ...recording, ...patch }, null)
+
+  it.each([0.6, 1])('keeps the cursor hidden after it fades out, though the trip to the taskbar follows (smoothing %s)', (smoothing) => {
+    const view = viewWith({ smoothing, hideWhenStill: true })
+    expect(view.map.spans).toEqual([{ source: { start: 0, end: lookAtResult.endMs }, outputStart: 0, rate: 1 }])
+    const frames = outputFrameTimes(view.map, FPS)
+    const lastClick = workClicks.at(-1)!
+    const hiddenFrom = frames.findIndex((t) => t > lastClick.t && cursorAt(view.cursor, t, true, view.frame) === null)
+    expect(frames[hiddenFrom]).toBeLessThan(lookAtResult.endMs - 500)
+    for (const t of frames.slice(hiddenFrom)) expect(cursorAt(view.cursor, t, true, view.frame)).toBeNull()
+  })
+
+  it.each([0.6, 1])('keeps the cursor on the last place it rested to the end (smoothing %s)', (smoothing) => {
+    const view = viewWith({ smoothing, hideWhenStill: false })
+    const resting = outputFrameTimes(view.map, FPS).filter((t) => t >= lookAtResult.startMs + 700)
+    expect(resting.at(-1)).toBeGreaterThan(lookAtResult.endMs - 20)
+    for (const t of resting) {
+      const at = cursorAt(view.cursor, t, false, view.frame)!
+      expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeLessThan(0.01)
+    }
+  })
+})
+
 describe('a taskbar stop right after the last click', () => {
   const finalClick = leftClick(7000, next)
   const stopClick: Click = { t: 9000, ...taskbarButton, button: 'left', up: null }

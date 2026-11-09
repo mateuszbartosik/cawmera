@@ -45,7 +45,7 @@ export function shutterTimes(t: number, fps: number, blur: number, samples: numb
 
 function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout, ti: number, k: number): void {
   const { video, view, doc, settings, style, backdrop } = scene
-  const { crop, frame, track } = view
+  const { crop, frame, track, effectClicks } = view
   const { content } = layout
   const ctx = target as CanvasRenderingContext2D
   const camera = cameraAt(ti, view.zooms, frame, settings.zoomSpeed)
@@ -73,7 +73,7 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   })
   const sizeScale = layout.scale * track.scale
   if (settings.clickEffect !== 'off') {
-    for (const click of activeClicks(track.clicks, ti, settings.clickEffect, frame)) {
+    for (const click of activeClicks(effectClicks, ti, settings.clickEffect, frame)) {
       const at = toComposition(click)
       drawClickEffect(ctx, { ...click, ...at }, settings.clickEffect, style.accent, CLICK_EFFECT_RADIUS_PX * sizeScale)
     }
@@ -81,7 +81,7 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   const cursor = cursorAt(view.cursor, ti, settings.hideWhenStill, frame)
   if (cursor) {
     const heightPx = CURSOR_BASE_PX * settings.cursorSize * sizeScale
-    drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(track.clicks, ti))
+    drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(effectClicks, ti))
   }
 }
 
@@ -90,8 +90,8 @@ function lookOf(scene: RecordingScene, t: number) {
   return JSON.stringify([
     cameraAt(t, view.zooms, view.frame, settings.zoomSpeed),
     cursorAt(view.cursor, t, settings.hideWhenStill, view.frame),
-    activeClicks(view.track.clicks, t, settings.clickEffect, view.frame),
-    pressScale(view.track.clicks, t)
+    activeClicks(view.effectClicks, t, settings.clickEffect, view.frame),
+    pressScale(view.effectClicks, t)
   ])
 }
 

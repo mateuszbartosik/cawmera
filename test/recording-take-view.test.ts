@@ -3,7 +3,7 @@ import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { cameraAt, type CameraState } from '../src/renderer/src/recording/camera'
 import { buildCursorPath, cursorAt, SMOOTHING_MAX_SIGMA_MS, type CursorFrame } from '../src/renderer/src/recording/cursor'
-import { activeClicks } from '../src/renderer/src/recording/effects'
+import { activeClicks, PRESS, pressScale } from '../src/renderer/src/recording/effects'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
 import { recordingScene } from '../src/renderer/src/recording/scene'
 import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
@@ -15,7 +15,7 @@ import { autoZooms } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
 const SAMPLE_MS = 8
-const piece =(start: number, end: number, rate: Rate = 1, cut = false): Piece => ({ start, end, rate, cut })
+const piece = (start: number, end: number, rate: Rate = 1, cut = false): Piece => ({ start, end, rate, cut })
 const entryOf = (id: string, track: RecordingTrack): RecordingEntry => ({ id, name: 'Recording', poster: null, track })
 const monitorTake = (durationMs: number, cursor: CursorSample[], clicks: Click[]): RecordingTrack =>
   ({ kind: 'monitor', ...frame, fps: 60, durationMs, scale: 1, cursor, clicks })
@@ -47,7 +47,7 @@ function expectSameCursor(actual: CursorFrame | null, expected: CursorFrame | nu
 
 describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew it', () => {
   const take = entryOf('stage-1', monitorTake(12_000, wandering(12_000, SAMPLE_MS),
-    [clickOnPath(2500), clickOnPath(4200), clickOnPath(5000), clickOnPath(7600), clickOnPath(8400), clickOnPath(10_400)]))
+    [clickOnPath(900), clickOnPath(2500), clickOnPath(4200), clickOnPath(5000), clickOnPath(7600), clickOnPath(8400), clickOnPath(10_400)]))
   const trim = { start: 1003, end: 10_997 }
   const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), ...patch })
 
@@ -82,14 +82,26 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
     }
   })
 
-  it.each([0.3, 0.6, 1])('draws the smoothed cursor where stage 1 did, away from the ends of the video (smoothing %s)', (smoothing) => {
+  it.each([0.3, 0.6, 1])('draws the smoothed cursor where stage 1 did, from the first frame until the end nears (smoothing %s)', (smoothing) => {
     const stage1 = buildCursorPath(take.track, smoothing, trim.end)
     const view = takeViewFor(take, settings({ smoothing }), null)
     const smoothingReach = 3 * smoothing * SMOOTHING_MAX_SIGMA_MS + SAMPLE_MS
-    const inside = outputFrameTimes(view.map, 60).filter((o) => o >= smoothingReach && o <= view.map.outputMs - smoothingReach)
-    expect(inside.length).toBeGreaterThan(500)
-    for (const o of inside) {
+    const compared = outputFrameTimes(view.map, 60).filter((o) => o <= view.map.outputMs - smoothingReach)
+    expect(compared[0]).toBe(0)
+    for (const o of compared) {
       expectSameCursor(cursorAt(view.cursor, o, true, view.frame), cursorAt(stage1, trim.start + o, true, frame))
+    }
+  })
+
+  it.each(['ring', 'ripple'] as const)('draws stage 1’s %s effects and presses on every exported frame, the one before the video included', (effect) => {
+    const view = takeViewFor(take, settings(), null)
+    expect(activeClicks(view.effectClicks, 0, effect, view.frame)).toHaveLength(1)
+    for (const o of outputFrameTimes(view.map, 60)) {
+      const now = activeClicks(view.effectClicks, o, effect, view.frame)
+      const then = activeClicks(take.track.clicks, trim.start + o, effect, frame)
+      expect(now.map(({ x, y }) => ({ x, y }))).toEqual(then.map(({ x, y }) => ({ x, y })))
+      now.forEach((active, i) => expect(active.progress).toBeCloseTo(then[i].progress, 9))
+      expect(pressScale(view.effectClicks, o)).toBeCloseTo(pressScale(take.track.clicks, trim.start + o), 9)
     }
   })
 
@@ -104,6 +116,56 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
     for (const o of outputFrameTimes(view.map, 60).filter((o) => o >= landing.t)) {
       const at = cursorAt(view.cursor, o, false, view.frame)!
       expect(Math.hypot(at.x - landing.x, at.y - landing.y)).toBeLessThan(0.01)
+    }
+  })
+})
+
+describe('the start of a video after a dragged trim start is stage 1’s', () => {
+  const resting = (x: number, y: number, fromMs: number, toMs: number): CursorSample[] =>
+    Array.from({ length: Math.floor((toMs - fromMs) / 16) }, (_, i) => ({ t: fromMs + i * 16, x, y, shape: 'arrow' }))
+  const trim = { start: 5000, end: 11_000 }
+  const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), ...patch })
+  const expectStage1Cursor = (take: RecordingEntry, smoothing: number) => {
+    const stage1 = buildCursorPath(take.track, smoothing, trim.end)
+    const view = takeViewFor(take, settings({ smoothing }), null)
+    for (const o of outputFrameTimes(view.map, 60)) {
+      expectSameCursor(cursorAt(view.cursor, o, true, view.frame), cursorAt(stage1, trim.start + o, true, frame))
+    }
+    return view
+  }
+
+  it.each([0, 0.6])('keeps a cursor that was still before it hidden (smoothing %s)', (smoothing) => {
+    const still = entryOf('still-before-start', monitorTake(12_000, resting(800, 400, 0, 12_000), []))
+    const view = expectStage1Cursor(still, smoothing)
+    for (const o of outputFrameTimes(view.map, 60)) expect(cursorAt(view.cursor, o, true, view.frame)).toBeNull()
+  })
+
+  it.each([0, 0.6])('fades out a cursor that stopped a second before it (smoothing %s)', (smoothing) => {
+    const moving = Array.from({ length: 250 }, (_, i): CursorSample => ({ t: i * 16, x: 200 + i * 4, y: 300, shape: 'arrow' }))
+    const stopped = entryOf('stopped-before-start', monitorTake(12_000, [...moving, ...resting(1200, 300, 4000, 12_000)], []))
+    const view = expectStage1Cursor(stopped, smoothing)
+    expect(cursorAt(view.cursor, 0, true, view.frame)!.opacity).toBe(1)
+    expect(cursorAt(view.cursor, 1000, true, view.frame)).toBeNull()
+  })
+
+  it('carries on the ring and the press of a click made just before it', () => {
+    const click: Click = { t: 4900, x: 800, y: 400, button: 'left', up: 5400 }
+    const clicked = entryOf('clicked-before-start', monitorTake(12_000, resting(800, 400, 0, 12_000), [click]))
+    const view = expectStage1Cursor(clicked, 0.6)
+    expect(view.track.clicks).toEqual([])
+    expect(view.zooms).toEqual([])
+    expect(activeClicks(view.effectClicks, 0, 'ring', view.frame)).toEqual([{ x: 800, y: 400, progress: 100 / 450 }])
+    expect(activeClicks(view.effectClicks, 349, 'ring', view.frame)).toHaveLength(1)
+    expect(activeClicks(view.effectClicks, 350, 'ring', view.frame)).toEqual([])
+    expect(pressScale(view.effectClicks, 0)).toBeCloseTo(PRESS.scale, 9)
+    expect(pressScale(view.effectClicks, 400)).toBeCloseTo(PRESS.scale, 9)
+    expect(pressScale(view.effectClicks, 400 + PRESS.ms)).toBe(1)
+    for (const o of outputFrameTimes(view.map, 60)) {
+      const now = activeClicks(view.effectClicks, o, 'ring', view.frame)
+      const then = activeClicks(clicked.track.clicks, trim.start + o, 'ring', frame)
+      expect(now.length).toBe(then.length)
+      now.forEach((active, i) => expect(active.progress).toBeCloseTo(then[i].progress, 9))
+      expect(pressScale(view.effectClicks, o)).toBeCloseTo(pressScale(clicked.track.clicks, trim.start + o), 9)
     }
   })
 })
@@ -177,15 +239,17 @@ describe('the take view', () => {
     expect(takeViewFor(entry, sameValues, { x: 0, y: 120, w: 1920, h: 960 })).toBe(cropped)
   })
 
-  it('rebuilds a ten-minute take in under 200 ms', () => {
+  it('rebuilds a ten-minute take in under 200 ms at smoothing 0', () => {
     const long = longEntry(600_000)
-    // Stage 1's Gaussian smoothing alone takes 65–130 ms on 72,000 samples; Task 8's spring replaces it.
+    // Stage 1's Gaussian smoothing alone takes 65–130 ms on 72,000 samples, too close to the budget to time it here.
     const smoothing = 0
     takeViewFor(long, recording({ smoothing, trim: { start: 0, end: 600_000 }, pieces: wholeTake(600_000) }), null)
     const started = performance.now()
     takeViewFor(long, recording({ smoothing, trim: { start: 500, end: 599_000 }, pieces: wholeTake(600_000) }), null)
     expect(performance.now() - started).toBeLessThan(200)
   })
+
+  it.todo('rebuilds a ten-minute take in under 200 ms at the default smoothing')
 
   it('keeps the camera continuous across a cut and a speed-up', () => {
     const seams = [

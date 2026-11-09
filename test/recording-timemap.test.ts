@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  mapTrack, outputFrameTimes, outputToSource, snapToOutput, sourceToOutput, timeMapOf, wholeTake, RATES, type Piece, type Rate
+  mapTrack, outputFrameTimes, outputToSource, preRollToOutput, snapToOutput, sourceToOutput, timeMapOf, wholeTake, RATES, type Piece, type Rate
 } from '../src/renderer/src/recording/timemap'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
 
@@ -145,6 +145,12 @@ describe('time map', () => {
     expect([sourceToOutput(map, 2500), sourceToOutput(map, 3000), sourceToOutput(map, 4999), sourceToOutput(map, 5000)]).toEqual([null, null, null, 2000])
     expect([snapToOutput(map, 2000), snapToOutput(map, 3000), snapToOutput(map, 4999)]).toEqual([2000, 2000, 2000])
     expect([outputToSource(map, 1999), outputToSource(map, 2000)]).toEqual([1999, 5000])
+  })
+  it('runs time before the video on below output 0 at the first span’s rate, and snaps the rest', () => {
+    const map = timeMapOf({ start: 2000, end: 9000 }, [piece(0, 5000, 2), piece(5000, 6000, 1, true), piece(6000, 10_000)])
+    expect([preRollToOutput(map, 0), preRollToOutput(map, 1500), preRollToOutput(map, 2000)]).toEqual([-1000, -250, 0])
+    expect([preRollToOutput(map, 4000), preRollToOutput(map, 5500), preRollToOutput(map, 9500)]).toEqual([1000, 1500, map.outputMs])
+    expect(preRollToOutput(timeMapOf({ start: 0, end: 4000 }, [piece(0, 4000, 1, true)]), 100)).toBe(0)
   })
   it('maps a track onto nothing when nothing plays', () => {
     const track: RecordingTrack = { kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 4000, scale: 1,

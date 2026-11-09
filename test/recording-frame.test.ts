@@ -130,6 +130,22 @@ describe('drawRecordingFrame', () => {
     expect(videoDraws).toEqual([[640, 360, 1280, 720, content.x, content.y, content.w, content.h]])
   })
 
+  it('draws the ring and the press of a click made just before the video starts', () => {
+    const click = { t: 900, x: 640, y: 360, button: 'left' as const, up: 1400 }
+    const clickedBefore = { ...track, clicks: [click], cursor: still.map((s) => ({ ...s, x: 640, y: 360 })) }
+    const trimmed = { ...settings, trim: { start: 1000, end: 6400 }, motionBlur: 0 }
+    const view = takeViewFor({ id: 'frame-before-start', name: 'Recording', poster: null, track: clickedBefore }, trimmed, null)
+    vi.mocked(effects.drawClickEffect).mockClear()
+    vi.mocked(cursorArt.drawCursor).mockClear()
+
+    drawRecordingFrame(fakeContext().ctx, { ...scene, view, settings: trimmed }, 0, 'export')
+
+    expect(effects.drawClickEffect).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(effects.drawClickEffect).mock.calls[0][1].progress).toBeCloseTo(100 / 450)
+    expect(cursorArt.drawCursor).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(cursorArt.drawCursor).mock.calls[0][4]).toBeCloseTo(effects.PRESS.scale)
+  })
+
   it('draws the click effect and the cursor where they happened, in composition px', () => {
     const click = { t: 1000, x: 640, y: 360, button: 'left' as const, up: 1090 }
     const resting = { ...track, scale: 1.5, clicks: [click], cursor: still.map((s) => ({ ...s, x: 640, y: 360 })) }

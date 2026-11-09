@@ -1,4 +1,5 @@
 import type { Rect } from '../render/geometry'
+import { firstIndexWhere } from './binary-search'
 import type { Click, CursorSample, RecordingTrack } from './track'
 import type { Trim } from './trim'
 
@@ -29,16 +30,7 @@ export function timeMapOf(trim: Trim, pieces: Piece[]): TimeMap {
   return { spans, outputMs, trimStart: trim.start }
 }
 
-function firstIndexWhere(spans: MappedSpan[], holds: (span: MappedSpan) => boolean): number {
-  let low = 0
-  let high = spans.length
-  while (low < high) {
-    const middle = (low + high) >> 1
-    if (holds(spans[middle])) high = middle
-    else low = middle + 1
-  }
-  return low
-}
+const firstSpanEndingAfter = (spans: MappedSpan[], sourceMs: number) => spans[firstIndexWhere(spans.length, (i) => spans[i].source.end > sourceMs)]
 
 const outputIn = (span: MappedSpan, sourceMs: number) => span.outputStart + (sourceMs - span.source.start) / span.rate
 
@@ -46,23 +38,28 @@ export function sourceToOutput(map: TimeMap, sourceMs: number): number | null {
   const { spans } = map
   if (spans.length === 0) return null
   if (sourceMs === spans[spans.length - 1].source.end) return map.outputMs
-  const span = spans[firstIndexWhere(spans, (s) => s.source.end > sourceMs)]
+  const span = firstSpanEndingAfter(spans, sourceMs)
   if (!span || sourceMs < span.source.start) return null
   return outputIn(span, sourceMs)
 }
 
 export function snapToOutput(map: TimeMap, sourceMs: number): number {
-  const { spans } = map
-  const span = spans[firstIndexWhere(spans, (s) => s.source.end > sourceMs)]
+  const span = firstSpanEndingAfter(map.spans, sourceMs)
   if (!span) return map.outputMs
   return sourceMs < span.source.start ? span.outputStart : outputIn(span, sourceMs)
+}
+
+/** Like snapToOutput, except that time before the first span runs on below output 0 at that span's rate. */
+export function preRollToOutput(map: TimeMap, sourceMs: number): number {
+  const first = map.spans[0]
+  return first && sourceMs < first.source.start ? outputIn(first, sourceMs) : snapToOutput(map, sourceMs)
 }
 
 export function outputToSource(map: TimeMap, outputMs: number): number {
   const { spans } = map
   if (spans.length === 0) return map.trimStart
   const clamped = Math.min(Math.max(outputMs, 0), map.outputMs)
-  const index = Math.max(0, firstIndexWhere(spans, (s) => s.outputStart > clamped) - 1)
+  const index = Math.max(0, firstIndexWhere(spans.length, (i) => spans[i].outputStart > clamped) - 1)
   const span = spans[index]
   return Math.min(span.source.end, span.source.start + (clamped - span.outputStart) * span.rate)
 }

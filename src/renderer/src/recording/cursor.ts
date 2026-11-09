@@ -1,4 +1,5 @@
 import type { Size } from '../render/geometry'
+import { firstIndexWhere } from './binary-search'
 import { LONGEST_CLICK_EFFECT_MS } from './effects'
 import { isInFrame, type Click, type CursorSample, type CursorShape, type RecordingTrack } from './track'
 
@@ -13,28 +14,12 @@ const GAUSSIAN_REACH_IN_SIGMAS = 3
 
 interface Point { t: number; x: number; y: number; shape: CursorShape | null }
 
-function lastIndexWhere(length: number, isAtOrBefore: (index: number) => boolean): number {
-  let low = 0
-  let high = length - 1
-  let found = -1
-  while (low <= high) {
-    const middle = (low + high) >> 1
-    if (isAtOrBefore(middle)) {
-      found = middle
-      low = middle + 1
-    } else {
-      high = middle - 1
-    }
-  }
-  return found
-}
-
 function lastIndexAtOrBefore(values: number[], target: number): number {
-  return lastIndexWhere(values.length, (index) => values[index] <= target)
+  return firstIndexWhere(values.length, (index) => values[index] > target) - 1
 }
 
 function firstIndexAtOrAfter(values: number[], target: number): number {
-  return lastIndexWhere(values.length, (index) => values[index] < target) + 1
+  return firstIndexWhere(values.length, (index) => values[index] >= target)
 }
 
 function withoutShapeFlickers(points: Point[]): Point[] {
@@ -198,7 +183,7 @@ function opacityWithin(span: ActiveSpan, t: number): number {
 }
 
 function opacityAt(spans: ActiveSpan[], t: number): number {
-  const index = lastIndexWhere(spans.length, (i) => spans[i].start - CURSOR_RULES.fadeMs <= t)
+  const index = firstIndexWhere(spans.length, (i) => spans[i].start - CURSOR_RULES.fadeMs > t) - 1
   const candidates = [spans[index], spans[index - 1]].filter((span) => span !== undefined)
   return Math.max(0, ...candidates.map((span) => opacityWithin(span, t)))
 }
