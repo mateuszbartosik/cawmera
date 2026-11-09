@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CURSOR_ART, cursorMatrix, drawCursor } from '../src/renderer/src/recording/cursor-art'
+import { CURSOR_ART, cursorMatrix, drawCursor, leansWhileMoving } from '../src/renderer/src/recording/cursor-art'
 import { activeClicks, drawClickEffect, pressScale } from '../src/renderer/src/recording/effects'
 import { CURSOR_SHAPES } from '../src/renderer/src/recording/track'
 import { fakeContext } from './fake-canvas'
@@ -43,6 +43,16 @@ describe('cursor art', () => {
     const turned = cursorMatrix('arrow', { x: 300, y: 200 }, 64, 0.2).slice(0, 4)
     const expected = [Math.cos(0.2), Math.sin(0.2), -Math.sin(0.2), Math.cos(0.2)].map((value) => 2 * value)
     turned.forEach((value, i) => expect(value).toBeCloseTo(expected[i]))
+  })
+
+  it('leans only the shapes held by their tip', () => {
+    expect(CURSOR_SHAPES.filter(leansWhileMoving)).toEqual(['arrow', 'hand', 'progress', 'help', 'other'])
+  })
+
+  it('keeps shapes held by their centre upright, whatever the tilt', () => {
+    const upright = CURSOR_SHAPES.filter((shape) => !leansWhileMoving(shape))
+    expect(upright).toEqual(['ibeam', 'wait', 'crosshair', 'not-allowed', 'move', 'resize-ew', 'resize-ns', 'resize-nwse', 'resize-nesw'])
+    for (const shape of upright) expect(cursorMatrix(shape, { x: 300, y: 200 }, 32, 0.2)).toEqual(cursorMatrix(shape, { x: 300, y: 200 }, 32))
   })
 
   it('draws the cursor turned by the tilt', () => {

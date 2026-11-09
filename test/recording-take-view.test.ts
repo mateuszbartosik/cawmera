@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { buildCameraPath, cameraAt, cameraTargets, type CameraState } from '../src/renderer/src/recording/camera'
-import { buildCursorPath, cursorAt, SMOOTHING_MAX_TAU_MS, tiltAt, type CursorFrame } from '../src/renderer/src/recording/cursor'
+import { buildCursorPath, cursorAt, SMOOTHING_MAX_TAU_MS, tiltAt, type CursorFrame, type CursorPath } from '../src/renderer/src/recording/cursor'
 import { activeClicks, PRESS, pressScale } from '../src/renderer/src/recording/effects'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
 import { recordingScene } from '../src/renderer/src/recording/scene'
@@ -107,7 +107,7 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
     }
   })
 
-  it.each([0.3, 0.6, 1])('sits on every click at its output time and holds on the last one to the end (smoothing %s)', (smoothing) => {
+  it.each([0, 0.3, 0.6, 1])('sits on every click at its output time and holds on the last one to the end (smoothing %s)', (smoothing) => {
     const view = takeViewFor(take, settings({ smoothing }), null)
     expect(view.track.clicks).toHaveLength(6)
     for (const click of view.track.clicks) {
@@ -296,7 +296,7 @@ describe('the take view', () => {
     }
   })
 
-  it.each([0.6, 1])('keeps the cursor on clicks on both sides of a cut (smoothing %s)', (smoothing) => {
+  it.each([0, 0.6, 1])('keeps the cursor on clicks on both sides of a cut (smoothing %s)', (smoothing) => {
     const atSeam = { ...entry, track: { ...entry.track, clicks: [click(3990, 700, 500), click(6000, 760, 420)] } }
     const view = takeViewFor(atSeam, recording({ smoothing, pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)] }), null)
     expect(view.track.clicks.map((c) => c.t)).toEqual([2990, 3000])
@@ -387,6 +387,18 @@ describe('the cursor at a cut’s seam', () => {
     for (const o of afterItHid) expect(cursorAt(view.cursor, o, true, view.frame)).toBeNull()
   })
 
+  it.each([0, 0.6])('shows a hidden cursor that moves right after a cut with the cut, not before it (smoothing %s)', (smoothing) => {
+    const movesOnAfterTheCut = entryOf('moves-on-after-the-cut', monitorTake(12_000, [
+      ...along(0, 4096, () => 500),
+      ...along(4096, 5904, (t) => 500 + (730 * (t - 4096)) / 1808),
+      ...along(5904, 12_000, (t) => 1230 + Math.min(Math.max(t - 6000, 0), 1000) / 2)
+    ], []))
+    const view = takeViewFor(movesOnAfterTheCut, cutOut(smoothing), null)
+    const beforeTheCut = outputFrameTimes(view.map, 60).filter((o) => o >= 1000 && o < seamMs)
+    for (const o of beforeTheCut) expect(cursorAt(view.cursor, o, true, view.frame)).toBeNull()
+    expect(cursorAt(view.cursor, seamMs, true, view.frame)!.opacity).toBe(1)
+  })
+
   it.each([0, 0.6, 1])('stands upright through a jump (smoothing %s)', (smoothing) => {
     const view = takeViewFor(movedInTheCut, cutOut(smoothing), null)
     for (const o of outputFrameTimes(view.map, 60)) expect(tiltAt(view.cursor, o, 1)).toBeCloseTo(0, 9)
@@ -406,6 +418,35 @@ describe('the cursor at a cut’s seam', () => {
     const view = takeViewFor(clicked, { ...cutOut(smoothing), pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 8000, 8), piece(8000, 12_000)] }, null)
     for (const values of [view.cursor.x, view.cursor.y, view.cursor.vx, view.cursor.vy]) expect(values.every(Number.isFinite)).toBe(true)
     for (const o of outputFrameTimes(view.map, 60)) expect(Number.isFinite(tiltAt(view.cursor, o, 1))).toBe(true)
+  })
+})
+
+describe('the cursor gliding into the end of the video and into a cut', () => {
+  const pxPerMs = 1
+  const xAt = (sourceMs: number) => 60 + pxPerMs * sourceMs
+  const steadyMove = entryOf('steady-move', monitorTake(1800,
+    Array.from({ length: 1800 / SAMPLE_MS + 1 }, (_, i): CursorSample => ({ t: i * SAMPLE_MS, x: xAt(i * SAMPLE_MS), y: 540, shape: 'arrow' })), []))
+  const expectOnPathAtFullSpeed = (path: CursorPath, index: number, sourceMs: number) => {
+    expect(Math.abs(path.x[index] - xAt(sourceMs))).toBeLessThan(0.1)
+    expect(path.vx[index]).toBeCloseTo(pxPerMs, 2)
+  }
+
+  it.each([0.3, 0.6, 1])('reaches a manual trim end at full speed on its path (smoothing %s)', (smoothing) => {
+    const view = takeViewFor(steadyMove, { ...DEFAULT_RECORDING, smoothing, trim: { start: 0, end: 1500 }, pieces: wholeTake(1800) }, null)
+    expectOnPathAtFullSpeed(view.cursor, view.cursor.t.length - 1, 1500)
+    for (const o of outputFrameTimes(view.map, 60)) expect(Math.abs(cursorAt(view.cursor, o, false, view.frame)!.x - xAt(o))).toBeLessThan(0.1)
+  })
+
+  it.each([0.3, 0.6, 1])('reaches a cut at full speed on its path and leaves it the same way (smoothing %s)', (smoothing) => {
+    const view = takeViewFor(steadyMove, { ...DEFAULT_RECORDING, smoothing, trim: { start: 0, end: 1800 },
+      pieces: [piece(0, 600), piece(600, 1200, 1, true), piece(1200, 1800)] }, null)
+    const seam = view.cursor.t.indexOf(600)
+    expect(view.cursor.t[seam + 1]).toBe(600)
+    expectOnPathAtFullSpeed(view.cursor, seam, 600)
+    expectOnPathAtFullSpeed(view.cursor, seam + 1, 1200)
+    for (const o of outputFrameTimes(view.map, 60)) {
+      expect(Math.abs(cursorAt(view.cursor, o, false, view.frame)!.x - xAt(o < 600 ? o : o + 600))).toBeLessThan(0.1)
+    }
   })
 })
 

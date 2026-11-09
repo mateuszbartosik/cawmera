@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildCursorPath, cursorAt, TILT, tiltAt, type CursorPath } from '../src/renderer/src/recording/cursor'
-import type { RecordingTrack } from '../src/renderer/src/recording/track'
+import { parseTrack, type RecordingTrack } from '../src/renderer/src/recording/track'
 
 const frame = { width: 1920, height: 1080 }
 const zigzag = Array.from({ length: 120 }, (_, i) => ({ t: i * 16, x: 500 + (i % 2) * 6 + i * 4, y: 300, shape: 'arrow' as const }))
@@ -44,6 +44,25 @@ describe('cursor path', () => {
         expect(Math.hypot(at.x - click.x, at.y - click.y)).toBeLessThan(0.5)
       }
     }
+  })
+
+  it('sits on a left and right click made at once, off the recorded path, at every smoothing including 0', () => {
+    const chord = [
+      { t: 805, x: 650, y: 280, button: 'left' as const, up: 900 },
+      { t: 805, x: 650, y: 280, button: 'right' as const, up: 900 }
+    ]
+    for (const smoothing of [0, 0.6, 1]) {
+      const at = cursorAt(buildCursorPath(track({ clicks: chord }), smoothing), 805, false, frame)!
+      expect(Math.hypot(at.x - 650, at.y - 280)).toBeLessThan(0.5)
+    }
+  })
+
+  it('glides through a sample time the helper wrote twice', () => {
+    const rows = Array.from({ length: 200 }, (_, i) => [i * 8, 100 + i * 4, 300, 0])
+    const repeated = parseTrack({ version: 1, kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 1600, scale: 1,
+      shapes: ['arrow'], cursor: [...rows.slice(0, 100), [792, 496, 300, 0], ...rows.slice(100)], clicks: [] })
+    const path = buildCursorPath(repeated, 0.6)
+    for (const t of [776, 792, 800, 808]) expect(cursorAt(path, t, false, frame)!.x).toBeCloseTo(100 + t / 2, 1)
   })
 
   it('does not lag behind a steady move', () => {

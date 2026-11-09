@@ -40,7 +40,10 @@ function shapeNamed(name: unknown): CursorShape {
   return (CURSOR_SHAPES as readonly unknown[]).includes(name) ? (name as CursorShape) : 'other'
 }
 
-/** Reads the helper's `track.json` (version 1) into a track with rows sorted by time. */
+/**
+ * Reads the helper's `track.json` (version 1) into a track with rows sorted by time. A time with two cursor samples keeps the
+ * last one written, since two samples at one time mark a cut's seam in the cursor path.
+ */
 export function parseTrack(json: unknown): RecordingTrack {
   if (typeof json !== 'object' || json === null) return invalidTrack()
   const raw = json as Record<string, unknown>
@@ -61,6 +64,7 @@ export function parseTrack(json: unknown): RecordingTrack {
       shape: shapeIndex === HIDDEN_SHAPE_INDEX ? null : (shapes[shapeIndex] ?? 'other')
     }))
     .sort((a, b) => a.t - b.t)
+    .filter((sample, i, sorted) => sample.t !== sorted[i + 1]?.t)
   const clicks = rowsOf(raw.clicks, CLICK_ROW_LENGTH)
     .filter(isFiniteRow)
     .map(([t, x, y, button, up]): Click => ({

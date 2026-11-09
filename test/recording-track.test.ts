@@ -42,6 +42,15 @@ describe('parseTrack', () => {
     for (const bad of invalid) expect(() => parseTrack(bad)).toThrow('Not a Cawmera recording track')
   })
 
+  it('keeps one cursor sample per time, the last one written', () => {
+    const track = parseTrack({ ...raw, cursor: [[0, 1, 1, 0], [8, 2, 2, 0], [16, 4, 4, 0], [8, 3, 3, 1]] })
+    expect(track.cursor).toEqual([
+      { t: 0, x: 1, y: 1, shape: 'arrow' },
+      { t: 8, x: 3, y: 3, shape: 'hand' },
+      { t: 16, x: 4, y: 4, shape: 'arrow' }
+    ])
+  })
+
   it('drops rows with non-finite numbers', () => {
     const track = parseTrack({ ...raw, cursor: [[0, 1, 2, 0], [1, null, 2, 0]], clicks: [[1, 2, 3, 0, -1], [null, 2, 3, 0, -1]] })
     expect(track.cursor).toHaveLength(1)

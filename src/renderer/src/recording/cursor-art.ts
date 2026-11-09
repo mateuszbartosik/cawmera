@@ -63,12 +63,19 @@ export const CURSOR_ART: Record<CursorShape, { d: string; hotspot: Point }> = {
   }
 }
 
-/** `tilt` is in radians, clockwise, about the hotspot. */
+/** A pointer held by its tip leans as it moves; a shape held by its centre, like the I-beam or a resize arrow, stays upright. */
+export function leansWhileMoving(shape: CursorShape): boolean {
+  const { hotspot } = CURSOR_ART[shape]
+  return hotspot.x !== CENTER.x || hotspot.y !== CENTER.y
+}
+
+/** `tilt` is in radians, clockwise, about the hotspot, for the shapes that lean while moving. */
 export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, tilt = 0): [number, number, number, number, number, number] {
   const scale = heightPx / ART_BOX
   const { hotspot } = CURSOR_ART[shape]
-  const cos = Math.cos(tilt) * scale
-  const sin = Math.sin(tilt) * scale
+  const lean = leansWhileMoving(shape) ? tilt : 0
+  const cos = Math.cos(lean) * scale
+  const sin = Math.sin(lean) * scale
   const turnedHotspot = { x: cos * hotspot.x - sin * hotspot.y, y: sin * hotspot.x + cos * hotspot.y }
   // `0 - sin`, not `-sin`: upright, the matrix is exactly the untilted one, with no −0 in it.
   return [cos, sin, 0 - sin, cos, at.x - turnedHotspot.x, at.y - turnedHotspot.y]
