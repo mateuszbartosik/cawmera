@@ -6,6 +6,7 @@ import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { drawRecordingFrame, shutterTimes, viewMatrix, type RecordingScene } from '../src/renderer/src/recording/frame'
 import { buildCameraPath, cameraAt, cameraTargets } from '../src/renderer/src/recording/camera'
+import { tiltAt } from '../src/renderer/src/recording/cursor'
 import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
 import { takeViewFor, type TakeView } from '../src/renderer/src/recording/take-view'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
@@ -90,6 +91,26 @@ describe('drawRecordingFrame', () => {
     expect(videoDraws(3000, 'export', panning)).toBe(8)
     expect(videoDraws(3500, 'export', panning)).toBe(1)
     expect(videoDraws(4000, 'export', panning)).toBe(1)
+  })
+
+  it('draws one sample once a cursor gliding to a stop moves under about a quarter pixel across the shutter', () => {
+    const glideThenRest = { ...track, cursor: still.map((sample, i) => ({ ...sample, x: 400 + Math.min(i, 150) * 6 })) }
+    const settling = { ...scene, view: withZooms(viewOf(glideThenRest), []) }
+    expect(videoDraws(2300, 'export', settling)).toBe(8)
+    expect(videoDraws(2800, 'export', settling)).toBe(1)
+  })
+
+  it('leans the cursor with its speed while tilt is on, and keeps it upright with tilt off', () => {
+    const gliding = { ...track, cursor: still.map((sample, i) => ({ ...sample, x: 400 + i * 4 })) }
+    const view = withZooms(viewOf(gliding), [])
+    const drawnTilt = (tilt: boolean) => {
+      vi.mocked(cursorArt.drawCursor).mockClear()
+      drawRecordingFrame(fakeContext().ctx, { ...scene, view, settings: { ...settings, tilt, motionBlur: 0 } }, 3000, 'export')
+      return vi.mocked(cursorArt.drawCursor).mock.calls[0][5]
+    }
+    expect(drawnTilt(true)).toBeGreaterThan(0)
+    expect(drawnTilt(true)).toBeCloseTo(tiltAt(view.cursor, 3000, track.scale), 9)
+    expect(drawnTilt(false)).toBe(0)
   })
 
   it('blends full-alpha layers into the target as a running mean and leaves the context as it found it', () => {

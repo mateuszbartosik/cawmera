@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCursorPath, cursorAt, type CursorPath } from '../src/renderer/src/recording/cursor'
+import { buildCursorPath, cursorAt, TILT, tiltAt, type CursorPath } from '../src/renderer/src/recording/cursor'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
 
 const frame = { width: 1920, height: 1080 }
@@ -17,29 +17,65 @@ describe('cursor path', () => {
     expect(cursorAt(path, 16, false, frame)!.x).toBeCloseTo(510)
   })
 
-  it('sits exactly on every click at its time, whatever the smoothing', () => {
-    for (const smoothing of [0.3, 0.6, 1]) {
+  it('sits exactly on every click at its time, at every smoothing including 0', () => {
+    for (const smoothing of [0, 0.3, 0.6, 1]) {
       const at = cursorAt(buildCursorPath(track(), smoothing), 800, false, frame)!
       expect(Math.hypot(at.x - 700, at.y - 300)).toBeLessThan(0.5)
     }
   })
 
-  it('sits on a click that falls between two samples', () => {
+  it('sits on a click off the recorded path that falls between two samples, at every smoothing including 0', () => {
     const clicks = [{ t: 805, x: 650, y: 280, button: 'left' as const, up: null }]
-    const at = cursorAt(buildCursorPath(track({ clicks }), 0.5), 805, false, frame)!
-    expect(Math.hypot(at.x - 650, at.y - 280)).toBeLessThan(0.5)
+    for (const smoothing of [0, 0.5, 1]) {
+      const at = cursorAt(buildCursorPath(track({ clicks }), smoothing), 805, false, frame)!
+      expect(Math.hypot(at.x - 650, at.y - 280)).toBeLessThan(0.5)
+    }
   })
 
-  it('pins two close clicks independently', () => {
+  it('pins two close clicks independently, at every smoothing including 0', () => {
     const clicks = [
       { t: 800, x: 700, y: 300, button: 'left' as const, up: null },
       { t: 900, x: 900, y: 500, button: 'left' as const, up: null }
     ]
-    const path = buildCursorPath(track({ clicks }), 1)
-    for (const click of clicks) {
-      const at = cursorAt(path, click.t, false, frame)!
-      expect(Math.hypot(at.x - click.x, at.y - click.y)).toBeLessThan(0.5)
+    for (const smoothing of [0, 1]) {
+      const path = buildCursorPath(track({ clicks }), smoothing)
+      for (const click of clicks) {
+        const at = cursorAt(path, click.t, false, frame)!
+        expect(Math.hypot(at.x - click.x, at.y - click.y)).toBeLessThan(0.5)
+      }
     }
+  })
+
+  it('does not lag behind a steady move', () => {
+    const ramp = Array.from({ length: 200 }, (_, i) => ({ t: i * 8, x: 100 + i * 4, y: 300, shape: 'arrow' as const }))
+    const path = buildCursorPath(track({ cursor: ramp, clicks: [], durationMs: 1600 }), 1)
+    expect(cursorAt(path, 800, false, frame)!.x).toBeCloseTo(500, 0)
+  })
+
+  it('knows its speed on both axes, in px per ms', () => {
+    const diagonal = Array.from({ length: 200 }, (_, i) => ({ t: i * 8, x: 100 + i * 4, y: 900 - i * 3, shape: 'arrow' as const }))
+    const path = buildCursorPath(track({ cursor: diagonal, clicks: [], durationMs: 1600 }), 0.6)
+    const middle = path.t.indexOf(800)
+    expect(path.vx[middle]).toBeCloseTo(0.5, 3)
+    expect(path.vy[middle]).toBeCloseTo(-0.375, 3)
+  })
+
+  it('tilts clockwise moving right, anticlockwise moving left, up to 10°, and stands upright when still', () => {
+    const moving = (direction: 1 | -1) => buildCursorPath(track({ clicks: [], durationMs: 800,
+      cursor: Array.from({ length: 100 }, (_, i) => ({ t: i * 8, x: 1000 + direction * i * 40, y: 300, shape: 'arrow' as const })) }), 0.6)
+    expect(tiltAt(moving(1), 400, 1)).toBeCloseTo((10 * Math.PI) / 180, 3)
+    expect(tiltAt(moving(-1), 400, 1)).toBeCloseTo((-10 * Math.PI) / 180, 3)
+    const still = Array.from({ length: 100 }, (_, i) => ({ t: i * 8, x: 500, y: 300, shape: 'arrow' as const }))
+    expect(tiltAt(buildCursorPath(track({ cursor: still, clicks: [], durationMs: 800 }), 0.6), 400, 1)).toBeCloseTo(0, 9)
+  })
+
+  it('leans in proportion to its speed in logical px', () => {
+    const halfSpeed = TILT.fullAtPxPerMs / 2
+    const cursor = Array.from({ length: 200 }, (_, i) => ({ t: i * 8, x: 500 + i * 8 * halfSpeed, y: 300, shape: 'arrow' as const }))
+    const path = buildCursorPath(track({ cursor, clicks: [], durationMs: 1600 }), 0.6)
+    const degrees = (radians: number) => (radians * 180) / Math.PI
+    expect(degrees(tiltAt(path, 800, 1))).toBeCloseTo(TILT.maxDeg / 2, 3)
+    expect(degrees(tiltAt(path, 800, 2))).toBeCloseTo(TILT.maxDeg / 4, 3)
   })
 
   it('irons out jitter', () => {

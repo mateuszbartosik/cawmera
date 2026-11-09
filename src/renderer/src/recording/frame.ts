@@ -4,7 +4,7 @@ import { drawBackground, drawBorder, drawFrameShadow, roundRectPath } from '../r
 import { clamp, type Size } from '../render/geometry'
 import { cameraAt, type CameraPath, type CameraState } from './camera'
 import { CURSOR_BASE_PX, drawCursor } from './cursor-art'
-import { cursorAt } from './cursor'
+import { cursorAt, tiltAt } from './cursor'
 import { activeClicks, drawClickEffect, pressScale } from './effects'
 import { recordingLayout, type RecordingLayout } from './layout'
 import type { RecordingDoc } from './settings'
@@ -25,8 +25,9 @@ export type Matrix = [number, number, number, number, number, number]
 
 const CLICK_EFFECT_RADIUS_PX = 28
 const OPAQUE_BASE = '#000'
-/** A spring only nears its goal: a camera moving under about a quarter output pixel across the shutter draws as still. */
+/** A spring only nears its goal: a camera or a cursor moving under about a quarter output pixel across the shutter draws as still. */
 const STILL_CAMERA_MOVE = { logDepth: 2.5e-4, focusPx: 0.1 }
+const STILL_CURSOR_MOVE_PX = 0.1
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -82,7 +83,8 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   const cursor = cursorAt(view.cursor, ti, settings.hideWhenStill, frame)
   if (cursor) {
     const heightPx = CURSOR_BASE_PX * settings.cursorSize * sizeScale
-    drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(effectClicks, ti))
+    const tilt = settings.tilt ? tiltAt(view.cursor, ti, track.scale) : 0
+    drawCursor(ctx, { ...cursor, ...toComposition(cursor) }, settings.look, heightPx, pressScale(effectClicks, ti), tilt)
   }
 }
 
@@ -93,13 +95,18 @@ function cameraStillBetween(camera: CameraPath, from: number, to: number): boole
     && Math.hypot(after.focus.x - before.focus.x, after.focus.y - before.focus.y) <= STILL_CAMERA_MOVE.focusPx
 }
 
-function lookOf(scene: RecordingScene, t: number) {
+function cursorStillBetween(scene: RecordingScene, from: number, to: number): boolean {
   const { view, settings } = scene
-  return JSON.stringify([
-    cursorAt(view.cursor, t, settings.hideWhenStill, view.frame),
-    activeClicks(view.effectClicks, t, settings.clickEffect, view.frame),
-    pressScale(view.effectClicks, t)
-  ])
+  const before = cursorAt(view.cursor, from, settings.hideWhenStill, view.frame)
+  const after = cursorAt(view.cursor, to, settings.hideWhenStill, view.frame)
+  if (!before || !after) return before === after
+  return before.shape === after.shape && before.opacity === after.opacity
+    && Math.hypot(after.x - before.x, after.y - before.y) <= STILL_CURSOR_MOVE_PX
+}
+
+function clickEffectsOf(scene: RecordingScene, t: number) {
+  const { view, settings } = scene
+  return JSON.stringify([activeClicks(view.effectClicks, t, settings.clickEffect, view.frame), pressScale(view.effectClicks, t)])
 }
 
 function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'export'): number[] {
@@ -107,7 +114,8 @@ function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'exp
   const times = shutterTimes(t, settings.fps, settings.motionBlur, BLUR_SAMPLES[quality])
   const first = times[0]
   const last = times[times.length - 1]
-  const still = cameraStillBetween(view.camera, first, last) && lookOf(scene, first) === lookOf(scene, last)
+  const still = cameraStillBetween(view.camera, first, last) && cursorStillBetween(scene, first, last)
+    && clickEffectsOf(scene, first) === clickEffectsOf(scene, last)
   return still ? [t] : times
 }
 

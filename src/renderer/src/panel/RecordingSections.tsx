@@ -11,7 +11,7 @@ import { takeViewFor } from '../recording/take-view'
 import { percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
-const CURSOR_KEYS = ['cursorSize', 'smoothing', 'look', 'clickEffect', 'hideWhenStill'] as const
+const CURSOR_KEYS = ['cursorSize', 'smoothing', 'look', 'clickEffect', 'hideWhenStill', 'tilt'] as const
 const MOTION_KEYS = ['motionBlur', 'zoomSpeed'] as const
 
 const LOOK_OPTIONS: { value: CursorLook; label: string }[] = [
@@ -122,6 +122,7 @@ export function CursorSection() {
         testId="click-effect"
       />
       <Switch label="Hide when still" checked={recording.hideWhenStill} onChange={(hideWhenStill) => setRecording({ hideWhenStill })} testId="hide-when-still" />
+      <Switch label="Tilt while moving" checked={recording.tilt} onChange={(tilt) => setRecording({ tilt })} testId="tilt-while-moving" />
     </Section>
   )
 }

@@ -63,17 +63,22 @@ export const CURSOR_ART: Record<CursorShape, { d: string; hotspot: Point }> = {
   }
 }
 
-export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number): [number, number, number, number, number, number] {
+/** `tilt` is in radians, clockwise, about the hotspot. */
+export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, tilt = 0): [number, number, number, number, number, number] {
   const scale = heightPx / ART_BOX
   const { hotspot } = CURSOR_ART[shape]
-  return [scale, 0, 0, scale, at.x - hotspot.x * scale, at.y - hotspot.y * scale]
+  const cos = Math.cos(tilt) * scale
+  const sin = Math.sin(tilt) * scale
+  const turnedHotspot = { x: cos * hotspot.x - sin * hotspot.y, y: sin * hotspot.x + cos * hotspot.y }
+  // `0 - sin`, not `-sin`: upright, the matrix is exactly the untilted one, with no −0 in it.
+  return [cos, sin, 0 - sin, cos, at.x - turnedHotspot.x, at.y - turnedHotspot.y]
 }
 
-export function drawCursor(ctx: CanvasRenderingContext2D, frame: CursorFrame, look: CursorLook, heightPx: number, press: number): void {
+export function drawCursor(ctx: CanvasRenderingContext2D, frame: CursorFrame, look: CursorLook, heightPx: number, press: number, tilt = 0): void {
   const { fill, outline } = LOOKS[look]
   ctx.save()
   ctx.globalAlpha *= frame.opacity
-  ctx.transform(...cursorMatrix(frame.shape, frame, heightPx * press))
+  ctx.transform(...cursorMatrix(frame.shape, frame, heightPx * press, tilt))
   const path = new Path2D(CURSOR_ART[frame.shape].d)
   ctx.shadowColor = SHADOW.color
   ctx.shadowBlur = SHADOW.blur

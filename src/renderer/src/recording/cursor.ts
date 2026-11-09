@@ -1,18 +1,26 @@
-import type { Size } from '../render/geometry'
+import { clamp, type Size } from '../render/geometry'
 import { firstIndexWhere } from './binary-search'
 import { LONGEST_CLICK_EFFECT_MS } from './effects'
+import { springStep, type Spring } from './spring'
 import { isInFrame, type Click, type CursorSample, type CursorShape, type RecordingTrack } from './track'
 
-export const SMOOTHING_MAX_SIGMA_MS = 120
+/** 100% smooths about as much as stage 1's Gaussian at σ = 120 ms: there and back, the spring spreads a sample over a standard deviation of 2τ. */
+export const SMOOTHING_MAX_TAU_MS = 60
+export const MIN_PIN_MS = 17
+/** The cursor leans by up to `maxDeg`, reached at a horizontal speed of `fullAtPxPerMs` logical px per ms. */
+export const TILT = { maxDeg: 10, fullAtPxPerMs: 2.5 }
 export const CURSOR_RULES = { stillAfterMs: 1500, showBeforeMoveMs: 150, stillPx: 2, fadeMs: 200, minShapeMs: 100, offFramePx: 32 }
 
 export interface ActiveSpan { start: number; end: number }
-export interface CursorPath { t: number[]; x: number[]; y: number[]; shape: (CursorShape | null)[]; activeSpans: ActiveSpan[] }
+/** Velocities are in px per ms. Two points at one time are a cut's seam, where the cursor jumps. */
+export interface CursorPath { t: number[]; x: number[]; y: number[]; vx: number[]; vy: number[]; shape: (CursorShape | null)[]; activeSpans: ActiveSpan[] }
 export interface CursorFrame { x: number; y: number; shape: CursorShape; opacity: number }
 
-const GAUSSIAN_REACH_IN_SIGMAS = 3
+/** Parallel arrays rather than an object per sample: a ten-minute take has 72,000 samples. */
+type Samples = Pick<CursorPath, 't' | 'x' | 'y' | 'shape'>
+interface IndexRange { from: number; to: number }
 
-interface Point { t: number; x: number; y: number; shape: CursorShape | null }
+const CRITICALLY_DAMPED = 1
 
 function lastIndexAtOrBefore(values: number[], target: number): number {
   return firstIndexWhere(values.length, (index) => values[index] > target) - 1
@@ -22,90 +30,143 @@ function firstIndexAtOrAfter(values: number[], target: number): number {
   return firstIndexWhere(values.length, (index) => values[index] >= target)
 }
 
-function withoutShapeFlickers(points: Point[]): Point[] {
-  const result = points.map((point) => ({ ...point }))
+function startsAfterSeam(times: number[], index: number): boolean {
+  return index > 0 && times[index] === times[index - 1]
+}
+
+function withoutShapeFlickers(times: number[], shapes: (CursorShape | null)[]): (CursorShape | null)[] {
+  const result = [...shapes]
   let runStart = 0
   while (runStart < result.length) {
     let runEnd = runStart
-    while (runEnd + 1 < result.length && result[runEnd + 1].shape === result[runStart].shape) runEnd++
+    while (runEnd + 1 < result.length && result[runEnd + 1] === result[runStart]) runEnd++
     const isLastRun = runEnd + 1 === result.length
     const isFirstRun = runStart === 0
-    if (!isFirstRun && !isLastRun && result[runEnd + 1].t - result[runStart].t < CURSOR_RULES.minShapeMs) {
-      const previousShape = result[runStart - 1].shape
-      for (let i = runStart; i <= runEnd; i++) result[i].shape = previousShape
+    if (!isFirstRun && !isLastRun && times[runEnd + 1] - times[runStart] < CURSOR_RULES.minShapeMs) {
+      const previousShape = result[runStart - 1]
+      for (let i = runStart; i <= runEnd; i++) result[i] = previousShape
     }
     runStart = runEnd + 1
   }
   return result
 }
 
-function gaussianSmoothed(points: Point[], sigma: number): Point[] {
-  if (sigma === 0) return points
-  const times = points.map((point) => point.t)
-  const reach = sigma * GAUSSIAN_REACH_IN_SIGMAS
-  return points.map((point) => {
-    const from = firstIndexAtOrAfter(times, point.t - reach)
-    const to = lastIndexAtOrBefore(times, point.t + reach)
-    let weightSum = 0
-    let x = 0
-    let y = 0
-    for (let i = from; i <= to; i++) {
-      const distance = (times[i] - point.t) / sigma
-      const weight = Math.exp(-0.5 * distance * distance)
-      weightSum += weight
-      x += points[i].x * weight
-      y += points[i].y * weight
-    }
-    return { ...point, x: x / weightSum, y: y / weightSum }
-  })
+function samplesOf(cursor: CursorSample[]): Samples {
+  const t = cursor.map((sample) => sample.t)
+  return {
+    t,
+    x: cursor.map((sample) => sample.x),
+    y: cursor.map((sample) => sample.y),
+    shape: withoutShapeFlickers(t, cursor.map((sample) => sample.shape))
+  }
+}
+
+function runsBetweenSeams(times: number[]): IndexRange[] {
+  const runs = [{ from: 0, to: times.length }]
+  for (let i = 1; i < times.length; i++) {
+    if (!startsAfterSeam(times, i)) continue
+    runs[runs.length - 1].to = i
+    runs.push({ from: i, to: times.length })
+  }
+  return runs
+}
+
+/** In place: a follower at rest on the first value steps towards each next one, then follows that back from the last, which cancels its lag. */
+function followedThereAndBack(times: number[], values: number[], { from, to }: IndexRange, spring: Spring): void {
+  let state: [number, number] = [values[from], 0]
+  for (let i = from + 1; i < to; i++) {
+    state = springStep(state[0], state[1], values[i], spring, times[i] - times[i - 1])
+    values[i] = state[0]
+  }
+  state = [values[to - 1], 0]
+  for (let i = to - 2; i >= from; i--) {
+    state = springStep(state[0], state[1], values[i], spring, times[i + 1] - times[i])
+    values[i] = state[0]
+  }
+}
+
+function springSmoothed(samples: Samples, tau: number): Samples {
+  if (tau === 0 || samples.t.length === 0) return samples
+  const spring: Spring = { omega: 1 / tau, damping: CRITICALLY_DAMPED }
+  const x = [...samples.x]
+  const y = [...samples.y]
+  for (const run of runsBetweenSeams(samples.t)) {
+    followedThereAndBack(samples.t, x, run, spring)
+    followedThereAndBack(samples.t, y, run, spring)
+  }
+  return { ...samples, x, y }
+}
+
+function valueAt(times: number[], values: number[], t: number): number {
+  const last = times.length - 1
+  const index = lastIndexAtOrBefore(times, t)
+  if (index < 0) return values[0]
+  if (index >= last) return values[last]
+  const span = times[index + 1] - times[index]
+  const progress = span === 0 ? 0 : (t - times[index]) / span
+  return values[index] + (values[index + 1] - values[index]) * progress
 }
 
 function positionAt(times: number[], xs: number[], ys: number[], t: number): { x: number; y: number } {
-  const last = times.length - 1
-  const index = lastIndexAtOrBefore(times, t)
-  if (index < 0) return { x: xs[0], y: ys[0] }
-  if (index >= last) return { x: xs[last], y: ys[last] }
-  const span = times[index + 1] - times[index]
-  const progress = span === 0 ? 0 : (t - times[index]) / span
-  return { x: xs[index] + (xs[index + 1] - xs[index]) * progress, y: ys[index] + (ys[index + 1] - ys[index]) * progress }
+  return { x: valueAt(times, xs, t), y: valueAt(times, ys, t) }
 }
 
-function pinnedToClicks(smoothed: Point[], clicks: Click[], sigma: number): Point[] {
-  if (sigma === 0 || clicks.length === 0 || smoothed.length === 0) return smoothed
-  const times = smoothed.map((point) => point.t)
-  const xs = smoothed.map((point) => point.x)
-  const ys = smoothed.map((point) => point.y)
-
-  const withClickPoints = [...smoothed]
-  for (const click of clicks) {
-    const index = lastIndexAtOrBefore(times, click.t)
-    if (index >= 0 && times[index] === click.t) continue
-    const shape = smoothed[Math.max(0, index)].shape
-    withClickPoints.push({ t: click.t, ...positionAt(times, xs, ys, click.t), shape })
+/** New arrays with a point on the path at each of the ascending `times` that has none. */
+function withPointsAt(samples: Samples, times: number[]): Samples {
+  const result: Samples = { t: [], x: [], y: [], shape: [] }
+  const add = (t: number, x: number, y: number, shape: CursorShape | null) => {
+    result.t.push(t)
+    result.x.push(x)
+    result.y.push(y)
+    result.shape.push(shape)
   }
-  withClickPoints.sort((a, b) => a.t - b.t)
+  let next = 0
+  const addSamplesUntil = (end: number) => {
+    for (; next < samples.t.length && samples.t[next] <= end; next++) add(samples.t[next], samples.x[next], samples.y[next], samples.shape[next])
+  }
+  for (const t of times) {
+    addSamplesUntil(t)
+    if (result.t.at(-1) === t) continue
+    const shape = result.t.length > 0 ? result.shape[result.shape.length - 1] : (samples.shape[0] ?? null)
+    add(t, valueAt(samples.t, samples.x, t), valueAt(samples.t, samples.y, t), shape)
+  }
+  addSamplesUntil(Number.POSITIVE_INFINITY)
+  return result
+}
 
-  const pinTimes = withClickPoints.map((point) => point.t)
-  const corrected = withClickPoints.map((point) => ({ ...point }))
+function pinnedToClicks(samples: Samples, clicks: Click[], tau: number): Samples {
+  if (clicks.length === 0 || samples.t.length === 0) return samples
+  const pinned = withPointsAt(samples, clicks.map((click) => click.t))
   clicks.forEach((click, i) => {
-    const gaps = [clicks[i - 1], clicks[i + 1]].filter((other) => other !== undefined).map((other) => Math.abs(other.t - click.t))
-    // Narrowed to half the gap to the nearest click so neighbouring corrections never overlap.
-    const clickSigma = Math.min(sigma, ...gaps.map((gap) => gap / 2))
-    if (clickSigma <= 0) return
-    const smoothedAtClick = positionAt(times, xs, ys, click.t)
-    const offsetX = click.x - smoothedAtClick.x
-    const offsetY = click.y - smoothedAtClick.y
-    const radius = 2 * clickSigma
-    const from = firstIndexAtOrAfter(pinTimes, click.t - radius)
-    const to = lastIndexAtOrBefore(pinTimes, click.t + radius)
-    for (let k = from; k <= to; k++) {
-      const u = Math.abs(pinTimes[k] - click.t) / radius
+    const halfGaps = [clicks[i - 1], clicks[i + 1]].filter((other) => other !== undefined).map((other) => Math.abs(other.t - click.t) / 2)
+    // Narrowed to half the gap to the nearest click, below MIN_PIN_MS too, so neighbouring corrections never overlap.
+    const pinMs = Math.min(...halfGaps, Math.max(MIN_PIN_MS, 2 * tau))
+    if (pinMs <= 0) return
+    const offsetX = click.x - valueAt(samples.t, samples.x, click.t)
+    const offsetY = click.y - valueAt(samples.t, samples.y, click.t)
+    const radius = 2 * pinMs
+    const pull = (k: number) => {
+      const u = Math.abs(pinned.t[k] - click.t) / radius
       const weight = (1 - u * u) ** 2
-      corrected[k].x += offsetX * weight
-      corrected[k].y += offsetY * weight
+      pinned.x[k] += offsetX * weight
+      pinned.y[k] += offsetY * weight
     }
+    const at = lastIndexAtOrBefore(pinned.t, click.t)
+    for (let k = at; k >= 0 && click.t - pinned.t[k] < radius; k--) {
+      pull(k)
+      if (startsAfterSeam(pinned.t, k)) break
+    }
+    for (let k = at + 1; k < pinned.t.length && pinned.t[k] - click.t < radius && !startsAfterSeam(pinned.t, k); k++) pull(k)
   })
-  return corrected
+  return pinned
+}
+
+function velocitiesOf(times: number[], values: number[]): number[] {
+  return values.map((_, i) => {
+    const before = startsAfterSeam(times, i) ? i : Math.max(0, i - 1)
+    const after = i + 1 < values.length && !startsAfterSeam(times, i + 1) ? i + 1 : i
+    return after === before ? 0 : (values[after] - values[before]) / (times[after] - times[before])
+  })
 }
 
 function mergedSpans(spans: ActiveSpan[]): ActiveSpan[] {
@@ -119,18 +180,22 @@ function mergedSpans(spans: ActiveSpan[]): ActiveSpan[] {
   return merged
 }
 
-function activeSpansOf(points: Point[], clicks: Click[]): ActiveSpan[] {
-  if (points.length === 0) return []
+function activeSpansOf({ t, x, y }: Samples, clicks: Click[]): ActiveSpan[] {
+  if (t.length === 0) return []
   const spanAround = (from: number, to: number): ActiveSpan => ({
     start: from - CURSOR_RULES.showBeforeMoveMs,
     end: to + CURSOR_RULES.stillAfterMs
   })
-  const spans = [spanAround(points[0].t, points[0].t), ...clicks.map((click) => spanAround(click.t, click.t))]
-  let anchor = points[0]
-  for (let i = 1; i < points.length; i++) {
-    if (Math.hypot(points[i].x - anchor.x, points[i].y - anchor.y) <= CURSOR_RULES.stillPx) continue
-    spans.push(spanAround(points[i - 1].t, points[i].t))
-    anchor = points[i]
+  const spans = [spanAround(t[0], t[0]), ...clicks.map((click) => spanAround(click.t, click.t))]
+  let anchor = 0
+  for (let i = 1; i < t.length; i++) {
+    if (startsAfterSeam(t, i)) {
+      anchor = i
+      continue
+    }
+    if (Math.hypot(x[i] - x[anchor], y[i] - y[anchor]) <= CURSOR_RULES.stillPx) continue
+    spans.push(spanAround(t[i - 1], t[i]))
+    anchor = i
   }
   return mergedSpans(spans)
 }
@@ -141,35 +206,34 @@ function landingClickOf(track: RecordingTrack, endMs: number): Click | null {
   return lastClick && endMs - lastClick.t <= LONGEST_CLICK_EFFECT_MS ? lastClick : null
 }
 
-function heldOnLandingClick(cursor: CursorSample[], landingClick: Click | null): CursorSample[] {
-  if (!landingClick) return cursor
-  return cursor.map((sample) => (sample.t > landingClick.t ? { ...sample, x: landingClick.x, y: landingClick.y } : sample))
+function heldOnLandingClick(samples: Samples, landingClick: Click | null): Samples {
+  if (!landingClick) return samples
+  const after = lastIndexAtOrBefore(samples.t, landingClick.t) + 1
+  return { ...samples, x: [...samples.x].fill(landingClick.x, after), y: [...samples.y].fill(landingClick.y, after) }
 }
 
-function exactlyOnLandingClick(points: Point[], landingClick: Click | null): Point[] {
-  if (!landingClick) return points
-  const before = points.filter((point) => point.t < landingClick.t)
-  const shape = before[before.length - 1]?.shape ?? points[0]?.shape ?? null
-  const landed = points.filter((point) => point.t >= landingClick.t).map((point) => ({ ...point, x: landingClick.x, y: landingClick.y }))
-  if (landed[0]?.t !== landingClick.t) landed.unshift({ t: landingClick.t, x: landingClick.x, y: landingClick.y, shape })
-  return [...before, ...landed]
+function exactlyOnLandingClick(samples: Samples, landingClick: Click | null): Samples {
+  if (!landingClick) return samples
+  const held = withPointsAt(samples, [landingClick.t])
+  const landed = firstIndexAtOrAfter(held.t, landingClick.t)
+  held.x.fill(landingClick.x, landed)
+  held.y.fill(landingClick.y, landed)
+  return held
 }
 
-/** Smoothing is 0..1. The smoothed path is pinned to every click up to the end so effects land exactly where the click happened. When the video ends while the last click's effect still plays, the cursor holds on that click. */
+/**
+ * Smoothing is 0..1, a spring run forward and then back, so the cursor glides without lagging. At every smoothing the path is
+ * pinned to every click up to the end so effects land exactly where the click happened. When the video ends while the last
+ * click's effect still plays, the cursor holds on that click. A cut's seam splits the path: the cursor jumps with the cut, and
+ * the jump isn't movement.
+ */
 export function buildCursorPath(track: RecordingTrack, smoothing: number, endMs = track.durationMs): CursorPath {
-  const sigma = Math.max(0, Math.min(1, smoothing)) * SMOOTHING_MAX_SIGMA_MS
+  const tau = clamp01(smoothing) * SMOOTHING_MAX_TAU_MS
   const landingClick = landingClickOf(track, endMs)
-  const steady = withoutShapeFlickers(heldOnLandingClick(track.cursor, landingClick))
   const clicks = track.clicks.filter((click) => click.t <= endMs)
-  const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), clicks, sigma)
-  const held = exactlyOnLandingClick(pinned, landingClick)
-  return {
-    t: held.map((point) => point.t),
-    x: held.map((point) => point.x),
-    y: held.map((point) => point.y),
-    shape: held.map((point) => point.shape),
-    activeSpans: activeSpansOf(held, clicks)
-  }
+  const steady = heldOnLandingClick(samplesOf(track.cursor), landingClick)
+  const path = exactlyOnLandingClick(pinnedToClicks(springSmoothed(steady, tau), clicks, tau), landingClick)
+  return { ...path, vx: velocitiesOf(path.t, path.x), vy: velocitiesOf(path.t, path.y), activeSpans: activeSpansOf(path, clicks) }
 }
 
 function clamp01(value: number): number {
@@ -202,4 +266,11 @@ export function cursorAt(path: CursorPath, t: number, hideWhenStill: boolean, fr
   const opacity = hideWhenStill ? opacityAt(path.activeSpans, t) : 1
   if (opacity === 0) return null
   return { x, y, shape, opacity }
+}
+
+/** Radians, clockwise positive: the cursor leans with its horizontal speed, like a pointer dragged by its tip. */
+export function tiltAt(path: CursorPath, t: number, scale: number): number {
+  if (path.t.length === 0) return 0
+  const lean = clamp(valueAt(path.t, path.vx, t) / scale / TILT.fullAtPxPerMs, -1, 1)
+  return (lean * TILT.maxDeg * Math.PI) / 180
 }

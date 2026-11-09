@@ -30,6 +30,8 @@ describe('recording document', () => {
   })
 
   it('keeps screenshots free of recording settings', () => expect(DEFAULT_DOC.recording).toBeNull())
+
+  it('tilts the cursor while it moves by default', () => expect(recordingDocFor(track, null).tilt).toBe(true))
 })
 
 describe('section resets', () => {

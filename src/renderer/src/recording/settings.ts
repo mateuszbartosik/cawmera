@@ -16,6 +16,7 @@ export interface RecordingDoc {
   look: CursorLook
   clickEffect: ClickEffect
   hideWhenStill: boolean
+  tilt: boolean
   motionBlur: number
   zoomSpeed: ZoomSpeed
   fps: RecordingFps
@@ -27,6 +28,7 @@ export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces'> = {
   look: 'light',
   clickEffect: 'ring',
   hideWhenStill: true,
+  tilt: true,
   motionBlur: 0.5,
   zoomSpeed: 'calm',
   fps: 60

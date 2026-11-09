@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { buildCameraPath, cameraAt, cameraTargets, type CameraState } from '../src/renderer/src/recording/camera'
-import { buildCursorPath, cursorAt, SMOOTHING_MAX_SIGMA_MS, type CursorFrame } from '../src/renderer/src/recording/cursor'
+import { buildCursorPath, cursorAt, SMOOTHING_MAX_TAU_MS, tiltAt, type CursorFrame } from '../src/renderer/src/recording/cursor'
 import { activeClicks, PRESS, pressScale } from '../src/renderer/src/recording/effects'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
 import { recordingScene } from '../src/renderer/src/recording/scene'
@@ -15,6 +15,7 @@ import { autoZooms } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
 const SAMPLE_MS = 8
+const SPRING_REACH_IN_TAUS = 30
 const piece = (start: number, end: number, rate: Rate = 1, cut = false): Piece => ({ start, end, rate, cut })
 const entryOf = (id: string, track: RecordingTrack): RecordingEntry => ({ id, name: 'Recording', poster: null, track })
 const monitorTake = (durationMs: number, cursor: CursorSample[], clicks: Click[]): RecordingTrack =>
@@ -86,7 +87,7 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
   it.each([0.3, 0.6, 1])('draws the smoothed cursor where stage 1 did, from the first frame until the end nears (smoothing %s)', (smoothing) => {
     const stage1 = buildCursorPath(take.track, smoothing, trim.end)
     const view = takeViewFor(take, settings({ smoothing }), null)
-    const smoothingReach = 3 * smoothing * SMOOTHING_MAX_SIGMA_MS + SAMPLE_MS
+    const smoothingReach = SPRING_REACH_IN_TAUS * smoothing * SMOOTHING_MAX_TAU_MS + SAMPLE_MS
     const compared = outputFrameTimes(view.map, 60).filter((o) => o <= view.map.outputMs - smoothingReach)
     expect(compared[0]).toBe(0)
     for (const o of compared) {
@@ -205,6 +206,16 @@ describe('the take view', () => {
     expect(activeClicks(view.track.clicks, fast.t + 225, 'ring', view.frame)[0].progress).toBeCloseTo(0.5)
   })
 
+  it.each([0, 0.6, 1])('keeps the cursor on both clicks of a double-click inside an 8× stretch (smoothing %s)', (smoothing) => {
+    const doubleClicked = { ...entry, track: { ...entry.track, clicks: [click(6000, 700, 500), click(6150, 704, 503)] } }
+    const view = takeViewFor(doubleClicked, recording({ smoothing, pieces: [piece(0, 5000), piece(5000, 8000, 8), piece(8000, 12_000)] }), null)
+    expect(view.track.clicks.map((c) => c.t)).toEqual([4125, 4143.75])
+    for (const kept of view.track.clicks) {
+      const at = cursorAt(view.cursor, kept.t, false, view.frame)!
+      expect(Math.hypot(at.x - kept.x, at.y - kept.y)).toBeLessThan(0.5)
+    }
+  })
+
   it('frames a cropped take: positions move into the crop and a click outside it drives nothing', () => {
     const tabStrip = { ...entry, track: { ...entry.track, clicks: [clicks[0], click(5000, 600, 40), ...clicks.slice(1)] } }
     const view = takeViewFor(tabStrip, recording(), { x: 0, y: 120, w: 1920, h: 960 })
@@ -243,10 +254,9 @@ describe('the take view', () => {
     expect(takeViewFor(entry, sameValues, { x: 0, y: 120, w: 1920, h: 960 })).toBe(cropped)
   })
 
-  it('rebuilds a ten-minute take in under 200 ms at smoothing 0', () => {
+  it('rebuilds a ten-minute take in under 200 ms', () => {
     const long = longEntry(600_000)
-    // Stage 1's Gaussian smoothing alone takes 65–130 ms on 72,000 samples, too close to the budget to time it here.
-    const trimmedTo = (trim: Trim) => recording({ smoothing: 0, trim, pieces: wholeTake(600_000) })
+    const trimmedTo = (trim: Trim) => recording({ trim, pieces: wholeTake(600_000) })
     const trims = [{ start: 0, end: 600_000 }, { start: 500, end: 599_000 }]
     takeViewFor(long, trimmedTo(trims[0]), null)
     const rebuildsMs = Array.from({ length: 5 }, (_, i) => {
@@ -257,7 +267,17 @@ describe('the take view', () => {
     expect(Math.min(...rebuildsMs)).toBeLessThan(200)
   })
 
-  it.todo('rebuilds a ten-minute take in under 200 ms at the default smoothing')
+  it('follows a drag of a ten-minute take’s trim start in steps under 200 ms', () => {
+    const long = longEntry(600_000)
+    const startingAt = (start: number) => recording({ trim: { start, end: 600_000 }, pieces: wholeTake(600_000) })
+    takeViewFor(long, startingAt(0), null)
+    const stepsMs = Array.from({ length: 5 }, (_, i) => {
+      const started = performance.now()
+      takeViewFor(long, startingAt((i + 1) * 40), null)
+      return performance.now() - started
+    })
+    expect(Math.min(...stepsMs)).toBeLessThan(200)
+  })
 
   it('keeps the camera continuous across a cut and a speed-up', () => {
     const seams = [
@@ -339,6 +359,53 @@ describe('the cursor at the edges of what plays', () => {
   it('moves into the cropped frame', () => {
     const view = takeViewFor(sparse, raw({ trim: { start: 1000, end: 10_000 } }), { x: 50, y: 20, w: 1600, h: 900 })
     expectCursorAt(view, 0, { x: 150, y: 180, shape: 'arrow' })
+  })
+})
+
+describe('the cursor at a cut’s seam', () => {
+  const along = (fromMs: number, toMs: number, xAt: (t: number) => number): CursorSample[] =>
+    Array.from({ length: (toMs - fromMs) / 16 }, (_, i) => ({ t: fromMs + i * 16, x: xAt(fromMs + i * 16), y: 400, shape: 'arrow' }))
+  const movedInTheCut = entryOf('moved-in-the-cut', monitorTake(12_000, [
+    ...along(0, 4096, () => 500),
+    ...along(4096, 5904, (t) => 500 + (730 * (t - 4096)) / 1808),
+    ...along(5904, 12_000, () => 1230)
+  ], []))
+  const seamMs = 3000
+  const cutOut = (smoothing: number, trim = { start: 1000, end: 11_000 }): RecordingDoc =>
+    ({ ...DEFAULT_RECORDING, smoothing, trim, pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)] })
+
+  it.each([0, 0.6, 1])('jumps with the cut instead of gliding across it (smoothing %s)', (smoothing) => {
+    const view = takeViewFor(movedInTheCut, cutOut(smoothing), null)
+    for (const o of outputFrameTimes(view.map, 60)) {
+      expect(cursorAt(view.cursor, o, false, view.frame)!.x).toBeCloseTo(o < seamMs ? 500 : 1230, 6)
+    }
+  })
+
+  it.each([0, 0.6])('keeps a hidden still cursor hidden across a cut it moved in (smoothing %s)', (smoothing) => {
+    const view = takeViewFor(movedInTheCut, cutOut(smoothing), null)
+    const afterItHid = outputFrameTimes(view.map, 60).filter((o) => o >= 1000)
+    for (const o of afterItHid) expect(cursorAt(view.cursor, o, true, view.frame)).toBeNull()
+  })
+
+  it.each([0, 0.6, 1])('stands upright through a jump (smoothing %s)', (smoothing) => {
+    const view = takeViewFor(movedInTheCut, cutOut(smoothing), null)
+    for (const o of outputFrameTimes(view.map, 60)) expect(tiltAt(view.cursor, o, 1)).toBeCloseTo(0, 9)
+  })
+
+  it.each([0.6, 1])('reads nothing past the cut before it, as at the end of the video (smoothing %s)', (smoothing) => {
+    const wandered = entryOf('wandered-through-the-cut', monitorTake(12_000, wandering(12_000, SAMPLE_MS), []))
+    const cut = takeViewFor(wandered, cutOut(smoothing), null)
+    const endingAtTheCut = takeViewFor(wandered, cutOut(smoothing, { start: 1000, end: 4000 }), null)
+    for (const o of outputFrameTimes(endingAtTheCut.map, 60)) {
+      expectSameCursor(cursorAt(cut.cursor, o, true, cut.frame), cursorAt(endingAtTheCut.cursor, o, true, endingAtTheCut.frame))
+    }
+  })
+
+  it.each([0, 0.6, 1])('has a finite place and speed everywhere across cuts and speed-ups (smoothing %s)', (smoothing) => {
+    const clicked = entryOf('clicked-across-edits', monitorTake(12_000, wandering(12_000, SAMPLE_MS), [3990, 6000, 7000].map(clickOnPath)))
+    const view = takeViewFor(clicked, { ...cutOut(smoothing), pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 8000, 8), piece(8000, 12_000)] }, null)
+    for (const values of [view.cursor.x, view.cursor.y, view.cursor.vx, view.cursor.vy]) expect(values.every(Number.isFinite)).toBe(true)
+    for (const o of outputFrameTimes(view.map, 60)) expect(Number.isFinite(tiltAt(view.cursor, o, 1))).toBe(true)
   })
 })
 
