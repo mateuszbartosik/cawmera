@@ -1,8 +1,8 @@
-import { ALL_FORMATS, BufferTarget, CanvasSource, Input, Mp4OutputFormat, Output, Quality, UrlSource, VideoSampleSink } from 'mediabunny'
+import { ALL_FORMATS, BufferTarget, CanvasSource, Input, Mp4OutputFormat, Output, Quality, UrlSource, VideoSampleSink, type Source } from 'mediabunny'
 import { recordingUrl } from '@shared/media'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
-import { drawRecordingFrame } from './frame'
+import { drawRecordingFrame, sampleTimes } from './frame'
 import type { RecordingEntry } from './registry'
 import { recordingScene } from './scene'
 import type { RecordingDoc } from './settings'
@@ -10,16 +10,37 @@ import { outputFrameTimes, outputToSource } from './timemap'
 
 const MS_PER_SECOND = 1000
 
+export interface ExportTiming {
+  frames: number
+  decodeWaitMs: number
+  drawMs: number
+  encodeWaitMs: number
+  /** Part of `drawMs` spent on frames drawn from more than one blur sample. */
+  blurDrawMs: number
+  blurredFrames: number
+  drawnSamples: number
+  /** Flushing the encoder and finishing the file. */
+  finalizeMs: number
+}
+
+export interface ExportOptions {
+  source?: Source
+  onTiming?: (timing: ExportTiming) => void
+  /** Waits for the canvas work of every frame to finish inside the draw stage, so the GPU's share lands in `drawMs`, not in `encodeWaitMs`. */
+  settleDraws?: boolean
+}
+
 export async function exportRecordingVideo(
   entry: RecordingEntry,
   doc: Doc & { recording: RecordingDoc },
   style: HouseStyle,
   backdrop: ImageBitmap | null,
-  onProgress: (share: number) => void
+  onProgress: (share: number) => void,
+  options: ExportOptions = {}
 ): Promise<Uint8Array> {
   const { fps } = doc.recording
   const input = new Input({
-    source: new UrlSource(recordingUrl(entry.id), { getRetryDelay: () => null }),
+    source: options.source ?? new UrlSource(recordingUrl(entry.id), { getRetryDelay: () => null }),
     formats: ALL_FORMATS
   })
   try {
@@ -42,19 +63,43 @@ export async function exportRecordingVideo(
     try {
       const sourceSeconds = times.map((outputMs) => Math.max(outputToSource(map, outputMs) / MS_PER_SECOND, firstFrameSeconds))
       const samples = new VideoSampleSink(track).samplesAtTimestamps(sourceSeconds)
+      const timing: ExportTiming = { frames: 0, decodeWaitMs: 0, drawMs: 0, encodeWaitMs: 0, blurDrawMs: 0, blurredFrames: 0, drawnSamples: 0, finalizeMs: 0 }
+      const iterator = samples[Symbol.asyncIterator]()
       let index = 0
-      for await (const sample of samples) {
+      for (;;) {
+        const decodeStart = performance.now()
+        const next = await iterator.next()
+        timing.decodeWaitMs += performance.now() - decodeStart
+        if (next.done) break
+        const sample = next.value
         try {
           if (!sample) throw new Error('The recording has no picture at this point.')
-          drawRecordingFrame(ctx, { ...scene, video: sample.toCanvasImageSource() }, times[index], 'export')
+          const frameScene = { ...scene, video: sample.toCanvasImageSource() }
+          const sampleCount = options.onTiming ? sampleTimes(frameScene, times[index], 'export').length : 1
+          const drawStart = performance.now()
+          drawRecordingFrame(ctx, frameScene, times[index], 'export')
+          if (options.settleDraws) ctx.getImageData(0, 0, 1, 1)
+          const drawMs = performance.now() - drawStart
+          timing.drawMs += drawMs
+          timing.drawnSamples += sampleCount
+          if (sampleCount > 1) {
+            timing.blurDrawMs += drawMs
+            timing.blurredFrames++
+          }
         } finally {
           sample?.close()
         }
+        const encodeStart = performance.now()
         await encoder.add(index / fps, 1 / fps)
+        timing.encodeWaitMs += performance.now() - encodeStart
         index++
         onProgress(index / times.length)
       }
+      timing.frames = index
+      const finalizeStart = performance.now()
       await output.finalize()
+      timing.finalizeMs = performance.now() - finalizeStart
+      options.onTiming?.(timing)
     } catch (error) {
       await output.cancel().catch(() => undefined)
       throw error

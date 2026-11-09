@@ -6,3 +6,6 @@ native/recorder/build/
 *.log
 .DS_Store
 *.tsbuildinfo
+out-bench/
+bench/.cache/
+bench/results/

@@ -14,6 +14,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
+    "bench:export": "node scripts/bench.mjs export",
     "build:web": "vite build --config vite.web.config.ts",
     "build:recorder": "node scripts/build-recorder.mjs",
     "dist:win": "npm run build:recorder && npm run build && electron-builder --win",

@@ -109,7 +109,7 @@ function clickEffectsOf(scene: RecordingScene, t: number) {
   return JSON.stringify([activeClicks(view.effectClicks, t, settings.clickEffect, view.frame), pressScale(view.effectClicks, t)])
 }
 
-function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'export'): number[] {
+export function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'export'): number[] {
   const { view, settings } = scene
   const times = shutterTimes(t, settings.fps, settings.motionBlur, BLUR_SAMPLES[quality])
   const first = times[0]
