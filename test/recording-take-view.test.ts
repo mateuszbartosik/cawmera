@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
-import { cameraAt, type CameraState } from '../src/renderer/src/recording/camera'
+import { buildCameraPath, cameraAt, cameraTargets, type CameraState } from '../src/renderer/src/recording/camera'
 import { buildCursorPath, cursorAt, SMOOTHING_MAX_SIGMA_MS, type CursorFrame } from '../src/renderer/src/recording/cursor'
 import { activeClicks, PRESS, pressScale } from '../src/renderer/src/recording/effects'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
@@ -64,13 +64,14 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
     expect(outputFrameTimes(map, fps).map((o) => outputToSource(map, o))).toEqual(stage1FrameTimes(trim, fps))
   })
 
-  it.each(['calm', 'quick'] as const)('zooms and moves the camera as stage 1 did (%s)', (speed) => {
+  it.each(['calm', 'quick'] as const)('zooms as stage 1 did and moves the camera on stage 1’s zooms (%s)', (speed) => {
     const stage1 = autoZooms(take.track.clicks, frame, trim, speed)
+    const stage1Camera = buildCameraPath(cameraTargets(stage1, frame, speed), speed, frame)
     const view = takeViewFor(take, settings({ zoomSpeed: speed }), null)
     expect(stage1).toHaveLength(2)
     expect(view.zooms).toEqual(stage1.map((zoom) => ({ ...zoom, start: zoom.start - trim.start, end: zoom.end - trim.start })))
     for (const o of outputFrameTimes(view.map, 60)) {
-      expectSameCamera(cameraAt(o, view.zooms, view.frame, speed), cameraAt(trim.start + o, stage1, frame, speed))
+      expectSameCamera(cameraAt(view.camera, o), cameraAt(stage1Camera, trim.start + o))
     }
   })
 
@@ -218,6 +219,7 @@ describe('the take view', () => {
     expect(takeViewFor(entry, { ...base, cursorSize: 2 }, null)).toBe(view)
     const smoother = takeViewFor(entry, { ...base, smoothing: 0.2 }, null)
     expect(smoother.zooms).toBe(view.zooms)
+    expect(smoother.camera).toBe(view.camera)
     expect(smoother.cursor).not.toBe(view.cursor)
   })
 
@@ -228,9 +230,11 @@ describe('the take view', () => {
     expect(quicker.map).toBe(view.map)
     expect(quicker.cursor).toBe(view.cursor)
     expect(quicker.zooms).not.toBe(view.zooms)
+    expect(quicker.camera).not.toBe(view.camera)
     const retrimmed = takeViewFor(entry, { ...base, zoomSpeed: 'quick', trim: { start: 1000, end: 10_000 } }, null)
     expect(retrimmed.track).not.toBe(quicker.track)
     expect(retrimmed.zooms).not.toBe(quicker.zooms)
+    expect(retrimmed.camera).not.toBe(quicker.camera)
     expect(retrimmed.cursor).not.toBe(quicker.cursor)
     const sameValues = { ...base, zoomSpeed: 'quick' as const, trim: { start: 1000, end: 10_000 }, pieces: wholeTake(12_000) }
     expect(takeViewFor(entry, sameValues, null)).toBe(retrimmed)
@@ -258,9 +262,9 @@ describe('the take view', () => {
     ]
     for (const edited of seams) {
       const view = takeViewFor(entry, edited, null)
-      let previous = cameraAt(0, view.zooms, view.frame, 'calm')
+      let previous = cameraAt(view.camera, 0)
       for (let t = 1; t <= view.map.outputMs; t++) {
-        const current = cameraAt(t, view.zooms, view.frame, 'calm')
+        const current = cameraAt(view.camera, t)
         expect(Math.abs(current.depth - previous.depth)).toBeLessThan(0.01)
         expect(Math.hypot(current.focus.x - previous.focus.x, current.focus.y - previous.focus.y)).toBeLessThan(5)
         previous = current

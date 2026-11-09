@@ -5,10 +5,12 @@ import { recordingLayout } from '../src/renderer/src/recording/layout'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
 import { drawRecordingFrame, shutterTimes, viewMatrix, type RecordingScene } from '../src/renderer/src/recording/frame'
+import { buildCameraPath, cameraAt, cameraTargets } from '../src/renderer/src/recording/camera'
 import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
-import { takeViewFor } from '../src/renderer/src/recording/take-view'
+import { takeViewFor, type TakeView } from '../src/renderer/src/recording/take-view'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
+import type { ZoomSegment } from '../src/renderer/src/recording/zooms'
 import type { Rect } from '../src/renderer/src/render/geometry'
 import { fakeContext } from './fake-canvas'
 
@@ -60,18 +62,20 @@ describe('drawRecordingFrame', () => {
   const settings: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 }, pieces: wholeTake(6400) }
   const viewOf = (take: RecordingTrack, crop: Rect | null = null) =>
     takeViewFor({ id: 'frame', name: 'Recording', poster: null, track: take }, settings, crop)
+  const withZooms = (view: TakeView, zooms: ZoomSegment[]): TakeView =>
+    ({ ...view, zooms, camera: buildCameraPath(cameraTargets(zooms, view.frame, settings.zoomSpeed), settings.zoomSpeed, view.frame) })
   const scene: RecordingScene = {
     video,
     videoSize: { width: 2560, height: 1440 },
-    view: { ...viewOf(track), zooms: [{ start: 3000, end: 5000, depth: 2, focus: { x: 1280, y: 720 } }] },
+    view: withZooms(viewOf(track), [{ start: 3000, end: 5000, depth: 2, focus: { x: 1280, y: 720 } }]),
     doc: { ...DEFAULT_DOC, size: output },
     settings,
     style: DEFAULT_HOUSE_STYLE,
     backdrop: null
   }
-  const videoDraws = (t: number, quality: 'preview' | 'export') => {
+  const videoDraws = (t: number, quality: 'preview' | 'export', drawn = scene) => {
     const fake = fakeContext()
-    drawRecordingFrame(fake.ctx, scene, t, quality)
+    drawRecordingFrame(fake.ctx, drawn, t, quality)
     return fake.calls.filter((c) => c === 'drawImage:video').length
   }
 
@@ -79,6 +83,12 @@ describe('drawRecordingFrame', () => {
     expect(videoDraws(4000, 'export')).toBe(1)
     expect(videoDraws(2700, 'export')).toBe(8)
     expect(videoDraws(1000, 'preview')).toBe(1)
+  })
+
+  it('keeps blurring while the camera settles into a zoom, until it moves by under a hundredth of a pixel', () => {
+    const panning = { ...scene, view: withZooms(viewOf(track), [{ start: 3000, end: 5000, depth: 2, focus: { x: 900, y: 500 } }]) }
+    expect(videoDraws(3000, 'export', panning)).toBe(8)
+    expect(videoDraws(4000, 'export', panning)).toBe(1)
   })
 
   it('blends full-alpha layers into the target as a running mean and leaves the context as it found it', () => {
@@ -105,7 +115,7 @@ describe('drawRecordingFrame', () => {
       drawRecordingFrame(fake.ctx, scene, t, 'export')
       return Number(fake.calls.find((c) => c.startsWith('shadowBlur='))!.split('=')[1])
     }
-    expect(frameShadowBlur(4000)).toBeCloseTo(2 * frameShadowBlur(1000))
+    expect(frameShadowBlur(4000)).toBeCloseTo(cameraAt(scene.view.camera, 4000).depth * frameShadowBlur(1000))
   })
 
   it('paints every sample over an opaque base before the background', () => {
@@ -149,7 +159,7 @@ describe('drawRecordingFrame', () => {
   it('draws the click effect and the cursor where they happened, in composition px', () => {
     const click = { t: 1000, x: 640, y: 360, button: 'left' as const, up: 1090 }
     const resting = { ...track, scale: 1.5, clicks: [click], cursor: still.map((s) => ({ ...s, x: 640, y: 360 })) }
-    const clicked = { ...scene, view: { ...viewOf(resting), zooms: [] }, settings: { ...settings, motionBlur: 0 } }
+    const clicked = { ...scene, view: withZooms(viewOf(resting), []), settings: { ...settings, motionBlur: 0 } }
     const { content, scale } = recordingLayout(clicked.videoSize, output, DEFAULT_HOUSE_STYLE)
     const expected = { x: content.x + 640 * scale, y: content.y + 360 * scale }
     vi.mocked(effects.drawClickEffect).mockClear()

@@ -2,7 +2,7 @@ import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import { drawBackground, drawBorder, drawFrameShadow, roundRectPath } from '../render/compose'
 import { clamp, type Size } from '../render/geometry'
-import { cameraAt, type CameraState } from './camera'
+import { cameraAt, type CameraPath, type CameraState } from './camera'
 import { CURSOR_BASE_PX, drawCursor } from './cursor-art'
 import { cursorAt } from './cursor'
 import { activeClicks, drawClickEffect, pressScale } from './effects'
@@ -25,6 +25,8 @@ export type Matrix = [number, number, number, number, number, number]
 
 const CLICK_EFFECT_RADIUS_PX = 28
 const OPAQUE_BASE = '#000'
+/** A spring only nears its goal, so a camera that moves less than this across the shutter draws as still. */
+const STILL_CAMERA_MOVE = { logDepth: 1e-5, focusPx: 0.01 }
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
@@ -48,8 +50,7 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   const { crop, frame, track, effectClicks } = view
   const { content } = layout
   const ctx = target as CanvasRenderingContext2D
-  const camera = cameraAt(ti, view.zooms, frame, settings.zoomSpeed)
-  const [a, b, c, d, e, f] = viewMatrix(camera, layout, doc.size)
+  const [a, b, c, d, e, f] = viewMatrix(cameraAt(view.camera, ti), layout, doc.size)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = OPAQUE_BASE
   ctx.fillRect(0, 0, doc.size.width * k, doc.size.height * k)
@@ -85,10 +86,16 @@ function drawSample(target: Ctx, scene: RecordingScene, layout: RecordingLayout,
   }
 }
 
+function cameraStillBetween(camera: CameraPath, from: number, to: number): boolean {
+  const before = cameraAt(camera, from)
+  const after = cameraAt(camera, to)
+  return Math.abs(Math.log(after.depth / before.depth)) <= STILL_CAMERA_MOVE.logDepth
+    && Math.hypot(after.focus.x - before.focus.x, after.focus.y - before.focus.y) <= STILL_CAMERA_MOVE.focusPx
+}
+
 function lookOf(scene: RecordingScene, t: number) {
   const { view, settings } = scene
   return JSON.stringify([
-    cameraAt(t, view.zooms, view.frame, settings.zoomSpeed),
     cursorAt(view.cursor, t, settings.hideWhenStill, view.frame),
     activeClicks(view.effectClicks, t, settings.clickEffect, view.frame),
     pressScale(view.effectClicks, t)
@@ -96,11 +103,12 @@ function lookOf(scene: RecordingScene, t: number) {
 }
 
 function sampleTimes(scene: RecordingScene, t: number, quality: 'preview' | 'export'): number[] {
-  const { settings } = scene
+  const { view, settings } = scene
   const times = shutterTimes(t, settings.fps, settings.motionBlur, BLUR_SAMPLES[quality])
   const first = times[0]
   const last = times[times.length - 1]
-  return lookOf(scene, first) === lookOf(scene, last) ? [t] : times
+  const still = cameraStillBetween(view.camera, first, last) && lookOf(scene, first) === lookOf(scene, last)
+  return still ? [t] : times
 }
 
 interface Layer { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D }

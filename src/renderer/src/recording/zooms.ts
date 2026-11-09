@@ -1,5 +1,5 @@
 import { clamp, type Point, type Size } from '../render/geometry'
-import { ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
+import { clampFocus, ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
 import { isShownClick, type Click } from './track'
 import type { Trim } from './trim'
 
@@ -55,15 +55,10 @@ function groupClicks(clicks: Click[], frame: Size, rules: ZoomRules): Click[][] 
 function zoomAround(clicks: Click[], frame: Size, holdLimits: Span, rules: ZoomRules): ClickedZoom {
   const box = paddedBoxAround(clicks, frame, rules)
   const depth = Math.min(rules.maxDepth, frame.width / (box.right - box.left), frame.height / (box.bottom - box.top))
-  const halfViewX = frame.width / (2 * depth)
-  const halfViewY = frame.height / (2 * depth)
   return {
     clicks,
     depth,
-    focus: {
-      x: clamp((box.left + box.right) / 2, halfViewX, frame.width - halfViewX),
-      y: clamp((box.top + box.bottom) / 2, halfViewY, frame.height - halfViewY)
-    },
+    focus: clampFocus({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 }, depth, frame),
     start: clamp(clicks[0].t - rules.preClickMs, holdLimits.start, holdLimits.end),
     end: clamp(clicks[clicks.length - 1].t + rules.holdMs, holdLimits.start, holdLimits.end)
   }

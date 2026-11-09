@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cameraAt } from '../src/renderer/src/recording/camera'
+import { cameraAt, type CameraState } from '../src/renderer/src/recording/camera'
 import { cursorAt } from '../src/renderer/src/recording/cursor'
 import { activeClicks } from '../src/renderer/src/recording/effects'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
@@ -32,6 +32,12 @@ function glide(from: Spot, to: Spot, startMs: number, endMs: number): CursorSamp
 
 const rest = (at: Spot, startMs: number, endMs: number) => glide(at, at, startMs, endMs)
 const leftClick = (t: number, at: Spot): Click => ({ t, ...at, button: 'left', up: t + 90 })
+
+function expectWithinTwoPercentOfWide(camera: CameraState, movingOutOf: CameraState) {
+  expect(Math.log(camera.depth)).toBeLessThanOrEqual(0.02 * Math.log(movingOutOf.depth) + 1e-9)
+  expect(Math.abs(camera.focus.x - wide.focus.x)).toBeLessThanOrEqual(0.02 * Math.abs(movingOutOf.focus.x - wide.focus.x) + 1e-9)
+  expect(Math.abs(camera.focus.y - wide.focus.y)).toBeLessThanOrEqual(0.02 * Math.abs(movingOutOf.focus.y - wide.focus.y) + 1e-9)
+}
 
 const work = [
   ...glide({ x: 300, y: 200 }, search, 0, 1200),
@@ -143,9 +149,10 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
       { depth: 2.5, focus: { x: 500, y: 310 } },
       { depth: 2.5, focus: next }
     ])
-    const edgeFrames = exportedFrames.filter((t) => t <= 1000 || t >= view.map.outputMs - 1000)
-    for (const t of edgeFrames) expect(cameraAt(t, view.zooms, view.frame, speed)).toEqual(wide)
-    expect(cameraAt(exportedFrames.at(-1)!, view.zooms, view.frame, speed)).toEqual(wide)
+    const lastZoom = view.zooms.at(-1)!
+    for (const t of exportedFrames.filter((t) => t <= 1000)) expect(cameraAt(view.camera, t)).toEqual(wide)
+    for (const t of exportedFrames.filter((t) => t >= view.map.outputMs - 1000)) expectWithinTwoPercentOfWide(cameraAt(view.camera, t), lastZoom)
+    expectWithinTwoPercentOfWide(cameraAt(view.camera, exportedFrames.at(-1)!), lastZoom)
   })
 })
 

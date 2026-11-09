@@ -1,6 +1,6 @@
 import type { Rect, Size } from '../render/geometry'
 import { firstIndexWhere } from './binary-search'
-import type { ZoomSpeed } from './camera'
+import { buildCameraPath, cameraTargets, type CameraPath, type ZoomSpeed } from './camera'
 import { buildCursorPath, CURSOR_RULES, type CursorPath } from './cursor'
 import { LONGEST_CLICK_EFFECT_MS, PRESS } from './effects'
 import type { RecordingEntry } from './registry'
@@ -19,6 +19,7 @@ export interface TakeView {
   /** The track's clicks, and those just before the video whose ring or press still runs at its start. */
   effectClicks: Click[]
   zooms: ZoomSegment[]
+  camera: CameraPath
   cursor: CursorPath
 }
 
@@ -115,13 +116,15 @@ export function takeViewFor(entry: RecordingEntry, recording: RecordingDoc, crop
   if (sameZooms && sameCursor) return built.view
 
   const take = sameTake ? built.take : mappedTake(entry.track, trim, pieces, frameCrop)
+  const zooms = sameZooms ? built.view.zooms : autoZooms(take.track.clicks, take.frame, { start: 0, end: take.map.outputMs }, zoomSpeed)
   const view: TakeView = {
     map: take.map,
     crop: take.crop,
     frame: take.frame,
     track: take.track,
     effectClicks: take.effectClicks,
-    zooms: sameZooms ? built.view.zooms : autoZooms(take.track.clicks, take.frame, { start: 0, end: take.map.outputMs }, zoomSpeed),
+    zooms,
+    camera: sameZooms ? built.view.camera : buildCameraPath(cameraTargets(zooms, take.frame, zoomSpeed), zoomSpeed, take.frame),
     cursor: sameCursor ? built.view.cursor : buildCursorPath(take.trackWithPreRoll, smoothing)
   }
   builtViews.set(entry.track, { trim, pieces, crop: frameCrop, zoomSpeed, smoothing, take, view })

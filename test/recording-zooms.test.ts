@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { cameraAt, ZOOM_TRANSITION_MS } from '../src/renderer/src/recording/camera'
-import { autoZooms, ZOOM_RULES } from '../src/renderer/src/recording/zooms'
+import { buildCameraPath, cameraAt, cameraTargets, ZOOM_TRANSITION_MS, type ZoomSpeed } from '../src/renderer/src/recording/camera'
+import { autoZooms, ZOOM_RULES, type ZoomSegment } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
 const click = (t: number, x: number, y: number, button: 'left' | 'right' = 'left') => ({ t, x, y, button, up: t + 80 })
 const whole = (durationMs: number) => ({ start: 0, end: durationMs })
+const cameraFor = (zooms: ZoomSegment[], speed: ZoomSpeed) => buildCameraPath(cameraTargets(zooms, frame, speed), speed, frame)
 
 describe('autoZooms', () => {
   it('makes no zooms without clicks', () => expect(autoZooms([], frame, whole(10_000), 'calm')).toEqual([]))
@@ -44,8 +45,12 @@ describe('autoZooms', () => {
     expect(zooms).toHaveLength(1)
     expect(zooms[0].start).toBe(trim.start + edgeMs)
     expect(zooms[0].end).toBe(trim.end - edgeMs)
-    for (let t = trim.start; t <= trim.start + ZOOM_RULES.wideEdgeMs; t += 5) expect(cameraAt(t, zooms, frame, speed).depth).toBe(1)
-    for (let t = trim.end - ZOOM_RULES.wideEdgeMs; t <= trim.end; t += 5) expect(cameraAt(t, zooms, frame, speed).depth).toBe(1)
+    const camera = cameraFor(zooms, speed)
+    for (let t = trim.start; t <= trim.start + ZOOM_RULES.wideEdgeMs; t += 5) expect(cameraAt(camera, t).depth).toBe(1)
+    const twoPercentOfTheMoveOut = 0.02 * Math.log(zooms[0].depth) + 1e-9
+    for (let t = trim.end - ZOOM_RULES.wideEdgeMs; t <= trim.end; t += 5) {
+      expect(Math.log(cameraAt(camera, t).depth)).toBeLessThanOrEqual(twoPercentOfTheMoveOut)
+    }
   })
 
   it('counts only the clicks inside the trim', () => {
@@ -74,12 +79,13 @@ describe('autoZooms', () => {
   })
 
   it('keeps the meeting point inside both zooms and drops a zoom left too short', () => {
-    const edgeAtOneSecond = { ...ZOOM_RULES, wideEdgeMs: 300 }
+    const edgeAtOneSecond = { ...ZOOM_RULES, wideEdgeMs: 1000 - ZOOM_TRANSITION_MS.calm }
     const zooms = autoZooms([click(300, 100, 100), click(900, 1800, 1000)], frame, whole(10_000), 'calm', edgeAtOneSecond)
     expect(zooms).toEqual([{ start: 1000, end: 2400, depth: 2.5, focus: { x: 1536, y: 864 } }])
-    let previous = cameraAt(0, zooms, frame, 'calm')
+    const camera = cameraFor(zooms, 'calm')
+    let previous = cameraAt(camera, 0)
     for (let t = 1; t <= 4000; t++) {
-      const current = cameraAt(t, zooms, frame, 'calm')
+      const current = cameraAt(camera, t)
       expect(Math.abs(current.depth - previous.depth)).toBeLessThan(0.05)
       expect(Math.hypot(current.focus.x - previous.focus.x, current.focus.y - previous.focus.y)).toBeLessThan(40)
       previous = current
