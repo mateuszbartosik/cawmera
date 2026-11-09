@@ -26,8 +26,19 @@ export interface ExportTiming {
 export interface ExportOptions {
   source?: Source
   onTiming?: (timing: ExportTiming) => void
-  /** Waits for the canvas work of every frame to finish inside the draw stage, so the GPU's share lands in `drawMs`, not in `encodeWaitMs`. */
+  /** Waits, without reading pixels back, for the canvas work of every frame inside the draw stage, so the GPU's share lands in `drawMs`, not in `encodeWaitMs`. */
   settleDraws?: boolean
+}
+
+/** Waits for a canvas's queued work by reading one pixel of a snapshot into a CPU canvas, so the canvas itself is never read back. */
+function drawSettler(canvas: OffscreenCanvas): () => Promise<void> {
+  const probe = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!
+  return async () => {
+    const snapshot = await createImageBitmap(canvas)
+    probe.drawImage(snapshot, 0, 0, 1, 1)
+    probe.getImageData(0, 0, 1, 1)
+    snapshot.close()
+  }
 }
 
 export async function exportRecordingVideo(
@@ -64,36 +75,41 @@ export async function exportRecordingVideo(
       const sourceSeconds = times.map((outputMs) => Math.max(outputToSource(map, outputMs) / MS_PER_SECOND, firstFrameSeconds))
       const samples = new VideoSampleSink(track).samplesAtTimestamps(sourceSeconds)
       const timing: ExportTiming = { frames: 0, decodeWaitMs: 0, drawMs: 0, encodeWaitMs: 0, blurDrawMs: 0, blurredFrames: 0, drawnSamples: 0, finalizeMs: 0 }
+      const settle = options.settleDraws ? drawSettler(canvas) : null
       const iterator = samples[Symbol.asyncIterator]()
       let index = 0
-      for (;;) {
-        const decodeStart = performance.now()
-        const next = await iterator.next()
-        timing.decodeWaitMs += performance.now() - decodeStart
-        if (next.done) break
-        const sample = next.value
-        try {
-          if (!sample) throw new Error('The recording has no picture at this point.')
-          const frameScene = { ...scene, video: sample.toCanvasImageSource() }
-          const sampleCount = options.onTiming ? sampleTimes(frameScene, times[index], 'export').length : 1
-          const drawStart = performance.now()
-          drawRecordingFrame(ctx, frameScene, times[index], 'export')
-          if (options.settleDraws) ctx.getImageData(0, 0, 1, 1)
-          const drawMs = performance.now() - drawStart
-          timing.drawMs += drawMs
-          timing.drawnSamples += sampleCount
-          if (sampleCount > 1) {
-            timing.blurDrawMs += drawMs
-            timing.blurredFrames++
+      try {
+        for (;;) {
+          const decodeStart = performance.now()
+          const next = await iterator.next()
+          timing.decodeWaitMs += performance.now() - decodeStart
+          if (next.done) break
+          const sample = next.value
+          try {
+            if (!sample) throw new Error('The recording has no picture at this point.')
+            const frameScene = { ...scene, video: sample.toCanvasImageSource() }
+            const sampleCount = options.onTiming ? sampleTimes(frameScene, times[index], 'export').length : 1
+            const drawStart = performance.now()
+            drawRecordingFrame(ctx, frameScene, times[index], 'export')
+            if (settle) await settle()
+            const drawMs = performance.now() - drawStart
+            timing.drawMs += drawMs
+            timing.drawnSamples += sampleCount
+            if (sampleCount > 1) {
+              timing.blurDrawMs += drawMs
+              timing.blurredFrames++
+            }
+          } finally {
+            sample?.close()
           }
-        } finally {
-          sample?.close()
+          const encodeStart = performance.now()
+          await encoder.add(index / fps, 1 / fps)
+          timing.encodeWaitMs += performance.now() - encodeStart
+          index++
+          onProgress(index / times.length)
         }
-        const encodeStart = performance.now()
-        await encoder.add(index / fps, 1 / fps)
-        timing.encodeWaitMs += performance.now() - encodeStart
-        index++
-        onProgress(index / times.length)
+      } finally {
+        await iterator.return?.()
       }
       timing.frames = index
       const finalizeStart = performance.now()

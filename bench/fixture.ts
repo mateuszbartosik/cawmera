@@ -110,6 +110,9 @@ function drawRoundedRect(ctx: OffscreenCanvasRenderingContext2D, x: number, y: n
   ctx.fill()
 }
 
+/** Bump with every change to `drawUiFrame` or the encoding, so a cached fixture video is never reused after it. */
+export const FIXTURE_VERSION = 1
+
 /** Text rows, a scrolling list and a modal that opens and closes, at a size that scales with the width. */
 function drawUiFrame(ctx: OffscreenCanvasRenderingContext2D, options: FixtureOptions, seconds: number) {
   const { width, height, seconds: clipSeconds } = options

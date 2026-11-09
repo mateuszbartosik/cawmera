@@ -27,6 +27,16 @@ describe('the benchmark fixture', () => {
   })
 })
 
+describe('moving share', () => {
+  const rows = (positions: number[]) => positions.map((x, i) => ({ t: i * 50, x, y: 0, shape: 'arrow' as const }))
+  const track = (positions: number[]) => ({ kind: 'monitor' as const, width: 100, height: 100, fps: 60, durationMs: 400, scale: 1, cursor: rows(positions), clicks: [] })
+
+  it('counts the 100 ms windows where the cursor travels at least 2 px', () => {
+    expect(movingShare(track([0, 0, 0, 0, 0, 10, 20, 30, 30]))).toBe(0.5)
+    expect(movingShare(track([0, 0, 0, 0, 0, 0, 0, 0, 0]))).toBe(0)
+  })
+})
+
 describe('real-time factor', () => {
   it('reports how many times real time an export took', () => expect(realtimeFactor(38_000, 91_200)).toBeCloseTo(2.4))
 })

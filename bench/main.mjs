@@ -7,10 +7,14 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const cacheDirectory = join(root, 'bench', '.cache')
 const resultsDirectory = join(root, 'bench', 'results')
-const TIMEOUT_MS = 20 * 60 * 1000
+const SECONDS_PER_CLIP_SECOND_PER_RUN = 4
+const FIXED_TIMEOUT_MS = 5 * 60 * 1000
 
 const config = JSON.parse(process.argv.find((argument) => argument.startsWith('--bench-config='))?.slice('--bench-config='.length) ?? '{}')
 
+const timeoutMs = FIXED_TIMEOUT_MS + 1000 * SECONDS_PER_CLIP_SECOND_PER_RUN * (config.seconds ?? 20) * ((config.runs ?? 3) + 2)
+
+app.setPath('userData', join(cacheDirectory, 'profile'))
 app.commandLine.appendSwitch('no-proxy-server')
 
 function exitWith(code) {
@@ -82,6 +86,13 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     console.error('bench failed: timed out')
     exitWith(2)
-  }, TIMEOUT_MS).unref()
-  await window.loadFile(join(root, 'out-bench', 'export.html'))
+  }, timeoutMs).unref()
+  window.webContents.on('did-fail-load', (_event, code, description) => {
+    console.error(`bench failed: the page did not load (${code} ${description})`)
+    exitWith(1)
+  })
+  await window.loadFile(join(root, 'out-bench', 'export.html')).catch((error) => {
+    console.error(`bench failed: ${error.message}`)
+    exitWith(1)
+  })
 })
