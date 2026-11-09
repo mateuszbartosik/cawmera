@@ -10,6 +10,13 @@ describe('springStep', () => {
     }
   })
 
+  it.each([1, 0.8])('settles within 2% exactly at its settle time: from then on, and not 1% sooner (damping %s)', (damping) => {
+    const spring = springFor(900, damping)
+    const errorAt = (t: number) => Math.abs(1 - springStep(0, 0, 1, spring, t)[0])
+    expect(errorAt(0.99 * 900)).toBeGreaterThan(0.02)
+    for (let t = 900; t <= 4500; t++) expect(errorAt(t)).toBeLessThanOrEqual(0.02 + 1e-9)
+  })
+
   it('never overshoots when critically damped, and by under 2% at 0.8', () => {
     const peak = (damping: number) => Math.max(...Array.from({ length: 3000 }, (_, t) => springStep(0, 0, 1, springFor(900, damping), t)[0]))
     expect(peak(1)).toBeLessThanOrEqual(1)

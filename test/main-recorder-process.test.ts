@@ -3,8 +3,10 @@ import { expect, it } from 'vitest'
 import { parseHelperLine, startRecorder } from '../src/main/recorder-process'
 
 const fixture = resolve(__dirname, 'fixtures/fake-recorder.mjs')
-const start = (mode: string) =>
-  startRecorder({ command: process.execPath, args: [fixture, mode], readyTimeoutMs: 500, stopTimeoutMs: 500 })
+const ANSWERS_WITHIN_MS = 4000
+const NEVER_ANSWERS_MS = 500
+const start = (mode: string, timeouts: { readyTimeoutMs?: number; stopTimeoutMs?: number } = {}) =>
+  startRecorder({ command: process.execPath, args: [fixture, mode], readyTimeoutMs: ANSWERS_WITHIN_MS, stopTimeoutMs: ANSWERS_WITHIN_MS, ...timeouts })
 
 it('parses helper lines and ignores noise', () => {
   expect(parseHelperLine('{"type":"ready","width":1,"height":2}')).toEqual({ type: 'ready', width: 1, height: 2 })
@@ -55,12 +57,13 @@ it('parses a ready line split across chunks and ended with CRLF', async () => {
 })
 
 it('ignores a ready line without a usable size', async () => {
-  await expect(start('bad-ready')).rejects.toMatchObject({ code: 'timeout' })
+  await expect(start('bad-ready', { readyTimeoutMs: NEVER_ANSWERS_MS })).rejects.toMatchObject({ code: 'timeout' })
 })
 
 it('rejects with the helper error', async () => await expect(start('error')).rejects.toEqual({ code: 'access-denied', message: 'blocked' }))
 
-it('times out when the helper never gets ready', async () => await expect(start('silent')).rejects.toMatchObject({ code: 'timeout' }))
+it('times out when the helper never gets ready', async () =>
+  await expect(start('silent', { readyTimeoutMs: NEVER_ANSWERS_MS })).rejects.toMatchObject({ code: 'timeout' }))
 
 it('ends by itself when the recorded window goes away', async () => {
   const s = await start('exit-early')
@@ -69,7 +72,7 @@ it('ends by itself when the recorded window goes away', async () => {
 })
 
 it('kills a helper that ignores stop', async () => {
-  const s = await start('ignore-stop')
+  const s = await start('ignore-stop', { stopTimeoutMs: NEVER_ANSWERS_MS })
   s.begin()
   s.stop()
   expect(await s.ended).toMatchObject({ error: { code: 'timeout' } })

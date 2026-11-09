@@ -47,7 +47,8 @@ describe('autoZooms', () => {
     expect(zooms[0].end).toBe(trim.end - edgeMs)
     const camera = cameraFor(zooms, speed)
     for (let t = trim.start; t <= trim.start + ZOOM_RULES.wideEdgeMs; t += 5) expect(cameraAt(camera, t).depth).toBe(1)
-    const twoPercentOfTheMoveOut = 0.02 * Math.log(zooms[0].depth) + 1e-9
+    // The zoom-out starts from the tail of the zoom-in, so one settle time into it the camera is 2% out, give or take a hair.
+    const twoPercentOfTheMoveOut = 1.001 * 0.02 * Math.log(zooms[0].depth)
     for (let t = trim.end - ZOOM_RULES.wideEdgeMs; t <= trim.end; t += 5) {
       expect(Math.log(cameraAt(camera, t).depth)).toBeLessThanOrEqual(twoPercentOfTheMoveOut)
     }

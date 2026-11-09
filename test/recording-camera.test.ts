@@ -39,9 +39,34 @@ describe('cameraTargets', () => {
 describe('cameraAt', () => {
   it('is wide with no zooms', () => expect(cameraAt(pathFor([]), 5000)).toEqual(wide))
 
-  it('is within 2% of a zoom from its start to its end', () => {
+  it('is within 2% of a zoom’s depth and focus from its start to its end', () => {
     const path = pathFor([z(3000, 6000, 2, 500, 400)])
-    for (const t of [3000, 4500, 6000]) expect(share(cameraAt(path, t).depth, 2)).toBeGreaterThanOrEqual(0.98 - 1e-9)
+    for (const t of [3000, 4500, 6000]) {
+      const { depth, focus } = cameraAt(path, t)
+      expect(share(depth, 2)).toBeGreaterThanOrEqual(0.98 - 1e-9)
+      expect(Math.abs(focus.x - 500)).toBeLessThanOrEqual(0.02 * (960 - 500) + 1e-9)
+      expect(Math.abs(focus.y - 400)).toBeLessThanOrEqual(0.02 * (540 - 400) + 1e-9)
+    }
+  })
+
+  it('leaves a short hold’s focus no earlier than its midpoint, and is at the next one a settle time later', () => {
+    const path = pathFor([z(3000, 3150, 2.5, 400, 400), z(3150, 6000, 2.5, 800, 600)])
+    const leaving = cameraAt(path, 3075).focus
+    expect(Math.abs(leaving.x - 400)).toBeLessThanOrEqual(0.02 * (960 - 400))
+    expect(Math.abs(leaving.y - 400)).toBeLessThanOrEqual(0.02 * (540 - 400))
+    const arrived = cameraAt(path, 3075 + ZOOM_TRANSITION_MS.calm).focus
+    expect(Math.abs(arrived.x - 800)).toBeLessThanOrEqual(0.02 * (800 - 400))
+    expect(Math.abs(arrived.y - 600)).toBeLessThanOrEqual(0.02 * (600 - 400))
+  })
+
+  it('pans straight from one close zoom’s focus to the next, through the points between them', () => {
+    const path = pathFor([z(3000, 5000, 2, 400, 400), z(5200, 8000, 2, 1500, 700)], 'quick')
+    const move = Array.from({ length: 1500 }, (_, i) => cameraAt(path, 4500 + i))
+    for (const x of [675, 950, 1225]) {
+      const passing = move.find((camera) => camera.focus.x >= x)!
+      expect(passing.focus.y).toBeCloseTo(400 + ((passing.focus.x - 400) * 300) / 1100, 0)
+      expect(passing.depth).toBeCloseTo(2, 3)
+    }
   })
 
   it.each(['calm', 'quick'] as const)('starts moving ZOOM_TRANSITION_MS before a zoom, not earlier (%s)', (speed) => {
@@ -69,6 +94,23 @@ describe('cameraAt', () => {
     const close = pathFor([z(3000, 3600, 2, 400, 400), z(3900, 6000, 2.2, 1500, 700)])
     for (let t = 3600; t <= 3900; t += 10) expect(cameraAt(close, t).depth).toBeGreaterThan(1.8)
     expect(cameraAt(pathFor([z(3000, 4000, 2, 500, 400), z(8000, 9000, 2, 1500, 700)]), 6500).depth).toBeLessThan(1.02)
+  })
+
+  it('brings a quick zoom-out to rest at wide instead of stopping it dead at 1×', () => {
+    const path = pathFor([z(2000, 3000, 2.5, 960, 540)], 'quick')
+    const dropOver = (t: number) => cameraAt(path, t).depth - cameraAt(path, t + 1).depth
+    const zoomOut = Array.from({ length: 3000 }, (_, i) => 3000 + i)
+    const reachesWide = zoomOut.find((t) => cameraAt(path, t + 1).depth <= 1.001)!
+    const fastest = Math.max(...zoomOut.filter((t) => t < reachesWide).map(dropOver))
+    expect(dropOver(reachesWide)).toBeLessThan(0.01 * fastest)
+  })
+
+  it('never shows wider than the whole frame, even overshooting a target just above it', () => {
+    const path = buildCameraPath([
+      { at: 1000, state: { depth: 2.5, focus: { x: 960, y: 540 } } },
+      { at: 2000, state: { depth: 1.01, focus: { x: 960, y: 540 } } }
+    ], 'quick', frame)
+    for (let t = 2000; t < 4000; t += 2) expect(cameraAt(path, t).depth).toBeGreaterThanOrEqual(1)
   })
 
   it('never shows wider than the whole frame, and quick overshoots a zoom by under 2%', () => {

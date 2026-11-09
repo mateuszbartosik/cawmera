@@ -25,8 +25,8 @@ export type Matrix = [number, number, number, number, number, number]
 
 const CLICK_EFFECT_RADIUS_PX = 28
 const OPAQUE_BASE = '#000'
-/** A spring only nears its goal, so a camera that moves less than this across the shutter draws as still. */
-const STILL_CAMERA_MOVE = { logDepth: 1e-5, focusPx: 0.01 }
+/** A spring only nears its goal: a camera moving under about a quarter output pixel across the shutter draws as still. */
+const STILL_CAMERA_MOVE = { logDepth: 2.5e-4, focusPx: 0.1 }
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 

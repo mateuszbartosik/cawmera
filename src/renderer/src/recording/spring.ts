@@ -1,18 +1,32 @@
-/** A damped spring pulling a value towards a goal. `omega` is its natural frequency, per ms. */
+/** `omega` is per ms. */
 export interface Spring { omega: number; damping: number }
 
 const SETTLED_SHARE = 0.02
-/** ω × settle time for a critical spring: (1 + x)·e^(−x) = 0.02 at x = 5.834. */
-const CRITICAL_OMEGA_TIMES_SETTLE = 5.834
 
-/** A step from rest stays within 2% of its move from `settleMs` on. */
-export function springFor(settleMs: number, damping: number): Spring {
-  if (!(damping > 0 && damping <= 1)) throw new RangeError(`Spring damping must be above 0 and at most 1, not ${damping}`)
-  if (damping === 1) return { omega: CRITICAL_OMEGA_TIMES_SETTLE / settleMs, damping }
-  return { omega: Math.log(1 / (SETTLED_SHARE * Math.sqrt(1 - damping ** 2))) / (damping * settleMs), damping }
+/** ω × the time after which a step from rest stays within SETTLED_SHARE of its move: 5.834 critically damped, about 3.76 at 0.8. */
+function unitSettleTime(damping: number): number {
+  const unit: Spring = { omega: 1, damping }
+  const errorAt = (x: number) => Math.abs(1 - springStep(0, 0, 1, unit, x)[0])
+  const halfSwing = Math.PI / Math.sqrt(1 - damping ** 2)
+  const nextPeakAfter = (x: number) => (damping === 1 ? 0 : Math.exp(-damping * halfSwing * (Math.floor(x / halfSwing) + 1)))
+  const settledFrom = (x: number) => errorAt(x) <= SETTLED_SHARE && nextPeakAfter(x) <= SETTLED_SHARE
+  let unsettled = 0
+  let settled = 1
+  while (!settledFrom(settled)) [unsettled, settled] = [settled, settled * 2]
+  for (let i = 0; i < 60; i++) {
+    const middle = (unsettled + settled) / 2
+    if (settledFrom(middle)) settled = middle
+    else unsettled = middle
+  }
+  return settled
 }
 
-/** The value and its velocity (per ms) after `dtMs`, solved exactly: one long step lands where many short ones do. */
+export function springFor(settleMs: number, damping: number): Spring {
+  if (!(damping > 0 && damping <= 1)) throw new RangeError(`Spring damping must be above 0 and at most 1, not ${damping}`)
+  return { omega: unitSettleTime(damping) / settleMs, damping }
+}
+
+/** Velocity is per ms. Exact, so one long step lands where many short ones do. */
 export function springStep(value: number, velocity: number, goal: number, spring: Spring, dtMs: number): [number, number] {
   const { omega, damping } = spring
   const offset = value - goal

@@ -85,9 +85,10 @@ describe('drawRecordingFrame', () => {
     expect(videoDraws(1000, 'preview')).toBe(1)
   })
 
-  it('keeps blurring while the camera settles into a zoom, until it moves by under a hundredth of a pixel', () => {
+  it('keeps blurring a camera still settling at a zoom’s start, and draws it once it moves under about a quarter pixel', () => {
     const panning = { ...scene, view: withZooms(viewOf(track), [{ start: 3000, end: 5000, depth: 2, focus: { x: 900, y: 500 } }]) }
     expect(videoDraws(3000, 'export', panning)).toBe(8)
+    expect(videoDraws(3500, 'export', panning)).toBe(1)
     expect(videoDraws(4000, 'export', panning)).toBe(1)
   })
 

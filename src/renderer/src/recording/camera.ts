@@ -14,11 +14,11 @@ export const CAMERA_MOTION: Record<ZoomSpeed, { settleMs: number; damping: numbe
 export const ZOOM_TRANSITION_MS: Record<ZoomSpeed, number> = { calm: CAMERA_MOTION.calm.settleMs, quick: CAMERA_MOTION.quick.settleMs }
 
 const STAY_WIDE_EXTRA_GAP_MS = 300
+const CRITICALLY_DAMPED = 1
 
 interface Axis { value: number; velocity: number }
-/** From `at` on, each axis (ln depth, focus x, focus y) springs from `from` towards `goal`. */
-interface Knot { at: number; from: Axis[]; goal: number[] }
-export interface CameraPath { knots: Knot[]; spring: Spring; frame: Size }
+interface Knot { at: number; from: Axis[]; goal: number[]; spring: Spring }
+export interface CameraPath { knots: Knot[]; frame: Size }
 
 const wideOf = (frame: Size): CameraState => ({ depth: 1, focus: { x: frame.width / 2, y: frame.height / 2 } })
 const stateOf = ({ depth, focus }: ZoomSegment): CameraState => ({ depth, focus })
@@ -31,7 +31,6 @@ export function clampFocus(point: Point, depth: number, frame: Size): Point {
   return { x: clamp(point.x, halfViewX, frame.width - halfViewX), y: clamp(point.y, halfViewY, frame.height - halfViewY) }
 }
 
-/** Where the camera heads, and from when. It heads for a zoom one settle time early, so the zoom is in when it starts. */
 export function cameraTargets(zooms: ZoomSegment[], frame: Size, speed: ZoomSpeed): CameraTarget[] {
   const lead = ZOOM_TRANSITION_MS[speed]
   const wide = wideOf(frame)
@@ -51,32 +50,33 @@ export function cameraTargets(zooms: ZoomSegment[], frame: Size, speed: ZoomSpee
   return targets
 }
 
-function movedFrom(knot: Knot, spring: Spring, dtMs: number): Axis[] {
+function movedFrom(knot: Knot, dtMs: number): Axis[] {
   return knot.from.map(({ value, velocity }, axis) => {
-    const [nextValue, nextVelocity] = springStep(value, velocity, knot.goal[axis], spring, dtMs)
+    const [nextValue, nextVelocity] = springStep(value, velocity, knot.goal[axis], knot.spring, dtMs)
     return { value: nextValue, velocity: nextVelocity }
   })
 }
 
-/** Starts wide and at rest. At each target the camera keeps its place and velocity and springs towards the new goal. */
 export function buildCameraPath(targets: CameraTarget[], speed: ZoomSpeed, frame: Size): CameraPath {
   const { settleMs, damping } = CAMERA_MOTION[speed]
-  const spring = springFor(settleMs, damping)
+  const intoZoom = springFor(settleMs, damping)
+  // An overshooting zoom-out would hit the 1× floor at speed and stop dead.
+  const outToWide = springFor(settleMs, CRITICALLY_DAMPED)
   const atRest = axesOf(wideOf(frame)).map((value) => ({ value, velocity: 0 }))
   const knots: Knot[] = []
   for (const { at, state } of [...targets].sort((a, b) => a.at - b.at)) {
     const previous = knots.at(-1)
-    knots.push({ at, from: previous ? movedFrom(previous, spring, at - previous.at) : atRest, goal: axesOf(state) })
+    const from = previous ? movedFrom(previous, at - previous.at) : atRest
+    knots.push({ at, from, goal: axesOf(state), spring: state.depth > 1 ? intoZoom : outToWide })
   }
-  return { knots, spring, frame }
+  return { knots, frame }
 }
 
-/** Never wider than the whole frame, and never showing past its edges. */
 export function cameraAt(path: CameraPath, t: number): CameraState {
-  const { knots, spring, frame } = path
+  const { knots, frame } = path
   const index = firstIndexWhere(knots.length, (i) => knots[i].at > t) - 1
   if (index < 0) return wideOf(frame)
-  const [logDepth, x, y] = movedFrom(knots[index], spring, t - knots[index].at).map(({ value }) => value)
+  const [logDepth, x, y] = movedFrom(knots[index], t - knots[index].at).map(({ value }) => value)
   const depth = Math.max(1, Math.exp(logDepth))
   return { depth, focus: clampFocus({ x, y }, depth, frame) }
 }
