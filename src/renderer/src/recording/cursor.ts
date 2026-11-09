@@ -150,24 +150,39 @@ function activeSpansOf(points: Point[], clicks: Click[]): ActiveSpan[] {
   return mergedSpans(spans)
 }
 
-function heldOnLandingClick(cursor: CursorSample[], track: RecordingTrack, endMs: number): CursorSample[] {
+function landingClickOf(track: RecordingTrack, endMs: number): Click | null {
   const frame = { width: track.width, height: track.height }
-  const landingClick = track.clicks.findLast((click) => click.t <= endMs && isInFrame(click, frame))
-  if (!landingClick || endMs - landingClick.t > LONGEST_CLICK_EFFECT_MS) return cursor
+  const lastClick = track.clicks.findLast((click) => click.t <= endMs && isInFrame(click, frame))
+  return lastClick && endMs - lastClick.t <= LONGEST_CLICK_EFFECT_MS ? lastClick : null
+}
+
+function heldOnLandingClick(cursor: CursorSample[], landingClick: Click | null): CursorSample[] {
+  if (!landingClick) return cursor
   return cursor.map((sample) => (sample.t > landingClick.t ? { ...sample, x: landingClick.x, y: landingClick.y } : sample))
 }
 
-/** Smoothing is 0..1. The smoothed path is pinned to every click so effects land exactly where the click happened. When the video ends while the last click's effect still plays, the cursor holds on that click. */
+function exactlyOnLandingClick(points: Point[], landingClick: Click | null): Point[] {
+  if (!landingClick) return points
+  const before = points.filter((point) => point.t < landingClick.t)
+  const shape = before[before.length - 1]?.shape ?? points[0]?.shape ?? null
+  const landed = points.filter((point) => point.t >= landingClick.t).map((point) => ({ ...point, x: landingClick.x, y: landingClick.y }))
+  if (landed[0]?.t !== landingClick.t) landed.unshift({ t: landingClick.t, x: landingClick.x, y: landingClick.y, shape })
+  return [...before, ...landed]
+}
+
+/** Smoothing is 0..1. The smoothed path is pinned to every click up to the end so effects land exactly where the click happened. When the video ends while the last click's effect still plays, the cursor holds on that click. */
 export function buildCursorPath(track: RecordingTrack, smoothing: number, endMs = track.durationMs): CursorPath {
   const sigma = Math.max(0, Math.min(1, smoothing)) * SMOOTHING_MAX_SIGMA_MS
-  const steady = withoutShapeFlickers(heldOnLandingClick(track.cursor, track, endMs))
-  const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), track.clicks, sigma)
+  const landingClick = landingClickOf(track, endMs)
+  const steady = withoutShapeFlickers(heldOnLandingClick(track.cursor, landingClick))
+  const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), track.clicks.filter((click) => click.t <= endMs), sigma)
+  const held = exactlyOnLandingClick(pinned, landingClick)
   return {
-    t: pinned.map((point) => point.t),
-    x: pinned.map((point) => point.x),
-    y: pinned.map((point) => point.y),
-    shape: pinned.map((point) => point.shape),
-    activeSpans: activeSpansOf(pinned, track.clicks)
+    t: held.map((point) => point.t),
+    x: held.map((point) => point.x),
+    y: held.map((point) => point.y),
+    shape: held.map((point) => point.shape),
+    activeSpans: activeSpansOf(held, track.clicks)
   }
 }
 

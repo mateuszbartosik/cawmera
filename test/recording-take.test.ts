@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cameraAt } from '../src/renderer/src/recording/camera'
+import { buildCursorPath, cursorAt } from '../src/renderer/src/recording/cursor'
 import { activeClicks } from '../src/renderer/src/recording/effects'
 import { frameTimes } from '../src/renderer/src/recording/export'
 import { isShownClick, stopClickOf, withoutStopClick, type Click, type CursorSample, type RecordingTrack } from '../src/renderer/src/recording/track'
@@ -132,5 +133,47 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
     const edgeFrames = exportedFrames.filter((t) => t <= trim.start + 1000 || t >= trim.end - 1000)
     for (const t of edgeFrames) expect(cameraAt(t, zooms, frame, speed)).toEqual(wide)
     expect(cameraAt(exportedFrames.at(-1)!, zooms, frame, speed)).toEqual(wide)
+  })
+})
+
+describe('a taskbar stop right after the last click', () => {
+  const finalClick = leftClick(7000, next)
+  const stopClick: Click = { t: 9000, ...taskbarButton, button: 'left', up: null }
+  const raw = track(
+    [...work, ...rest(next, 5800, 7000), ...glide(next, taskbarButton, 7000, 9000), ...rest(taskbarButton, 9000, 9200)],
+    [...workClicks.slice(0, 2), finalClick, stopClick],
+    9200
+  )
+  const clean = withoutStopClick(raw, 'window')
+  const trim = autoTrim(clean, stopClickOf(raw, 'window'))
+
+  it('ends the video when the last click’s ring has played', () => {
+    expect(trim.end).toBe(finalClick.t + 650)
+  })
+
+  it.each([0, 0.6, 1])('keeps the cursor on the last click from the click to the end of the video (smoothing %s)', (smoothing) => {
+    const path = buildCursorPath(clean, smoothing, trim.end)
+    const landing = frameTimes(trim, FPS).filter((t) => t >= finalClick.t)
+    expect(landing.length).toBeGreaterThan(30)
+    for (const t of landing) {
+      const at = cursorAt(path, t, false, frame)!
+      expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeLessThan(0.01)
+    }
+  })
+
+  const endingAfterLastClick = (afterMs: number) => {
+    const cursor = [...rest(next, 0, 1000), ...glide(next, taskbarButton, 1000, 2000)]
+    const clicks = [{ t: 1000 - 1, ...next, button: 'left' as const, up: 1050 }]
+    return buildCursorPath(track(cursor, clicks, 3000), 0.6, 999 + afterMs)
+  }
+
+  it('holds when the video ends exactly 650 ms after the last click', () => {
+    const at = cursorAt(endingAfterLastClick(650), 1648, false, frame)!
+    expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeLessThan(0.01)
+  })
+
+  it('lets the cursor leave when the video ends 651 ms after the last click', () => {
+    const at = cursorAt(endingAfterLastClick(651), 1648, false, frame)!
+    expect(Math.hypot(at.x - next.x, at.y - next.y)).toBeGreaterThan(50)
   })
 })

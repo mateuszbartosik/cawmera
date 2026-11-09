@@ -117,6 +117,31 @@ describe('the landing at the end of a video', () => {
       for (const t of [1350, 1500, 1990]) expect(fromClick(path, t)).toBeLessThan(0.5)
     }
   })
+  it('is not pulled off the click by a click after the end', () => {
+    const later = { t: 2100, x: 900, y: 500, button: 'left' as const, up: 2150 }
+    const path = buildCursorPath({ ...take, clicks: [lastClick, later] }, 1, 2000)
+    for (let t = 1350; t <= 2000; t += 10) expect(fromClick(path, t)).toBeLessThan(0.01)
+  })
+  it('is exactly on the click when the cursor arrives only 100 ms before it', () => {
+    const arriving = Array.from({ length: 60 }, (_, i) => ({ t: 1000 + i * 16, x: 400 + Math.min(i * 40, 300) * 1, y: 300, shape: 'arrow' as const }))
+    const arrived = track({ cursor: [...arriving, ...leaving], clicks: [lastClick], durationMs: 5000 })
+    const path = buildCursorPath(arrived, 1, 2000)
+    for (let t = 1350; t <= 2000; t += 5) expect(fromClick(path, t)).toBeLessThan(0.01)
+  })
+  it('ends at the track duration by default', () => {
+    expect(fromClick(buildCursorPath(take, 0.6), 1990)).toBeGreaterThan(100)
+    const short = track({ cursor: [...resting, ...leaving], clicks: [lastClick], durationMs: 2000 })
+    expect(fromClick(buildCursorPath(short, 0.6), 1990)).toBeLessThan(0.01)
+  })
+  it('never takes a click outside the frame as the landing', () => {
+    const outside = { t: 1350, x: 2500, y: 300, button: 'left' as const, up: 1420 }
+    const path = buildCursorPath({ ...take, clicks: [outside] }, 0, 2000)
+    expect(fromClick(path, 1990)).toBeGreaterThan(100)
+  })
+  it('stays fully visible through the hold when it hides while still', () => {
+    const path = buildCursorPath(take, 0.6, 2000)
+    for (const t of [1350, 1700, 2000]) expect(cursorAt(path, t, true, frame)!.opacity).toBe(1)
+  })
   it('lets the cursor leave when the video ends more than 650 ms after the last click', () => {
     expect(fromClick(buildCursorPath(take, 0.6, 2100), 1990)).toBeGreaterThan(100)
   })
