@@ -84,6 +84,30 @@ describe('auto trim of a take stopped from the taskbar', () => {
     expect(autoTrim(track(cursor, 5000), stopClickOn(button)).end).toBe(3984)
   })
 
+  describe('after waiting on the button for its thumbnail', () => {
+    const popup: Spot = { x: 900, y: 900 }
+    const waitThenThumbnail = (waitMs: number) => [
+      ...stay(content, 2000, 4000),
+      ...glide(content, button, 4000),
+      ...stay(button, 4480, 4480 + waitMs),
+      ...glide(button, popup, 4480 + waitMs, 10),
+      ...stay(popup, 4640 + waitMs, 4880 + waitMs)
+    ]
+    const clickOnPopup = (waitMs: number): Click => ({ t: 4780 + waitMs, ...popup, button: 'left', up: null })
+    const maximizedWindow = (cursor: CursorSample[], durationMs: number): RecordingTrack =>
+      ({ ...track(cursor, durationMs), kind: 'window', height: 1040 })
+
+    it('cuts a 3 s wait and the thumbnail click on a monitor take', () => {
+      expect(autoTrim(track(waitThenThumbnail(3000), 7900), clickOnPopup(3000)).end).toBe(4000)
+    })
+    it('cuts the same wait on a maximized window, whose frame holds the thumbnail', () => {
+      expect(autoTrim(maximizedWindow(waitThenThumbnail(3000), 7900), clickOnPopup(3000)).end).toBe(4000)
+    })
+    it('keeps a stay of more than 5 s near the button as content', () => {
+      expect(autoTrim(track(waitThenThumbnail(5600), 10_500), clickOnPopup(5600)).end).toBe(clickOnPopup(5600).t)
+    })
+  })
+
   describe('when the trip starts right after a content click', () => {
     const clicked: Spot = { x: 900, y: 300 }
     const outsideWait: Spot = { x: 900, y: 840 }
@@ -111,7 +135,7 @@ describe('auto trim of a take stopped from the taskbar', () => {
     const arriving = [...stay(content, 0, 2000), ...glide(content, nearButton, 2000)]
     const clickNearButton = (t: number): Click => ({ t, ...nearButton, button: 'left', up: t + 80 })
 
-    it('keeps a stay of more than 2 s as content, like typing in a chat box above the button', () => {
+    it('keeps a stay of more than 5 s as content, like typing in a chat box above the button', () => {
       const chatBox: Spot = { x: 900, y: 880 }
       const cursor = [
         ...stay(content, 0, 2000),

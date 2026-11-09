@@ -84,7 +84,6 @@ export function isShownClick(click: Click, frame: Size): boolean {
 }
 
 function couldBeOnTaskbar(click: Click, track: RecordingTrack): boolean {
-  if (track.kind === 'window') return !isInFrame(click, track)
   const nearestEdgePx = Math.min(click.x, track.width - click.x, click.y, track.height - click.y)
   return nearestEdgePx <= TASKBAR_ZONE_PX * track.scale
 }

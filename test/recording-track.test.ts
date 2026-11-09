@@ -73,11 +73,11 @@ describe('the click that stopped a take', () => {
     expect(autoTrim(kept, stopClickOf(altTabbed, 'window')).end).toBe(10_000)
   })
 
-  it('never drops a click inside a window take’s frame', () => {
-    const windowTake: RecordingTrack = { ...take([next, taskbar]), kind: 'window' }
-    expect(stopClickOf(windowTake, 'window')).toBeNull()
-    const belowTheWindow = { ...taskbar, y: 1150 }
-    expect(stopClickOf({ ...windowTake, clicks: [next, belowTheWindow] }, 'window')).toEqual(belowTheWindow)
+  it('finds the stop click inside a window take near an edge, as on monitor takes', () => {
+    const thumbnailClick = { ...taskbar, y: 900 }
+    const maximized: RecordingTrack = { ...take([next, thumbnailClick]), kind: 'window', height: 1040 }
+    expect(stopClickOf(maximized, 'window')).toEqual(thumbnailClick)
+    expect(stopClickOf({ ...maximized, clicks: [next, { ...taskbar, y: 500 }] }, 'window')).toBeNull()
   })
 
   it('is found on a monitor take only near an edge, where the taskbar and its thumbnails are', () => {
