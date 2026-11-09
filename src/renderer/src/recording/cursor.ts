@@ -175,14 +175,15 @@ export function buildCursorPath(track: RecordingTrack, smoothing: number, endMs 
   const sigma = Math.max(0, Math.min(1, smoothing)) * SMOOTHING_MAX_SIGMA_MS
   const landingClick = landingClickOf(track, endMs)
   const steady = withoutShapeFlickers(heldOnLandingClick(track.cursor, landingClick))
-  const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), track.clicks.filter((click) => click.t <= endMs), sigma)
+  const clicks = track.clicks.filter((click) => click.t <= endMs)
+  const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), clicks, sigma)
   const held = exactlyOnLandingClick(pinned, landingClick)
   return {
     t: held.map((point) => point.t),
     x: held.map((point) => point.x),
     y: held.map((point) => point.y),
     shape: held.map((point) => point.shape),
-    activeSpans: activeSpansOf(held, track.clicks)
+    activeSpans: activeSpansOf(held, clicks)
   }
 }
 

@@ -4,8 +4,12 @@ import type { RecordingTrack } from '../src/renderer/src/recording/track'
 
 const frame = { width: 1920, height: 1080 }
 const zigzag = Array.from({ length: 120 }, (_, i) => ({ t: i * 16, x: 500 + (i % 2) * 6 + i * 4, y: 300, shape: 'arrow' as const }))
-const track = (extra: Partial<RecordingTrack> = {}): RecordingTrack => ({ kind: 'window', width: 1920, height: 1080, fps: 60,
-  durationMs: 2000, scale: 1, cursor: zigzag, clicks: [{ t: 800, x: 700, y: 300, button: 'left', up: 880 }], ...extra })
+const track = (extra: Partial<RecordingTrack> = {}): RecordingTrack => {
+  const made: RecordingTrack = { kind: 'window', width: 1920, height: 1080, fps: 60,
+    durationMs: 2000, scale: 1, cursor: zigzag, clicks: [{ t: 800, x: 700, y: 300, button: 'left', up: 880 }], ...extra }
+  made.cursor.forEach((sample, i) => { if (i > 0) expect(sample.t).toBeGreaterThan(made.cursor[i - 1].t) })
+  return made
+}
 
 describe('cursor path', () => {
   it('follows raw samples with smoothing 0', () => {
@@ -123,8 +127,9 @@ describe('the landing at the end of a video', () => {
     for (let t = 1350; t <= 2000; t += 10) expect(fromClick(path, t)).toBeLessThan(0.01)
   })
   it('is exactly on the click when the cursor arrives only 100 ms before it', () => {
-    const arriving = Array.from({ length: 60 }, (_, i) => ({ t: 1000 + i * 16, x: 400 + Math.min(i * 40, 300) * 1, y: 300, shape: 'arrow' as const }))
-    const arrived = track({ cursor: [...arriving, ...leaving], clicks: [lastClick], durationMs: 5000 })
+    const arriving = Array.from({ length: 16 }, (_, i) => ({ t: 1000 + i * 16, x: 400 + i * 20, y: 300, shape: 'arrow' as const }))
+    const waiting = Array.from({ length: 6 }, (_, i) => ({ t: 1248 + i * 16, x: 700, y: 300, shape: 'arrow' as const }))
+    const arrived = track({ cursor: [...arriving, ...waiting, ...leaving], clicks: [lastClick], durationMs: 5000 })
     const path = buildCursorPath(arrived, 1, 2000)
     for (let t = 1350; t <= 2000; t += 5) expect(fromClick(path, t)).toBeLessThan(0.01)
   })
@@ -141,6 +146,12 @@ describe('the landing at the end of a video', () => {
   it('stays fully visible through the hold when it hides while still', () => {
     const path = buildCursorPath(take, 0.6, 2000)
     for (const t of [1350, 1700, 2000]) expect(cursorAt(path, t, true, frame)!.opacity).toBe(1)
+  })
+  it('keeps a hidden still cursor hidden before a click after the end', () => {
+    const still = Array.from({ length: 300 }, (_, i) => ({ t: i * 16, x: 800, y: 400, shape: 'arrow' as const }))
+    const later = { t: 3500, x: 800, y: 400, button: 'left' as const, up: 3550 }
+    const path = buildCursorPath(track({ cursor: still, clicks: [later], durationMs: 5000 }), 0, 2000)
+    expect(cursorAt(path, 3300, true, frame)).toBeNull()
   })
   it('lets the cursor leave when the video ends more than 650 ms after the last click', () => {
     expect(fromClick(buildCursorPath(take, 0.6, 2100), 1990)).toBeGreaterThan(100)
