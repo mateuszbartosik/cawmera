@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCursorPath, cursorAt } from '../src/renderer/src/recording/cursor'
+import { buildCursorPath, cursorAt, type CursorPath } from '../src/renderer/src/recording/cursor'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
 
 const frame = { width: 1920, height: 1080 }
@@ -98,5 +98,26 @@ describe('cursor path', () => {
     expect(cursorAt(path, 2900, true, frame)!.opacity).toBeGreaterThan(0)
     expect(cursorAt(path, 2700, true, frame)!.opacity).toBeGreaterThan(0)
     expect(cursorAt(path, 2700, true, frame)!.opacity).toBeLessThan(1)
+  })
+})
+
+describe('the landing at the end of a video', () => {
+  const resting = Array.from({ length: 85 }, (_, i) => ({ t: i * 16, x: 700, y: 300, shape: 'arrow' as const }))
+  const leaving = Array.from({ length: 40 }, (_, i) => ({ t: 1360 + i * 16, x: 700 + i * 20, y: 300 + i * 12, shape: 'arrow' as const }))
+  const lastClick = { t: 1350, x: 700, y: 300, button: 'left' as const, up: 1420 }
+  const take = track({ cursor: [...resting, ...leaving], clicks: [lastClick], durationMs: 5000 })
+  const fromClick = (path: CursorPath, t: number) => {
+    const at = cursorAt(path, t, false, frame)!
+    return Math.hypot(at.x - 700, at.y - 300)
+  }
+
+  it('holds the cursor on the last click while the video ends within 650 ms of it', () => {
+    for (const smoothing of [0, 0.6, 1]) {
+      const path = buildCursorPath(take, smoothing, 2000)
+      for (const t of [1350, 1500, 1990]) expect(fromClick(path, t)).toBeLessThan(0.5)
+    }
+  })
+  it('lets the cursor leave when the video ends more than 650 ms after the last click', () => {
+    expect(fromClick(buildCursorPath(take, 0.6, 2100), 1990)).toBeGreaterThan(100)
   })
 })

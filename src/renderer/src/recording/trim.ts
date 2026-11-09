@@ -1,11 +1,9 @@
-import { CLICK_EFFECT_MS } from './effects'
+import { LONGEST_CLICK_EFFECT_MS } from './effects'
 import { isInFrame, type Click, type CursorSample, type RecordingTrack } from './track'
 
 export interface Trim { start: number; end: number }
 
 export const TRIM_RULES = { restMs: 300, shortcutTailMs: 200, stillPx: 2, minLengthMs: 500, stopWaitPx: 200, stopWaitMaxMs: 5000 }
-
-const LONGEST_CLICK_EFFECT_MS = Math.max(...Object.values(CLICK_EFFECT_MS))
 
 const clickLanded = (click: Click, latestMs: number) => Math.min(click.t + LONGEST_CLICK_EFFECT_MS, latestMs)
 

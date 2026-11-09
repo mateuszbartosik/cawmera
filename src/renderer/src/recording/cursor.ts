@@ -1,5 +1,6 @@
 import type { Size } from '../render/geometry'
-import type { Click, CursorShape, RecordingTrack } from './track'
+import { LONGEST_CLICK_EFFECT_MS } from './effects'
+import { isInFrame, type Click, type CursorSample, type CursorShape, type RecordingTrack } from './track'
 
 export const SMOOTHING_MAX_SIGMA_MS = 120
 export const CURSOR_RULES = { stillAfterMs: 1500, showBeforeMoveMs: 150, stillPx: 2, fadeMs: 200, minShapeMs: 100, offFramePx: 32 }
@@ -149,10 +150,17 @@ function activeSpansOf(points: Point[], clicks: Click[]): ActiveSpan[] {
   return mergedSpans(spans)
 }
 
-/** Smoothing is 0..1. The smoothed path is pinned to every click so effects land exactly where the click happened. */
-export function buildCursorPath(track: RecordingTrack, smoothing: number): CursorPath {
+function heldOnLandingClick(cursor: CursorSample[], track: RecordingTrack, endMs: number): CursorSample[] {
+  const frame = { width: track.width, height: track.height }
+  const landingClick = track.clicks.findLast((click) => click.t <= endMs && isInFrame(click, frame))
+  if (!landingClick || endMs - landingClick.t > LONGEST_CLICK_EFFECT_MS) return cursor
+  return cursor.map((sample) => (sample.t > landingClick.t ? { ...sample, x: landingClick.x, y: landingClick.y } : sample))
+}
+
+/** Smoothing is 0..1. The smoothed path is pinned to every click so effects land exactly where the click happened. When the video ends while the last click's effect still plays, the cursor holds on that click. */
+export function buildCursorPath(track: RecordingTrack, smoothing: number, endMs = track.durationMs): CursorPath {
   const sigma = Math.max(0, Math.min(1, smoothing)) * SMOOTHING_MAX_SIGMA_MS
-  const steady = withoutShapeFlickers(track.cursor)
+  const steady = withoutShapeFlickers(heldOnLandingClick(track.cursor, track, endMs))
   const pinned = pinnedToClicks(gaussianSmoothed(steady, sigma), track.clicks, sigma)
   return {
     t: pinned.map((point) => point.t),

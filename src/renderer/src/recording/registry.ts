@@ -14,7 +14,7 @@ export interface RecordingEntry {
 
 export const POSTER_TIME_MS = 0
 
-interface CachedPath { smoothing: number; path: CursorPath }
+interface CachedPath { smoothing: number; endMs: number; path: CursorPath }
 interface CachedZooms { trim: Trim; speed: ZoomSpeed; zooms: ZoomSegment[] }
 
 const recordings = new Map<string, RecordingEntry>()
@@ -53,11 +53,11 @@ export function useRecording(id: string | null): RecordingEntry | null {
   return useSyncExternalStore(subscribe, () => getRecording(id))
 }
 
-export function cursorPathFor(entry: RecordingEntry, smoothing: number): CursorPath {
+export function cursorPathFor(entry: RecordingEntry, smoothing: number, endMs: number): CursorPath {
   const cached = cursorPaths.get(entry.id)
-  if (cached?.smoothing === smoothing) return cached.path
-  const path = buildCursorPath(entry.track, smoothing)
-  cursorPaths.set(entry.id, { smoothing, path })
+  if (cached?.smoothing === smoothing && cached.endMs === endMs) return cached.path
+  const path = buildCursorPath(entry.track, smoothing, endMs)
+  cursorPaths.set(entry.id, { smoothing, endMs, path })
   return path
 }
 

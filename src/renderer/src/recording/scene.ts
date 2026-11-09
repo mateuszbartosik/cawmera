@@ -16,7 +16,7 @@ export function recordingScene(
     videoSize: { width: entry.track.width, height: entry.track.height },
     track: entry.track,
     zooms: zoomsFor(entry, doc.recording.trim, doc.recording.zoomSpeed),
-    path: cursorPathFor(entry, doc.recording.smoothing),
+    path: cursorPathFor(entry, doc.recording.smoothing, doc.recording.trim.end),
     doc,
     settings: doc.recording,
     style,

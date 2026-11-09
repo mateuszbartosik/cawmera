@@ -3,6 +3,7 @@ import { isShownClick, type Click } from './track'
 
 export type ClickEffect = 'off' | 'ring' | 'ripple'
 export const CLICK_EFFECT_MS = { ring: 450, ripple: 650 }
+export const LONGEST_CLICK_EFFECT_MS = Math.max(...Object.values(CLICK_EFFECT_MS))
 export const PRESS = { scale: 0.85, ms: 120 }
 export interface ActiveClick { x: number; y: number; progress: number }
 
