@@ -24,6 +24,7 @@ import {
 } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
 import { togglePlayback } from '../recording/playback'
+import { stepSpaceTap } from './space-tap'
 import { recordingScene } from '../recording/scene'
 import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
@@ -286,24 +287,35 @@ export function Workspace() {
   // Space + drag pans the view, like every design tool.
   useEffect(() => {
     const typing = (target: EventTarget | null) =>
-      target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+      target instanceof HTMLElement &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+    const modified = (event: KeyboardEvent) => event.ctrlKey || event.altKey || event.metaKey || event.shiftKey
     const down = (event: KeyboardEvent) => {
       if (event.code === 'Space' && !typing(event.target)) {
         spaceRef.current = true
-        if (!event.repeat) {
-          spaceTapRef.current = true
-          setHover((h) => ({ ...h, cursor: 'grab' }))
-        }
+        if (!event.repeat) setHover((h) => ({ ...h, cursor: 'grab' }))
+        spaceTapRef.current = stepSpaceTap(spaceTapRef.current, {
+          kind: 'down',
+          repeat: event.repeat,
+          typing: false,
+          modified: modified(event)
+        }).armed
         event.preventDefault()
       }
     }
     const up = (event: KeyboardEvent) => {
       if (event.code === 'Space') {
-        const tapped = spaceTapRef.current && spaceRef.current && !typing(event.target)
+        const { doc, mode } = store.get()
+        const step = stepSpaceTap(spaceTapRef.current, {
+          kind: 'up',
+          typing: typing(event.target),
+          modified: modified(event),
+          playable: doc.recording !== null && mode === 'compose'
+        })
         spaceRef.current = false
-        spaceTapRef.current = false
+        spaceTapRef.current = step.armed
         setHover((h) => ({ ...h, cursor: 'default' }))
-        if (tapped && store.get().doc.recording) togglePlayback()
+        if (step.toggle) togglePlayback()
       }
     }
     window.addEventListener('keydown', down)
@@ -343,7 +355,7 @@ export function Workspace() {
     dragRef.current = null
 
     if (event.button === 1 || spaceRef.current) {
-      spaceTapRef.current = false
+      spaceTapRef.current = stepSpaceTap(spaceTapRef.current, { kind: 'panStarted' }).armed
       startViewPan(event)
     } else if (cropping && source) {
       const p = world

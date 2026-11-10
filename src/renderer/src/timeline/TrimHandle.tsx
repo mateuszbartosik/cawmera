@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from 'react'
+import { useEffect, useRef, type KeyboardEvent } from 'react'
 import type { Doc } from '../app/doc'
 import { commitFrom, store } from '../app/store'
 import { setRecording } from '../recording/actions'
@@ -41,6 +41,14 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
     const current = store.get().doc.recording?.trim ?? trim
     moveEdgeTo(current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS))
   }
+
+  useEffect(
+    () => () => {
+      finish(docBeforeDrag)
+      finish(docBeforeKeys)
+    },
+    []
+  )
 
   if (x < 0 || x > width) return null
 

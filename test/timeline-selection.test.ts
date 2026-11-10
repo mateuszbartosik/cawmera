@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_DOC, type Doc } from '../src/renderer/src/app/doc'
-import { addShot, selectShot, store, undo, updateDoc, validTimelineSelection } from '../src/renderer/src/app/store'
+import { deleteAction, escapeAction } from '../src/renderer/src/app/selection-keys'
+import { addShot, redo, selectShot, store, undo, updateDoc, validTimelineSelection } from '../src/renderer/src/app/store'
 import { setPlaying } from '../src/renderer/src/recording/playback'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
@@ -96,5 +97,44 @@ describe('starting playback', () => {
     store.set({ timelineSelection: range })
     setPlaying(true)
     expect(store.get().timelineSelection).toBe(range)
+  })
+})
+
+describe('selection details', () => {
+  it('lets the timeline selection win when one patch sets both', () => {
+    store.set({ selection: [{ kind: 'spotlight' }], timelineSelection: { kind: 'range', start: 1000, end: 2000 } })
+    expect(store.get().selection).toEqual([])
+    expect(store.get().timelineSelection).not.toBeNull()
+  })
+
+  it('revalidates on redo', () => {
+    updateDoc({ recording: recordingDoc(5000).recording })
+    undo()
+    store.set({ timelineSelection: { kind: 'range', start: 6000, end: 9000 } })
+    redo()
+    expect(store.get().timelineSelection).toBeNull()
+  })
+
+  it('keeps the selections exclusive through undo', () => {
+    updateDoc({ recording: recordingDoc(9000).recording })
+    store.set({ selection: [{ kind: 'spotlight' }] })
+    store.set({ timelineSelection: { kind: 'range', start: 1000, end: 2000 } })
+    undo()
+    expect(store.get().selection).toEqual([])
+    expect(store.get().timelineSelection).not.toBeNull()
+  })
+
+  it('escapes the box selection, then the timeline selection, then picked shots', () => {
+    const base = { selection: [], timelineSelection: null, shotSelection: [] }
+    expect(escapeAction(base)).toBeNull()
+    expect(escapeAction({ ...base, timelineSelection: { kind: 'zoom', id: 'z' }, shotSelection: ['a'] })).toBe('clear-timeline')
+    expect(escapeAction({ ...base, selection: [box] })).toBe('clear-boxes')
+  })
+
+  it('does nothing on Delete while only a timeline selection is set', () => {
+    const base = { selection: [], timelineSelection: null, shotSelection: [] }
+    expect(deleteAction({ ...base, timelineSelection: { kind: 'zoom', id: 'z' }, shotSelection: ['a'] })).toBe('ignore')
+    expect(deleteAction({ ...base, selection: [box] })).toBe('remove-boxes')
+    expect(deleteAction({ ...base, shotSelection: ['a'] })).toBe('delete-shots')
   })
 })

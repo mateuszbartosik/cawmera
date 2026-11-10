@@ -12,12 +12,16 @@ import { ClipRow } from './ClipRow'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
 import { Playhead } from './Playhead'
 import { Ruler } from './Ruler'
-import { fitView, formatClock, MIN_VIEW_MS, scrollView, VIEW_ZOOM_STEP, xToTime, zoomView } from './scale'
+import { fitView, formatClock, MIN_VIEW_MS, scrollView, VIEW_ZOOM_STEP, xToTime, zoomView, type TimelineView } from './scale'
 import { TrimHandle } from './TrimHandle'
 import { ZoomRow } from './ZoomRow'
 
 const PANEL_BOTTOM = 12
 const WHEEL_ZOOM_RATE = 0.0022
+
+function showView(current: TimelineView, next: TimelineView) {
+  if (next.start !== current.start || next.end !== current.end) store.set({ timelineView: next })
+}
 
 const rowColumns = { gridTemplateColumns: `${LABEL_WIDTH}px 1fr` }
 
@@ -67,11 +71,11 @@ function TimelinePanel() {
       const bounds = track.getBoundingClientRect()
       if (event.ctrlKey || event.metaKey) {
         const anchor = xToTime(event.clientX - bounds.left, view, bounds.width)
-        store.set({ timelineView: zoomView(view, Math.exp(-event.deltaY * WHEEL_ZOOM_RATE), anchor, duration) })
+        showView(view, zoomView(view, Math.exp(-event.deltaY * WHEEL_ZOOM_RATE), anchor, duration))
         return
       }
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-      store.set({ timelineView: scrollView(view, (delta / Math.max(bounds.width, 1)) * (view.end - view.start), duration) })
+      showView(view, scrollView(view, (delta / Math.max(bounds.width, 1)) * (view.end - view.start), duration))
     }
     body.addEventListener('wheel', onWheel, { passive: false })
     return () => body.removeEventListener('wheel', onWheel)
@@ -143,7 +147,7 @@ function TimelinePanel() {
         <div
           ref={trackRef}
           data-testid="timeline-track"
-          className="pointer-events-none absolute [overflow-x:clip]"
+          className="pointer-events-none absolute"
           style={{ top: BODY_PADDING, bottom: BODY_PADDING, left: SIDE_PADDING + LABEL_WIDTH, right: SIDE_PADDING }}
         >
           <TrimHandle edge="start" trim={trim} duration={duration} view={view} width={width} />

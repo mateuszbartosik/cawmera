@@ -30,6 +30,7 @@ import {
   startCapture,
   stepShot
 } from './actions'
+import { deleteAction, escapeAction } from './selection-keys'
 import { clearPickedShots, isUnsaved, liveShots, pickAllShots, redo, selectShot, store, undo, useApp } from './store'
 
 function runCommand(command: MenuCommand) {
@@ -124,13 +125,14 @@ function onKeyDown(event: KeyboardEvent) {
   if (key === 'c' && s.doc.sourceId) return void (s.mode === 'crop' ? leaveCrop() : enterCrop())
   if (key === 'r') return void shuffleLook()
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
-  if (key === 'escape' && s.selection.length > 0) return void store.set({ selection: [] })
-  if (key === 'escape' && s.timelineSelection) return void store.set({ timelineSelection: null })
-  if (key === 'escape' && s.shotSelection.length > 0) return void clearPickedShots()
-  const deleting = key === 'delete' || key === 'backspace'
-  if (deleting && s.selection.length > 0) return void (event.preventDefault(), removeSelected())
-  if (deleting && s.timelineSelection) return
-  if (deleting && s.shotSelection.length > 0) return void (event.preventDefault(), deletePickedShots())
+  const escape = key === 'escape' ? escapeAction(s) : null
+  if (escape === 'clear-boxes') return void store.set({ selection: [] })
+  if (escape === 'clear-timeline') return void store.set({ timelineSelection: null })
+  if (escape === 'clear-shots') return void clearPickedShots()
+  const remove = key === 'delete' || key === 'backspace' ? deleteAction(s) : null
+  if (remove === 'remove-boxes') return void (event.preventDefault(), removeSelected())
+  if (remove === 'delete-shots') return void (event.preventDefault(), deletePickedShots())
+  if (remove === 'ignore') return
   if (key.startsWith('arrow') && s.selection.length > 0) {
     const step = event.shiftKey ? 10 : 1
     const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0

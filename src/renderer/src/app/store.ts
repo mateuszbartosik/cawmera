@@ -240,8 +240,9 @@ export const backdropReady = () => backdropDecoding
 function keepSelectionsExclusive(prev: AppState, patch: Partial<AppState>): Partial<AppState> {
   const boxesChosen = patch.selection !== undefined && patch.selection.length > 0 && patch.selection !== prev.selection
   const timelineChosen = patch.timelineSelection != null && patch.timelineSelection !== prev.timelineSelection
-  if (boxesChosen && !timelineChosen && prev.timelineSelection !== null) return { ...patch, timelineSelection: null }
-  if (timelineChosen && !boxesChosen && prev.selection.length > 0) return { ...patch, selection: [] }
+  if (boxesChosen && timelineChosen) return { ...patch, selection: [] }
+  if (boxesChosen && prev.timelineSelection !== null) return { ...patch, timelineSelection: null }
+  if (timelineChosen && prev.selection.length > 0) return { ...patch, selection: [] }
   return patch
 }
 
