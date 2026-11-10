@@ -9,25 +9,29 @@ const cursor = Array.from({ length: 100 }, (_, i) => ({ t: i * 16, x: i * 10, y:
 const track: RecordingTrack = { kind: 'monitor', width: 1920, height: 1080, fps: 60, durationMs: 1600, scale: 1, cursor, clicks: [] }
 
 describe('recording document', () => {
-  it('gives a first recording the defaults, a fresh auto trim and the whole take as one uncut piece', () => {
+  it('gives a first recording the defaults, a fresh auto trim, the whole take as one uncut piece and automatic zooms', () => {
     const doc = recordingDocFor(track, null)
-    expect(doc).toEqual({ ...DEFAULT_RECORDING, trim: autoTrim(track), pieces: [{ start: 0, end: 1600, rate: 1, cut: false }] })
+    expect(doc).toEqual({ ...DEFAULT_RECORDING, trim: autoTrim(track), pieces: [{ start: 0, end: 1600, rate: 1, cut: false }], zooms: null })
   })
 
-  it('carries settings from the previous recording but not its trim or pieces', () => {
+  it('carries settings from the previous recording but not its trim, pieces or zooms', () => {
     const previous: RecordingDoc = {
       ...DEFAULT_RECORDING,
       cursorSize: 2,
       look: 'dark',
       trim: { start: 5, end: 6 },
-      pieces: [{ start: 0, end: 3, rate: 4, cut: false }, { start: 3, end: 9, rate: 1, cut: true }]
+      pieces: [{ start: 0, end: 3, rate: 4, cut: false }, { start: 3, end: 9, rate: 1, cut: true }],
+      zooms: [{ id: 'mine', start: 1, end: 4, depth: 2, aim: 'manual', focus: { x: 10, y: 20 } }]
     }
     const doc = recordingDocFor(track, previous)
     expect(doc.cursorSize).toBe(2)
     expect(doc.look).toBe('dark')
     expect(doc.trim).toEqual(autoTrim(track))
     expect(doc.pieces).toEqual(wholeTake(track.durationMs))
+    expect(doc.zooms).toBeNull()
   })
+
+  it('keeps the zooms out of the settings a section resets', () => expect(DEFAULT_RECORDING).not.toHaveProperty('zooms'))
 
   it('keeps screenshots free of recording settings', () => expect(DEFAULT_DOC.recording).toBeNull())
 

@@ -5,7 +5,7 @@ import { TIMELINE_SPACE, timelineShows, workspaceGeometry } from '../src/rendere
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
 
-const recordingDoc = { ...DEFAULT_DOC, sourceId: 'rec', recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 1000 }, pieces: wholeTake(1000) } }
+const recordingDoc = { ...DEFAULT_DOC, sourceId: 'rec', recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 1000 }, pieces: wholeTake(1000), zooms: null } }
 const screenshotDoc = { ...DEFAULT_DOC, sourceId: 'shot' }
 
 function show(doc: typeof DEFAULT_DOC, width: number) {

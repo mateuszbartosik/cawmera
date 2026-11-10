@@ -11,6 +11,7 @@ import { cropOf, takeViewFor, type TakeView } from '../src/renderer/src/recordin
 import { outputFrameTimes, outputToSource, wholeTake, type Piece, type Rate } from '../src/renderer/src/recording/timemap'
 import type { Click, CursorSample, CursorShape, RecordingTrack } from '../src/renderer/src/recording/track'
 import type { Trim } from '../src/renderer/src/recording/trim'
+import { segmentsFromEdits, type ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 import { autoZooms } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
@@ -50,7 +51,7 @@ describe('a take with one uncut 1× piece and no crop is drawn as stage 1 drew i
   const take = entryOf('stage-1', monitorTake(12_000, wandering(12_000, SAMPLE_MS),
     [clickOnPath(900), clickOnPath(2500), clickOnPath(4200), clickOnPath(5000), clickOnPath(7600), clickOnPath(8400), clickOnPath(10_400)]))
   const trim = { start: 1003, end: 10_997 }
-  const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), ...patch })
+  const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), zooms: null, ...patch })
 
   it('plays the trim and nothing else, in the whole frame', () => {
     const view = takeViewFor(take, settings(), null)
@@ -126,7 +127,7 @@ describe('the start of a video after a dragged trim start is stage 1’s', () =>
   const resting = (x: number, y: number, fromMs: number, toMs: number): CursorSample[] =>
     Array.from({ length: Math.floor((toMs - fromMs) / 16) }, (_, i) => ({ t: fromMs + i * 16, x, y, shape: 'arrow' }))
   const trim = { start: 5000, end: 11_000 }
-  const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), ...patch })
+  const settings = (patch: Partial<RecordingDoc> = {}): RecordingDoc => ({ ...DEFAULT_RECORDING, trim, pieces: wholeTake(12_000), zooms: null, ...patch })
   const expectStage1Cursor = (take: RecordingEntry, smoothing: number) => {
     const stage1 = buildCursorPath(take.track, smoothing, trim.end)
     const view = takeViewFor(take, settings({ smoothing }), null)
@@ -179,11 +180,18 @@ describe('the take view', () => {
   const entry: RecordingEntry = { id: 'take-view', name: 'Recording', poster: null,
     track: { kind: 'monitor', ...frame, fps: 60, durationMs: 12_000, scale: 1, cursor: still, clicks } }
   const recording = (patch: Partial<RecordingDoc> = {}): RecordingDoc =>
-    ({ ...DEFAULT_RECORDING, trim: { start: 1000, end: 11_000 }, pieces: wholeTake(12_000), ...patch })
+    ({ ...DEFAULT_RECORDING, trim: { start: 1000, end: 11_000 }, pieces: wholeTake(12_000), zooms: null, ...patch })
 
   it('gives stage 1’s zooms in output time when nothing is cut or sped up', () => {
     const stage1 = autoZooms(clicks, frame, { start: 1000, end: 11_000 }, 'calm').map((z) => ({ ...z, start: z.start - 1000, end: z.end - 1000 }))
     expect(takeViewFor(entry, recording(), null).zooms).toEqual(stage1)
+  })
+
+  it('keeps automatic zooms as found, even an edge zoom that storing them would re-aim', () => {
+    const early = { ...entry, track: { ...entry.track, clicks: [click(1200, 900, 500), click(2500, 1000, 560)] } }
+    const view = takeViewFor(early, recording(), null)
+    expect(view.zooms).toEqual([{ start: 1900, end: 3000, depth: 2.5, focus: { x: 950, y: 530 } }])
+    expect(segmentsFromEdits(view.edits, view, 'calm')[0].focus).toEqual({ x: 1000, y: 560 })
   })
 
   it('exports the frames stage 1 exported', () => {
@@ -254,6 +262,57 @@ describe('the take view', () => {
     expect(takeViewFor(entry, sameValues, { x: 0, y: 120, w: 1920, h: 960 })).toBe(cropped)
   })
 
+  it('rebuilds only the zooms and the camera for new zoom edits', () => {
+    const base = recording({ smoothing: 0.3 })
+    const view = takeViewFor(entry, base, null)
+    const stored = { ...base, zooms: view.edits }
+    const edited = takeViewFor(entry, stored, null)
+    expect(edited.track).toBe(view.track)
+    expect(edited.cursor).toBe(view.cursor)
+    expect(edited.edits).toBe(stored.zooms)
+    expect(edited.zooms).not.toBe(view.zooms)
+    expect(edited.camera).not.toBe(view.camera)
+    expect(takeViewFor(entry, stored, null)).toBe(edited)
+    expect(takeViewFor(entry, { ...stored, zooms: [...view.edits] }, null)).not.toBe(edited)
+  })
+
+  it('gives the automatic zooms as edits, in source ms and video px', () => {
+    const view = takeViewFor(entry, recording(), { x: 0, y: 120, w: 1920, h: 960 })
+    expect(view.zooms).toHaveLength(2)
+    expect(view.edits).toEqual(view.zooms.map((zoom, i) => ({
+      id: `auto-${i}`,
+      start: zoom.start + 1000,
+      end: zoom.end + 1000,
+      depth: zoom.depth,
+      aim: 'auto',
+      focus: { x: zoom.focus.x, y: zoom.focus.y + 120 }
+    })))
+  })
+
+  it('aims stored zooms in the cropped frame and moves the camera on them', () => {
+    const manual: ZoomEdit = { id: 'mine', start: 4000, end: 6000, depth: 3, aim: 'manual', focus: { x: 1500, y: 300 } }
+    const view = takeViewFor(entry, recording({ zooms: [manual] }), { x: 0, y: 120, w: 1920, h: 960 })
+    expect(view.edits).toEqual([manual])
+    expect(view.zooms).toEqual([{ start: 3000, end: 5000, depth: 3, focus: { x: 1500, y: 180 } }])
+    const onStoredZooms = buildCameraPath(cameraTargets(view.zooms, view.frame, 'calm'), 'calm', view.frame)
+    for (const t of [1000, 2500, 4000, 5500, 8000]) expect(cameraAt(view.camera, t)).toEqual(cameraAt(onStoredZooms, t))
+    expect(cameraAt(view.camera, 4000).depth).toBeGreaterThan(2.9)
+  })
+
+  it('turns its automatic zooms into edits and back across a cut, a speed-up and a crop', () => {
+    const edited = recording({ pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 8500, 4), piece(8500, 12_000)] })
+    const view = takeViewFor(entry, edited, { x: 40, y: 20, w: 1800, h: 1000 })
+    expect(view.zooms.map(({ start, end }) => [start, end])).toEqual([[1900, 4225]])
+    expect(view.edits.map(({ start, end }) => [start, end])).toEqual([[2900, 9100]])
+    const back = segmentsFromEdits(view.edits, view, edited.zoomSpeed)
+    expect(back).toHaveLength(1)
+    expect(back[0].start).toBeCloseTo(view.zooms[0].start, 6)
+    expect(back[0].end).toBeCloseTo(view.zooms[0].end, 6)
+    expect(back[0].depth).toBe(view.zooms[0].depth)
+    expect(back[0].focus).toEqual(view.zooms[0].focus)
+    expect(back[0].follow).toBeUndefined()
+  })
+
   it('keeps the camera continuous across a cut and a speed-up', () => {
     const seams = [
       recording({ pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)] }),
@@ -296,7 +355,7 @@ describe('the cursor at the edges of what plays', () => {
     { t: 9000, x: 1000, y: 1000, shape: 'hand' }
   ], []))
   const raw = (patch: Partial<RecordingDoc>): RecordingDoc =>
-    ({ ...DEFAULT_RECORDING, smoothing: 0, trim: { start: 0, end: 10_000 }, pieces: wholeTake(10_000), ...patch })
+    ({ ...DEFAULT_RECORDING, smoothing: 0, trim: { start: 0, end: 10_000 }, pieces: wholeTake(10_000), zooms: null, ...patch })
   const expectCursorAt = (view: TakeView, o: number, expected: { x: number; y: number; shape: CursorShape }) => {
     const at = cursorAt(view.cursor, o, false, view.frame)!
     expect(at.x).toBeCloseTo(expected.x, 6)
@@ -347,7 +406,7 @@ describe('the cursor at a cut’s seam', () => {
   ], []))
   const seamMs = 3000
   const cutOut = (smoothing: number, trim = { start: 1000, end: 11_000 }): RecordingDoc =>
-    ({ ...DEFAULT_RECORDING, smoothing, trim, pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)] })
+    ({ ...DEFAULT_RECORDING, smoothing, trim, pieces: [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 12_000)], zooms: null })
 
   it.each([0, 0.6, 1])('jumps with the cut instead of gliding across it (smoothing %s)', (smoothing) => {
     const view = takeViewFor(movedInTheCut, cutOut(smoothing), null)
@@ -407,14 +466,14 @@ describe('the cursor gliding into the end of the video and into a cut', () => {
   }
 
   it.each([0.3, 0.6, 1])('reaches a manual trim end at full speed on its path (smoothing %s)', (smoothing) => {
-    const view = takeViewFor(steadyMove, { ...DEFAULT_RECORDING, smoothing, trim: { start: 0, end: 1500 }, pieces: wholeTake(1800) }, null)
+    const view = takeViewFor(steadyMove, { ...DEFAULT_RECORDING, smoothing, trim: { start: 0, end: 1500 }, pieces: wholeTake(1800), zooms: null }, null)
     expectOnPathAtFullSpeed(view.cursor, view.cursor.t.length - 1, 1500)
     for (const o of outputFrameTimes(view.map, 60)) expect(Math.abs(cursorAt(view.cursor, o, false, view.frame)!.x - xAt(o))).toBeLessThan(0.1)
   })
 
   it.each([0.3, 0.6, 1])('reaches a cut at full speed on its path and leaves it the same way (smoothing %s)', (smoothing) => {
     const view = takeViewFor(steadyMove, { ...DEFAULT_RECORDING, smoothing, trim: { start: 0, end: 1800 },
-      pieces: [piece(0, 600), piece(600, 1200, 1, true), piece(1200, 1800)] }, null)
+      pieces: [piece(0, 600), piece(600, 1200, 1, true), piece(1200, 1800)], zooms: null }, null)
     const seam = view.cursor.t.indexOf(600)
     expect(view.cursor.t[seam + 1]).toBe(600)
     expectOnPathAtFullSpeed(view.cursor, seam, 600)

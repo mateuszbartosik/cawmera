@@ -54,7 +54,7 @@ describe('an export that fails midway', () => {
     vi.stubGlobal('OffscreenCanvas', class { getContext() { return {} } })
     const { exportRecordingVideo } = await import('../src/renderer/src/recording/export')
     const entry = { id: 'x', name: 'x', poster: null, track: { width: 10, height: 10 } } as never
-    const doc = { ...DEFAULT_DOC, recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 100 }, pieces: wholeTake(1000) } }
+    const doc = { ...DEFAULT_DOC, recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 100 }, pieces: wholeTake(1000), zooms: null } }
     await expect(exportRecordingVideo(entry, doc, DEFAULT_HOUSE_STYLE, null, () => undefined)).rejects.toThrow(message)
     expect(decoder.returned).toHaveBeenCalled()
   })

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { decodeBackdrop } from './backdrop'
 import { DEFAULT_DOC, randomAngle, type Density, type Doc, type ExportFormat } from './doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from './house-style'
+import { isAutomaticZoomId } from '../recording/zoom-edits'
 import type { TimelineView } from '../timeline/scale'
 
 export type Mode = 'compose' | 'crop'
@@ -492,14 +493,19 @@ function validSelection(doc: Doc, selection: Selection): Selection {
   return kept.length === selection.length ? selection : kept
 }
 
-const zoomEditIds = (_doc: Doc): string[] => []
+/** Automatic zooms are counted only in the take view, so any automatic id stays selectable until the first edit stores the zooms. */
+function hasZoom(doc: Doc, id: string): boolean {
+  const zooms = doc.recording?.zooms
+  if (zooms === undefined) return false
+  return zooms === null ? isAutomaticZoomId(id) : zooms.some((zoom) => zoom.id === id)
+}
 
 const takeDuration = (doc: Doc) => doc.recording?.pieces.at(-1)?.end ?? 0
 
 /** The timeline selection as `doc` still allows it: a gone zoom clears it, a range is clamped to the take (cleared when nothing is left). */
 export function validTimelineSelection(doc: Doc, selection: TimelineSelection): TimelineSelection {
   if (!selection) return null
-  if (selection.kind === 'zoom') return zoomEditIds(doc).includes(selection.id) ? selection : null
+  if (selection.kind === 'zoom') return hasZoom(doc, selection.id) ? selection : null
   const start = Math.max(selection.start, 0)
   const end = Math.min(selection.end, takeDuration(doc))
   if (end <= start) return null

@@ -4,6 +4,7 @@ import type { ZoomSpeed } from './camera'
 import { wholeTake, type Piece } from './timemap'
 import { autoTrim, type Trim } from './trim'
 import type { Click, RecordingTrack } from './track'
+import type { ZoomEdit } from './zoom-edits'
 import type { Size } from '../render/geometry'
 
 export type RecordingFps = 30 | 60
@@ -11,6 +12,8 @@ export type RecordingFps = 30 | 60
 export interface RecordingDoc {
   trim: Trim
   pieces: Piece[]
+  /** Null while the zooms are automatic. */
+  zooms: ZoomEdit[] | null
   cursorSize: number
   smoothing: number
   look: CursorLook
@@ -24,7 +27,7 @@ export interface RecordingDoc {
   fps: RecordingFps
 }
 
-export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces'> = {
+export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces' | 'zooms'> = {
   cursorSize: 1.5,
   smoothing: 0.6,
   look: 'light',
@@ -40,7 +43,7 @@ export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces'> = {
 export const RECORDING_SIZE: Size = { width: 1920, height: 1080 }
 
 export function recordingDocFor(track: RecordingTrack, previous: RecordingDoc | null, stopClick: Click | null = null): RecordingDoc {
-  return { ...(previous ?? DEFAULT_RECORDING), trim: autoTrim(track, stopClick), pieces: wholeTake(track.durationMs) }
+  return { ...(previous ?? DEFAULT_RECORDING), trim: autoTrim(track, stopClick), pieces: wholeTake(track.durationMs), zooms: null }
 }
 
 type DefaultKey = keyof typeof DEFAULT_RECORDING

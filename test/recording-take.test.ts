@@ -7,6 +7,7 @@ import { DEFAULT_RECORDING, recordingDocFor, type RecordingDoc } from '../src/re
 import { takeViewFor } from '../src/renderer/src/recording/take-view'
 import { outputFrameTimes, outputToSource, wholeTake } from '../src/renderer/src/recording/timemap'
 import { isShownClick, stopClickOf, withoutStopClick, type Click, type CursorSample, type RecordingTrack } from '../src/renderer/src/recording/track'
+import { materialize, segmentsFromEdits } from '../src/renderer/src/recording/zoom-edits'
 
 const frame = { width: 1920, height: 1080 }
 const SAMPLE_MS = 8
@@ -152,6 +153,15 @@ describe.each(Object.entries(takes))('a realistic take ended by %s', (_name, { s
     for (const t of exportedFrames.filter((t) => t >= view.map.outputMs - 1000)) expectWithinTwoPercentOfWide(cameraAt(view.camera, t), lastZoomDepth)
     expectWithinTwoPercentOfWide(cameraAt(view.camera, exportedFrames.at(-1)!), lastZoomDepth)
   })
+
+  it.each(['calm', 'quick'] as const)('keeps its automatic zooms and camera exactly once the first edit stores them (%s)', (speed) => {
+    const automatic = viewWith({ zoomSpeed: speed })
+    expect(segmentsFromEdits(automatic.edits, automatic, speed)).toEqual(automatic.zooms)
+    let n = 0
+    const stored = viewWith({ zoomSpeed: speed, zooms: materialize(automatic.edits, () => `zoom-${++n}`).edits })
+    expect(stored.zooms).toEqual(automatic.zooms)
+    for (const t of exportedFrames) expect(cameraAt(stored.camera, t)).toEqual(cameraAt(automatic.camera, t))
+  })
 })
 
 describe('the end of a video stopped from the taskbar reads only what plays', () => {
@@ -210,7 +220,7 @@ describe('a taskbar stop right after the last click', () => {
   const endingAfterLastClick = (afterMs: number) => {
     const cursor = [...rest(next, 0, 1000), ...glide(next, taskbarButton, 1000, 2000)]
     const clicks = [{ t: 1000 - 1, ...next, button: 'left' as const, up: 1050 }]
-    const recordingEnding = { ...DEFAULT_RECORDING, smoothing: 0.6, trim: { start: 0, end: 999 + afterMs }, pieces: wholeTake(3000) }
+    const recordingEnding = { ...DEFAULT_RECORDING, smoothing: 0.6, trim: { start: 0, end: 999 + afterMs }, pieces: wholeTake(3000), zooms: null }
     return takeViewFor(entryOf(track(cursor, clicks, 3000)), recordingEnding, null)
   }
 

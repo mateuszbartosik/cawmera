@@ -9,7 +9,7 @@ import type { Trim } from '../src/renderer/src/recording/trim'
 const frame = { width: 1920, height: 1080 }
 const wanderAt = (t: number) => ({ x: 960 + 700 * Math.sin(t / 1700), y: 540 + 380 * Math.sin(t / 2300 + 1) })
 const clickOnPath = (t: number): Click => ({ t, ...wanderAt(t), button: 'left', up: t + 90 })
-const recording = (patch: Partial<RecordingDoc>): RecordingDoc => ({ ...DEFAULT_RECORDING, trim: { start: 1000, end: 11_000 }, pieces: wholeTake(12_000), ...patch })
+const recording = (patch: Partial<RecordingDoc>): RecordingDoc => ({ ...DEFAULT_RECORDING, trim: { start: 1000, end: 11_000 }, pieces: wholeTake(12_000), zooms: null, ...patch })
 
 function longEntry(durationMs: number): RecordingEntry {
   const samplesPerSecond = 120

@@ -3,8 +3,11 @@ import { clampFocus, ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
 import { isShownClick, type Click } from './track'
 import type { Trim } from './trim'
 
-/** The camera is fully zoomed in from `start` to `end` (source ms). Transitions happen outside this window. */
-export interface ZoomSegment { start: number; end: number; depth: number; focus: Point }
+/**
+ * The camera is fully zoomed in from `start` to `end` (output ms), on `focus` and then on each `follow` focus by its `at`.
+ * Moving into and out of the zoom happens outside this window.
+ */
+export interface ZoomSegment { start: number; end: number; depth: number; focus: Point; follow?: { at: number; focus: Point }[] }
 
 export const ZOOM_RULES = {
   groupGapMs: 3000,
@@ -16,6 +19,9 @@ export const ZOOM_RULES = {
   marginShare: 0.1,
   minHoldMs: 600
 }
+
+/** Lets clicks fit at the depth their own padded box gives, which rounding can put a hair too deep. */
+const FIT_TOLERANCE = 1e-9
 
 type ZoomRules = typeof ZOOM_RULES
 
@@ -34,9 +40,28 @@ function paddedBoxAround(clicks: Click[], frame: Size, rules: ZoomRules): Box {
   }
 }
 
-function fitsAtMinDepth(clicks: Click[], frame: Size, rules: ZoomRules): boolean {
+const centreOf = (box: Box): Point => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 })
+
+function fitsAtDepth(clicks: Click[], frame: Size, depth: number, rules: ZoomRules): boolean {
   const box = paddedBoxAround(clicks, frame, rules)
-  return box.right - box.left <= frame.width / rules.minDepth && box.bottom - box.top <= frame.height / rules.minDepth
+  return box.right - box.left <= frame.width / depth && box.bottom - box.top <= frame.height / depth
+}
+
+/** Where the camera looks to show these clicks at this depth: their padded box's centre, kept far enough in to stay inside the frame. */
+export function focusOn(clicks: Click[], frame: Size, depth: number, rules = ZOOM_RULES): Point {
+  return clampFocus(centreOf(paddedBoxAround(clicks, frame, rules)), depth, frame)
+}
+
+/** Clicks in time order, a new group starting at each click that wouldn't fit in view at this depth with the group before it. */
+export function clickGroupsAtDepth(clicks: Click[], frame: Size, depth: number, rules = ZOOM_RULES): Click[][] {
+  const forgivingDepth = depth / (1 + FIT_TOLERANCE)
+  const groups: Click[][] = []
+  for (const click of clicks) {
+    const group = groups[groups.length - 1]
+    if (group !== undefined && fitsAtDepth([...group, click], frame, forgivingDepth, rules)) group.push(click)
+    else groups.push([click])
+  }
+  return groups
 }
 
 function groupClicks(clicks: Click[], frame: Size, rules: ZoomRules): Click[][] {
@@ -45,7 +70,7 @@ function groupClicks(clicks: Click[], frame: Size, rules: ZoomRules): Click[][] 
     const group = groups[groups.length - 1]
     const joins = group !== undefined
       && click.t - group[group.length - 1].t <= rules.groupGapMs
-      && fitsAtMinDepth([...group, click], frame, rules)
+      && fitsAtDepth([...group, click], frame, rules.minDepth, rules)
     if (joins) group.push(click)
     else groups.push([click])
   }
@@ -58,7 +83,7 @@ function zoomAround(clicks: Click[], frame: Size, holdLimits: Span, rules: ZoomR
   return {
     clicks,
     depth,
-    focus: clampFocus({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 }, depth, frame),
+    focus: clampFocus(centreOf(box), depth, frame),
     start: clamp(clicks[0].t - rules.preClickMs, holdLimits.start, holdLimits.end),
     end: clamp(clicks[clicks.length - 1].t + rules.holdMs, holdLimits.start, holdLimits.end)
   }
@@ -71,7 +96,7 @@ function resolveOverlaps(zooms: ClickedZoom[], frame: Size, holdLimits: Span, ru
       const previous = resolved[resolved.length - 1]
       if (previous === undefined || zoom.start >= previous.end) break
       const allClicks = [...previous.clicks, ...zoom.clicks]
-      if (!fitsAtMinDepth(allClicks, frame, rules)) {
+      if (!fitsAtDepth(allClicks, frame, rules.minDepth, rules)) {
         const midpointMs = (previous.clicks[previous.clicks.length - 1].t + zoom.clicks[0].t) / 2
         const meetingMs = clamp(midpointMs, previous.start, zoom.end)
         previous.end = meetingMs

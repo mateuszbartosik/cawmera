@@ -5,12 +5,15 @@ import { addShot, redo, selectShot, store, undo, updateDoc, validTimelineSelecti
 import { setPlaying } from '../src/renderer/src/recording/playback'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
+import type { ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 
 const recordingDoc = (durationMs: number): Doc => ({
   ...DEFAULT_DOC,
   sourceId: 'take',
-  recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: durationMs }, pieces: wholeTake(durationMs) }
+  recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: durationMs }, pieces: wholeTake(durationMs), zooms: null }
 })
+const storedZoom = (id: string): ZoomEdit => ({ id, start: 1000, end: 3000, depth: 2, aim: 'manual', focus: { x: 960, y: 540 } })
+const withZooms = (doc: Doc, zooms: ZoomEdit[] | null): Doc => ({ ...doc, recording: { ...doc.recording!, zooms } })
 
 const box = { kind: 'redaction', id: 'box' } as const
 
@@ -56,6 +59,24 @@ describe('timeline selection', () => {
 
   it('clears a zoom that no longer exists', () => {
     expect(validTimelineSelection(recordingDoc(10_000), { kind: 'zoom', id: 'gone' })).toBeNull()
+  })
+
+  it('keeps a stored zoom selected through doc changes until it is gone', () => {
+    updateDoc(withZooms(store.get().doc, [storedZoom('z1'), storedZoom('z2')]))
+    store.set({ timelineSelection: { kind: 'zoom', id: 'z2' } })
+    updateDoc({ recording: { ...store.get().doc.recording!, cursorSize: 2 } })
+    expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: 'z2' })
+    updateDoc(withZooms(store.get().doc, [storedZoom('z1')]))
+    expect(store.get().timelineSelection).toBeNull()
+    expect(validTimelineSelection(withZooms(recordingDoc(10_000), [storedZoom('z1')]), { kind: 'zoom', id: 'auto-0' })).toBeNull()
+  })
+
+  it('keeps an automatic zoom selected through doc changes while the zooms are automatic', () => {
+    store.set({ timelineSelection: { kind: 'zoom', id: 'auto-1' } })
+    updateDoc({ recording: { ...store.get().doc.recording!, cursorSize: 2 } })
+    expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: 'auto-1' })
+    expect(validTimelineSelection(recordingDoc(10_000), { kind: 'zoom', id: 'z1' })).toBeNull()
+    expect(validTimelineSelection(DEFAULT_DOC, { kind: 'zoom', id: 'auto-1' })).toBeNull()
   })
 
   it('is revalidated on every doc change, undo included', () => {

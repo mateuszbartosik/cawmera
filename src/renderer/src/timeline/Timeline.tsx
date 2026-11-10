@@ -85,7 +85,7 @@ function TimelinePanel() {
 
   const { track } = entry
   const { trim } = recording
-  const { map, zooms } = takeViewFor(entry, recording, crop)
+  const { map, edits } = takeViewFor(entry, recording, crop)
   const view = fitView(storedView, duration)
   const viewLength = view.end - view.start
   const shownClicks = track.clicks.filter((click) => isShownClick(click, track))
@@ -141,7 +141,7 @@ function TimelinePanel() {
 
         <div className="grid" style={rowColumns}>
           <RowLabel>Zoom</RowLabel>
-          <ZoomRow zooms={zooms} map={map} view={view} width={width} />
+          <ZoomRow edits={edits} view={view} width={width} />
         </div>
 
         <div

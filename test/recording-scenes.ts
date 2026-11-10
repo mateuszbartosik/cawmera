@@ -13,7 +13,7 @@ export const output = { width: 1920, height: 1080 }
 export const video = { tag: 'video' } as unknown as CanvasImageSource
 export const still: CursorSample[] = Array.from({ length: 400 }, (_, i) => ({ t: i * 16, x: 1280, y: 720, shape: 'arrow' }))
 export const track: RecordingTrack = { kind: 'window', width: 2560, height: 1440, fps: 60, durationMs: 6400, scale: 1, cursor: still, clicks: [] }
-export const settings: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 }, pieces: wholeTake(6400) }
+export const settings: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 }, pieces: wholeTake(6400), zooms: null }
 
 export const viewOf = (take: RecordingTrack, crop: Rect | null = null, recording = settings) =>
   takeViewFor({ id: 'frame', name: 'Recording', poster: null, track: take }, recording, crop)

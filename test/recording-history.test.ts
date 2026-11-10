@@ -16,9 +16,9 @@ const screenshot = (id: string) => ({
 
 describe('undo history of a recording shot', () => {
   it('survives many screenshots being added', () => {
-    const recorded: Doc = { ...DEFAULT_DOC, sourceId: 'take-1', recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 5000 }, pieces: wholeTake(5000) } }
+    const recorded: Doc = { ...DEFAULT_DOC, sourceId: 'take-1', recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 5000 }, pieces: wholeTake(5000), zooms: null } }
     store.set({ doc: recorded, past: [], future: [] })
-    updateDoc({ recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 4000 }, pieces: wholeTake(5000) } })
+    updateDoc({ recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 4000 }, pieces: wholeTake(5000), zooms: null } })
     for (let i = 0; i < 30; i++) registerSource(screenshot(`screenshot-${i}`))
     expect(store.get().past).toEqual([recorded])
   })

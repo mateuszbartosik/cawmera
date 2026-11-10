@@ -8,6 +8,7 @@ import type { RecordingDoc } from './settings'
 import { mapTrack, preRollToOutput, timeMapOf, type Piece, type TimeMap } from './timemap'
 import type { Click, CursorSample, RecordingTrack } from './track'
 import type { Trim } from './trim'
+import { editsFromSegments, segmentsFromEdits, type ZoomEdit } from './zoom-edits'
 import { autoZooms, type ZoomSegment } from './zooms'
 
 /** The take as it plays, in output ms and frame px. */
@@ -19,6 +20,8 @@ export interface TakeView {
   /** The track's clicks, and those just before the video whose ring or press still runs at its start. */
   effectClicks: Click[]
   zooms: ZoomSegment[]
+  /** The zooms the shot stores, or the automatic ones until it stores any, in source ms and video px. */
+  edits: ZoomEdit[]
   camera: CameraPath
   cursor: CursorPath
 }
@@ -32,6 +35,7 @@ interface BuiltView {
   pieces: Piece[]
   crop: Rect
   zoomSpeed: ZoomSpeed
+  storedZooms: ZoomEdit[] | null
   smoothing: number
   take: MappedTake
   view: TakeView
@@ -105,18 +109,25 @@ function mappedTake(track: RecordingTrack, trim: Trim, pieces: Piece[], crop: Re
   }
 }
 
+/** Stored zooms are aimed in the take. Automatic ones drive the camera just as found and stand in as edits until the first edit. */
+function zoomsOf(take: MappedTake, storedZooms: ZoomEdit[] | null, speed: ZoomSpeed): Pick<TakeView, 'zooms' | 'edits'> {
+  if (storedZooms) return { zooms: segmentsFromEdits(storedZooms, take, speed), edits: storedZooms }
+  const zooms = autoZooms(take.track.clicks, take.frame, { start: 0, end: take.map.outputMs }, speed)
+  return { zooms, edits: editsFromSegments(zooms, take.map, take.crop) }
+}
+
 /** Built once per edit state of a take; a change rebuilds only what depends on it. */
 export function takeViewFor(entry: RecordingEntry, recording: RecordingDoc, crop: Rect | null): TakeView {
-  const { trim, pieces, zoomSpeed, smoothing } = recording
+  const { trim, pieces, zooms: storedZooms, zoomSpeed, smoothing } = recording
   const frameCrop = cropOf(crop, entry.track)
   const built = builtViews.get(entry.track)
   const sameTake = built !== undefined && sameTrim(built.trim, trim) && samePieces(built.pieces, pieces) && sameRect(built.crop, frameCrop)
-  const sameZooms = sameTake && built.zoomSpeed === zoomSpeed
+  const sameZooms = sameTake && built.zoomSpeed === zoomSpeed && built.storedZooms === storedZooms
   const sameCursor = sameTake && built.smoothing === smoothing
   if (sameZooms && sameCursor) return built.view
 
   const take = sameTake ? built.take : mappedTake(entry.track, trim, pieces, frameCrop)
-  const zooms = sameZooms ? built.view.zooms : autoZooms(take.track.clicks, take.frame, { start: 0, end: take.map.outputMs }, zoomSpeed)
+  const { zooms, edits } = sameZooms ? built.view : zoomsOf(take, storedZooms, zoomSpeed)
   const view: TakeView = {
     map: take.map,
     crop: take.crop,
@@ -124,9 +135,10 @@ export function takeViewFor(entry: RecordingEntry, recording: RecordingDoc, crop
     track: take.track,
     effectClicks: take.effectClicks,
     zooms,
+    edits,
     camera: sameZooms ? built.view.camera : buildCameraPath(cameraTargets(zooms, take.frame, zoomSpeed), zoomSpeed, take.frame),
     cursor: sameCursor ? built.view.cursor : buildCursorPath(take.trackWithPreRoll, smoothing)
   }
-  builtViews.set(entry.track, { trim, pieces, crop: frameCrop, zoomSpeed, smoothing, take, view })
+  builtViews.set(entry.track, { trim, pieces, crop: frameCrop, zoomSpeed, storedZooms, smoothing, take, view })
   return view
 }
