@@ -125,9 +125,11 @@ function onKeyDown(event: KeyboardEvent) {
   if (key === 'r') return void shuffleLook()
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
   if (key === 'escape' && s.selection.length > 0) return void store.set({ selection: [] })
+  if (key === 'escape' && s.timelineSelection) return void store.set({ timelineSelection: null })
   if (key === 'escape' && s.shotSelection.length > 0) return void clearPickedShots()
   const deleting = key === 'delete' || key === 'backspace'
   if (deleting && s.selection.length > 0) return void (event.preventDefault(), removeSelected())
+  if (deleting && s.timelineSelection) return
   if (deleting && s.shotSelection.length > 0) return void (event.preventDefault(), deletePickedShots())
   if (key.startsWith('arrow') && s.selection.length > 0) {
     const step = event.shiftKey ? 10 : 1

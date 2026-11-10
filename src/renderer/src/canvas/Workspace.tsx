@@ -23,6 +23,7 @@ import {
   type ShotRecord
 } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
+import { togglePlayback } from '../recording/playback'
 import { recordingScene } from '../recording/scene'
 import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
 import { drawScene } from '../render/compose'
@@ -233,6 +234,7 @@ export function Workspace() {
   const rootRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<Drag | null>(null)
   const spaceRef = useRef(false)
+  const spaceTapRef = useRef(false)
   const [hover, setHover] = useState<{ cursor: string; item: string | null }>({ cursor: 'default', item: null })
   const [dragging, setDragging] = useState(false)
   const [reorder, setReorder] = useState<{ id: string; from: number; slot: number; active: boolean } | null>(null)
@@ -288,14 +290,20 @@ export function Workspace() {
     const down = (event: KeyboardEvent) => {
       if (event.code === 'Space' && !typing(event.target)) {
         spaceRef.current = true
-        if (!event.repeat) setHover((h) => ({ ...h, cursor: 'grab' }))
+        if (!event.repeat) {
+          spaceTapRef.current = true
+          setHover((h) => ({ ...h, cursor: 'grab' }))
+        }
         event.preventDefault()
       }
     }
     const up = (event: KeyboardEvent) => {
       if (event.code === 'Space') {
+        const tapped = spaceTapRef.current && spaceRef.current && !typing(event.target)
         spaceRef.current = false
+        spaceTapRef.current = false
         setHover((h) => ({ ...h, cursor: 'default' }))
+        if (tapped && store.get().doc.recording) togglePlayback()
       }
     }
     window.addEventListener('keydown', down)
@@ -335,6 +343,7 @@ export function Workspace() {
     dragRef.current = null
 
     if (event.button === 1 || spaceRef.current) {
+      spaceTapRef.current = false
       startViewPan(event)
     } else if (cropping && source) {
       const p = world

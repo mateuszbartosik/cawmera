@@ -29,7 +29,10 @@ export function usePlayhead(): number {
 }
 
 export function setPlaying(playing: boolean) {
-  store.set((s) => ({ playback: { playing, time: playing ? s.playback.time : playhead } }))
+  store.set((s) => ({
+    playback: { playing, time: playing ? s.playback.time : playhead },
+    ...(playing ? { selection: [], timelineSelection: s.timelineSelection?.kind === 'range' ? s.timelineSelection : null } : {})
+  }))
 }
 
 export function attachPlayer(player: RecordingPlayer | null) {

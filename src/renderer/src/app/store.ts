@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { decodeBackdrop } from './backdrop'
 import { DEFAULT_DOC, randomAngle, type Density, type Doc, type ExportFormat } from './doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from './house-style'
+import type { TimelineView } from '../timeline/scale'
 
 export type Mode = 'compose' | 'crop'
 /** A blur box or the spotlight of the active shot. */
@@ -10,6 +11,8 @@ export type BoxRef = { kind: 'redaction'; id: string } | { kind: 'spotlight' }
 export type Selection = BoxRef[]
 export const boxKey = (box: BoxRef) => (box.kind === 'redaction' ? box.id : 'spotlight')
 export const hasBox = (selection: Selection, box: BoxRef) => selection.some((candidate) => boxKey(candidate) === boxKey(box))
+/** What the recording timeline has selected: a stretch of the take, or a zoom (source ms). */
+export type TimelineSelection = { kind: 'range'; start: number; end: number } | { kind: 'zoom'; id: string } | null
 export type Theme = 'dark' | 'light'
 export type CaptureDelay = 0 | 3 | 5 | 10
 export type CaptureMode = 'screenshot' | 'recording'
@@ -67,6 +70,10 @@ export interface AppState {
   shots: ShotRecord[]
   mode: Mode
   selection: Selection
+  /** The part of the take the timeline rows show; null is the whole take. */
+  timelineView: TimelineView | null
+  /** Exclusive with `selection`: setting one clears the other. */
+  timelineSelection: TimelineSelection
   /**
    * Shots picked on the canvas (Shift/Ctrl-click, a drag on empty canvas, Ctrl+A), for acting on
    * several at once. Empty when nothing is picked; otherwise it includes the active shot.
@@ -184,6 +191,8 @@ let state: AppState = {
   shots: [firstShot],
   mode: 'compose',
   selection: [],
+  timelineView: null,
+  timelineSelection: null,
   shotSelection: [],
   theme: prefs.theme,
   collapsed: prefs.collapsed,
@@ -227,11 +236,21 @@ function syncBackdrop() {
 /** Resolves once the house background image, if any, can be drawn (before an export). */
 export const backdropReady = () => backdropDecoding
 
+/** Selecting boxes drops the timeline selection and the other way round. */
+function keepSelectionsExclusive(prev: AppState, patch: Partial<AppState>): Partial<AppState> {
+  const boxesChosen = patch.selection !== undefined && patch.selection.length > 0 && patch.selection !== prev.selection
+  const timelineChosen = patch.timelineSelection != null && patch.timelineSelection !== prev.timelineSelection
+  if (boxesChosen && !timelineChosen && prev.timelineSelection !== null) return { ...patch, timelineSelection: null }
+  if (timelineChosen && !boxesChosen && prev.selection.length > 0) return { ...patch, selection: [] }
+  return patch
+}
+
 export const store = {
   get: () => state,
   set(patch: Partial<AppState> | ((current: AppState) => Partial<AppState>)) {
-    const next = typeof patch === 'function' ? patch(state) : patch
+    const requested = typeof patch === 'function' ? patch(state) : patch
     const prev = state
+    const next = keepSelectionsExclusive(prev, requested)
     state = { ...state, ...next }
     if (prev.style.backgroundImage !== state.style.backgroundImage) syncBackdrop()
     if (
@@ -294,6 +313,8 @@ function activate(shots: ShotRecord[], id: string): Partial<AppState> {
     savedDoc: target.savedDoc,
     mode: 'compose',
     selection: [],
+    timelineView: null,
+    timelineSelection: null,
     shotSelection: []
   }
 }
@@ -470,6 +491,20 @@ function validSelection(doc: Doc, selection: Selection): Selection {
   return kept.length === selection.length ? selection : kept
 }
 
+const zoomEditIds = (_doc: Doc): string[] => []
+
+const takeDuration = (doc: Doc) => doc.recording?.pieces.at(-1)?.end ?? 0
+
+/** The timeline selection as `doc` still allows it: a gone zoom clears it, a range is clamped to the take (cleared when nothing is left). */
+export function validTimelineSelection(doc: Doc, selection: TimelineSelection): TimelineSelection {
+  if (!selection) return null
+  if (selection.kind === 'zoom') return zoomEditIds(doc).includes(selection.id) ? selection : null
+  const start = Math.max(selection.start, 0)
+  const end = Math.min(selection.end, takeDuration(doc))
+  if (end <= start) return null
+  return start === selection.start && end === selection.end ? selection : { kind: 'range', start, end }
+}
+
 /** Changes the active document. `history: false` is for continuous drags; call `commitFrom` when they end. */
 export function updateDoc(patch: Partial<Doc> | ((doc: Doc) => Partial<Doc>), options: { history?: boolean } = {}) {
   const current = state.doc
@@ -479,7 +514,8 @@ export function updateDoc(patch: Partial<Doc> | ((doc: Doc) => Partial<Doc>), op
     doc: next,
     past: history ? [...s.past, current].slice(-HISTORY_LIMIT) : s.past,
     future: history ? [] : s.future,
-    selection: validSelection(next, s.selection)
+    selection: validSelection(next, s.selection),
+    timelineSelection: validTimelineSelection(next, s.timelineSelection)
   }))
 }
 
@@ -498,6 +534,7 @@ export function undo() {
     past: past.slice(0, -1),
     future: [doc, ...future].slice(0, HISTORY_LIMIT),
     selection: validSelection(previous, s.selection),
+    timelineSelection: validTimelineSelection(previous, s.timelineSelection),
     mode: previous.sourceId ? s.mode : 'compose'
   }))
 }
@@ -511,6 +548,7 @@ export function redo() {
     past: [...past, doc].slice(-HISTORY_LIMIT),
     future: future.slice(1),
     selection: validSelection(next, s.selection),
+    timelineSelection: validTimelineSelection(next, s.timelineSelection),
     mode: next.sourceId ? s.mode : 'compose'
   }))
 }
