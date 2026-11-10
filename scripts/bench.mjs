@@ -5,7 +5,7 @@ import electron from 'electron'
 import { build } from 'vite'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const USAGE = 'usage: npm run bench:export -- [--seconds 20] [--size 1920x1080] [--fps 60] [--runs 3]'
+const USAGE = 'usage: npm run bench:export -- [--seconds 20] [--size 1920x1080] [--fps 60] [--runs 3] [--compare]'
 
 function option(args, name, fallback) {
   const at = args.indexOf(`--${name}`)
@@ -19,7 +19,8 @@ function exportConfig(args) {
     width,
     height,
     fps: Number(option(args, 'fps', '60')),
-    runs: Number(option(args, 'runs', '3'))
+    runs: Number(option(args, 'runs', '3')),
+    compare: args.includes('--compare')
   }
   const valid = [config.seconds, width, height, config.runs].every((value) => Number.isFinite(value) && value > 0) && [30, 60].includes(config.fps)
   if (!valid) throw new Error(USAGE)

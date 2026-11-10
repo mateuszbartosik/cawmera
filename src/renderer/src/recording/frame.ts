@@ -1,13 +1,14 @@
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
-import { drawBackground, drawBorder, drawFrameShadow, roundRectPath } from '../render/compose'
-import { clamp, compose, inverse, transformPoint, translation, type Matrix, type Point, type Size } from '../render/geometry'
+import { drawBackground, drawBorder, drawFrameShadow, drawFrameUnderside, roundRectPath } from '../render/compose'
+import { clamp, compose, inverse, transformPoint, translation, type Matrix, type Point, type Rect, type Size } from '../render/geometry'
 import { CURSOR_BASE_PX, cursorBounds, drawCursor } from './cursor-art'
 import { tiltAt, type CursorFrame } from './cursor'
 import { activeClicks, drawClickEffect, pressScale } from './effects'
 import { toComposition, type RecordingLayout } from './layout'
 import type { RecordingDoc } from './settings'
 import { sampleFrame, type CameraSamples, type CursorSamples, type FrameQuality } from './shutter'
+import { stageFor } from './stage-cache'
 import type { TakeView } from './take-view'
 
 export interface RecordingScene {
@@ -34,6 +35,7 @@ type LayerRole = 'picture' | 'sprite' | 'stamps'
 interface Sprite { canvas: OffscreenCanvas; width: number; height: number; hotspot: Point; origin: Point }
 
 const roundUp = (value: number, step: number) => Math.ceil(value / step) * step
+const frameRadius = (style: HouseStyle, content: Rect) => Math.min(style.radius, content.w / 2, content.h / 2)
 
 /** Whole 255ths, spread evenly. globalAlpha weighs in 8 bits, and k/255 is exact there, so n copies add up to exactly one. */
 export function stampWeights(count: number): number[] {
@@ -68,8 +70,11 @@ function layerFor(target: Ctx, role: LayerRole, width: number, height: number): 
   return created
 }
 
-/** The background, the frame with its shadow, the video, the border and the click effects, over an opaque base. */
-function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout, t: number, matrix: Matrix, base: Size): void {
+/**
+ * The background, the frame with its shadow, the video, the border and the click effects, over an opaque base. With a
+ * stage, the shadow comes from it.
+ */
+function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout, t: number, matrix: Matrix, base: Size, stage: OffscreenCanvas | null): void {
   const { video, view, doc, settings, style, backdrop } = scene
   const { crop, frame, track, effectClicks } = view
   const { content } = layout
@@ -81,8 +86,13 @@ function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout
   ctx.setTransform(...matrix)
 
   drawBackground(ctx, doc, style, backdrop)
-  const radius = Math.min(style.radius, content.w / 2, content.h / 2)
-  drawFrameShadow(ctx, content, radius, style, canvasPxPerPx)
+  const radius = frameRadius(style, content)
+  if (stage) {
+    ctx.drawImage(stage, 0, 0)
+    drawFrameUnderside(ctx, content, radius, style)
+  } else {
+    drawFrameShadow(ctx, content, radius, style, canvasPxPerPx)
+  }
 
   ctx.save()
   roundRectPath(ctx, content, radius)
@@ -104,7 +114,15 @@ function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout
  * time, into a layer with room around it. Each sample is that layer moved as the camera moves the picture by then, and
  * blending the copies at 1/(i+1) over an opaque base keeps their running mean.
  */
-function drawReprojected(target: Ctx, scene: RecordingScene, layout: RecordingLayout, t: number, atFrameTime: Matrix, camera: CameraSamples): void {
+function drawReprojected(
+  target: Ctx,
+  scene: RecordingScene,
+  layout: RecordingLayout,
+  t: number,
+  atFrameTime: Matrix,
+  camera: CameraSamples,
+  stage: OffscreenCanvas | null
+): void {
   const { width, height } = target.canvas
   const margin = Math.ceil(camera.travelPx) + LAYER_EDGE_PX
   const used = { width: width + 2 * margin, height: height + 2 * margin }
@@ -114,7 +132,7 @@ function drawReprojected(target: Ctx, scene: RecordingScene, layout: RecordingLa
   picture.ctx.beginPath()
   picture.ctx.rect(0, 0, used.width, used.height)
   picture.ctx.clip()
-  drawPicture(picture.ctx, scene, layout, t, compose(translation(margin, margin), atFrameTime), used)
+  drawPicture(picture.ctx, scene, layout, t, compose(translation(margin, margin), atFrameTime), used, stage)
   picture.ctx.restore()
 
   const backToComposition = inverse(atFrameTime)
@@ -183,15 +201,26 @@ function drawCursorStamps(target: Ctx, scene: RecordingScene, layout: RecordingL
 }
 
 /**
+ * Only the export keeps a stage: it draws every frame at one canvas px per output px, while the preview’s scale changes
+ * with the view.
+ */
+function stageOf(owner: Ctx, scene: RecordingScene, layout: RecordingLayout, quality: FrameQuality, k: number): OffscreenCanvas | null {
+  const { doc, style } = scene
+  if (quality !== 'export' || k !== 1 || style.shadow <= 0) return null
+  return stageFor(owner, doc.size, layout.content, frameRadius(style, layout.content), style)
+}
+
+/**
  * Nothing blurs at rest. The picture blurs by how far the camera moves it on the canvas, and the cursor by how far it moves
  * on the canvas, camera included; each layer blends just enough samples.
  */
 export function drawRecordingFrame(ctx: Ctx, scene: RecordingScene, outputMs: number, quality: FrameQuality, k = 1): void {
   const { layout, view, camera, cursor } = sampleFrame(scene, outputMs, quality, k)
+  const stage = stageOf(ctx, scene, layout, quality, k)
   ctx.save()
   ctx.globalAlpha = 1
-  if (camera.views.length === 1) drawPicture(ctx, scene, layout, outputMs, view, ctx.canvas)
-  else drawReprojected(ctx, scene, layout, outputMs, view, camera)
+  if (camera.views.length === 1) drawPicture(ctx, scene, layout, outputMs, view, ctx.canvas, stage)
+  else drawReprojected(ctx, scene, layout, outputMs, view, camera, stage)
   if (cursor) drawCursorStamps(ctx, scene, layout, outputMs, view, cursor)
   ctx.restore()
 }

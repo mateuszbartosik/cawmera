@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { angleDistance, angleName, edgeDirections, exportFileName, MIN_ANGLE_APART, normalizeAngle, randomAngle, slugify, snapDensity } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE, sanitizeHouseStyle } from '../src/renderer/src/app/house-style'
 import { DEFAULT_SIZE } from '../src/renderer/src/app/size'
-import { coverRect, lightPoint } from '../src/renderer/src/render/compose'
+import { coverRect, drawScene, lightPoint } from '../src/renderer/src/render/compose'
 import { clipTo, confineMove, normalize, resizeRect } from '../src/renderer/src/render/geometry'
 import {
   BLEED_OVERSHOOT,
@@ -23,6 +23,7 @@ import {
 import { shotAt, shotRects, slotAt, slotX } from '../src/renderer/src/canvas/view'
 import { emptyDoc } from '../src/renderer/src/app/store'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
+import { fakeContext } from './fake-canvas'
 
 const style = DEFAULT_HOUSE_STYLE
 const big = { width: 2880, height: 1800 } // a full window captured at 2×
@@ -359,6 +360,20 @@ describe('background image', () => {
     expect(coverRect({ width: 2400, height: 1260 }, { width: 1200, height: 630 })).toEqual({ x: 0, y: 0, w: 1200, h: 630 })
     expect(coverRect({ width: 1000, height: 1000 }, { width: 1600, height: 1000 })).toEqual({ x: 0, y: -300, w: 1600, h: 1600 })
     expect(coverRect({ width: 3000, height: 1000 }, { width: 1080, height: 1080 })).toEqual({ x: -1080, y: 0, w: 3240, h: 1080 })
+  })
+})
+
+describe('redaction', () => {
+  it('shrinks a blurred or pixelated box on an offscreen scratch canvas, which a hidden window can’t hibernate', () => {
+    for (const redactStyle of ['blur', 'pixelate'] as const) {
+      const fake = fakeContext()
+      const shot = { tag: 'shot' } as unknown as CanvasImageSource
+      const doc = { ...DEFAULT_DOC, redactions: [{ id: 'box', rect: { x: 200, y: 160, w: 360, h: 72 } }], redactStyle }
+      drawScene(fake.ctx, { source: { image: shot, width: 1600, height: 1000 }, doc, style })
+      const [small] = fake.layers
+      expect(small.argsAtCall['drawImage'].map((args) => args[0])).toEqual([shot])
+      expect(fake.argsAtCall['drawImage'].map((args) => args[0])).toEqual([shot, small.canvas])
+    }
   })
 })
 

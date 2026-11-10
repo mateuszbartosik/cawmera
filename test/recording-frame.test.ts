@@ -190,8 +190,8 @@ describe('drawRecordingFrame', () => {
     expect(cursorArt.drawCursor).toHaveBeenCalledTimes(1)
     expect(stamps.settings).toEqual({ colorType: 'float16' })
     expect(stamps.alphaAtCall['drawImage']).toEqual(stampWeights(cursor).map((weight) => weight / 255))
-    expect(fake.calls.filter((c) => c.startsWith('drawImage:'))).toHaveLength(1 + cursor + 1)
-    expect(fake.alphaAtCall['drawImage']).toEqual([1, 1])
+    expect(fake.calls.filter((c) => c.startsWith('drawImage:'))).toHaveLength(1 + 1 + cursor + 1)
+    expect(fake.alphaAtCall['drawImage']).toEqual([1, 1, 1])
   })
 
   it('keeps an 8-bit stamps layer, weighed the same, where the browser refuses float16', () => {
@@ -300,19 +300,19 @@ describe('drawRecordingFrame', () => {
     expect(fake.alphaAtCall['drawImage'].at(-1)).toBeCloseTo(0.5)
   })
 
-  it('draws a still frame straight onto the target, with the cursor as one sprite', () => {
+  it('draws a still frame straight onto the target over the stage, with the cursor as one sprite', () => {
     const fake = fakeContext()
     drawRecordingFrame(fake.ctx, zoomScene, 1000, 'export')
-    expect(fake.layers).toHaveLength(1)
-    expect(fake.calls.filter((c) => c.startsWith('drawImage:'))).toEqual(['drawImage:video', 'drawImage:offscreen'])
-    expect(fake.alphaAtCall['drawImage']).toEqual([1, 1])
+    expect(fake.layers).toHaveLength(2)
+    expect(fake.calls.filter((c) => c.startsWith('drawImage:'))).toEqual(['drawImage:offscreen', 'drawImage:video', 'drawImage:offscreen'])
+    expect(fake.alphaAtCall['drawImage']).toEqual([1, 1, 1])
     expect(fake.calls).not.toContain('globalCompositeOperation=lighter')
   })
 
   it('lays a still cursor on the picture at its opacity', () => {
     const fake = fakeContext()
     drawRecordingFrame(fake.ctx, zoomScene, 1600, 'export')
-    expect(fake.alphaAtCall['drawImage']).toEqual([1, 0.5])
+    expect(fake.alphaAtCall['drawImage']).toEqual([1, 1, 0.5])
   })
 
   it('holds the cursor on a click at the video’s end as one sharp copy, though the take moved it on', () => {
@@ -346,10 +346,10 @@ describe('drawRecordingFrame', () => {
     expect(drawnTilt(false)).toBe(0)
   })
 
-  it('zooms the frame shadow with the camera', () => {
+  it('zooms the live frame shadow with the camera', () => {
     const frameShadowBlur = (t: number) => {
       const fake = fakeContext()
-      drawRecordingFrame(fake.ctx, zoomScene, t, 'export')
+      drawRecordingFrame(fake.ctx, zoomScene, t, 'preview', 1)
       return Number(fake.calls.find((c) => c.startsWith('shadowBlur='))!.split('=')[1])
     }
     expect(frameShadowBlur(4000)).toBeCloseTo(cameraAt(zoomScene.view.camera, 4000).depth * frameShadowBlur(1000))

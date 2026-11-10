@@ -17,7 +17,7 @@ export interface Scene {
   backdrop?: ImageBitmap | null
 }
 
-type Ctx = CanvasRenderingContext2D
+type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 export function layoutFor(scene: Scene): Layout | null {
   const { source, doc, style } = scene
@@ -135,16 +135,47 @@ function drawBackdrop(ctx: Ctx, picture: ImageBitmap, size: Size) {
   ctx.restore()
 }
 
+const FRAME_SHADOW = { blur: 80, offsetY: 28, underside: '#05070d' }
+type ShadowStyle = Pick<HouseStyle, 'shadow'>
+
+function fillFrameUnderside(ctx: Ctx, frame: Rect, radius: number) {
+  ctx.fillStyle = FRAME_SHADOW.underside
+  roundRectPath(ctx, frame, radius)
+  ctx.fill()
+}
+
 /** Drawn first, as a filled shape under the frame. Shadow lengths are device px, hence * k. */
-export function drawFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: HouseStyle, k: number) {
+export function drawFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number) {
   if (style.shadow <= 0) return
   ctx.save()
   ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
-  ctx.shadowBlur = 80 * k
-  ctx.shadowOffsetY = 28 * k
-  ctx.fillStyle = '#05070d'
-  roundRectPath(ctx, frame, radius)
-  ctx.fill()
+  ctx.shadowBlur = FRAME_SHADOW.blur * k
+  ctx.shadowOffsetY = FRAME_SHADOW.offsetY * k
+  fillFrameUnderside(ctx, frame, radius)
+  ctx.restore()
+}
+
+/**
+ * drawFrameShadow’s shadow without its shape, on a canvas scaled by k alone. The shape sits a whole number of device px
+ * left of the canvas, and its shadow comes back by as many, to where drawFrameShadow puts it.
+ */
+export function drawFrameShadowAlone(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number) {
+  if (style.shadow <= 0) return
+  const awayPx = Math.ceil((frame.x + frame.w) * k) + 1
+  ctx.save()
+  ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
+  ctx.shadowBlur = FRAME_SHADOW.blur * k
+  ctx.shadowOffsetX = awayPx
+  ctx.shadowOffsetY = FRAME_SHADOW.offsetY * k
+  fillFrameUnderside(ctx, rect(frame.x - awayPx / k, frame.y, frame.w, frame.h), radius)
+  ctx.restore()
+}
+
+/** What drawFrameShadow lays over its shadow, for a frame drawn over drawFrameShadowAlone’s. */
+export function drawFrameUnderside(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle) {
+  if (style.shadow <= 0) return
+  ctx.save()
+  fillFrameUnderside(ctx, frame, radius)
   ctx.restore()
 }
 
@@ -255,16 +286,15 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${Math.max(0, Math.min(1, alpha))})`
 }
 
-const scratchCache = new Map<string, { canvas: HTMLCanvasElement; ctx: Ctx }>()
+const scratchCache = new Map<string, { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D }>()
 
+/** Offscreen, since a hidden window may hibernate a canvas element. */
 function scratch(width: number, height: number) {
   const key = `${width}x${height}`
   let entry = scratchCache.get(key)
   if (!entry) {
     if (scratchCache.size > 24) scratchCache.clear()
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
+    const canvas = new OffscreenCanvas(width, height)
     const ctx = canvas.getContext('2d', { willReadFrequently: width === 1 && height === 1 })
     if (!ctx) throw new Error('2D canvas is unavailable')
     entry = { canvas, ctx }
