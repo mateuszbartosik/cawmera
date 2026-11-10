@@ -4,6 +4,7 @@ import { commitFrom, store } from '../app/store'
 import { setRecording } from '../recording/actions'
 import { applyTrim, scrubTo } from '../recording/playback'
 import type { Trim } from '../recording/trim'
+import { dragSession } from './drag-session'
 import { CLIP_HEIGHT, CLIP_INSET, RULER_HEIGHT } from './layout'
 import { dragTrim, formatClock, timeToX, xToTime, type TimelineView } from './scale'
 
@@ -16,10 +17,11 @@ type Edge = 'start' | 'end'
 interface TrimHandleProps { edge: Edge; trim: Trim; duration: number; view: TimelineView; width: number }
 
 export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProps) {
-  const docBeforeDrag = useRef<Doc | null>(null)
+  const drag = useRef(dragSession<Doc>(commitFrom))
   const grabOffset = useRef(0)
   const docBeforeKeys = useRef<Doc | null>(null)
   const x = timeToX(trim[edge], view, width)
+  const visible = x >= 0 && x <= width
 
   const finish = (before: { current: Doc | null }) => {
     if (before.current) commitFrom(before.current)
@@ -44,13 +46,17 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
 
   useEffect(
     () => () => {
-      finish(docBeforeDrag)
+      drag.current.end()
       finish(docBeforeKeys)
     },
     []
   )
 
-  if (x < 0 || x > width) return null
+  useEffect(() => {
+    if (!visible) drag.current.end()
+  }, [visible])
+
+  if (!visible) return null
 
   return (
     <div
@@ -78,16 +84,16 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
         event.currentTarget.setPointerCapture(event.pointerId)
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
         grabOffset.current = event.clientX - bounds.left - x
-        docBeforeDrag.current = store.get().doc
+        drag.current.begin(store.get().doc)
       }}
       onPointerMove={(event) => {
-        if (!docBeforeDrag.current) return
+        if (!drag.current.accepts(event.buttons)) return
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
         moveEdgeTo(xToTime(event.clientX - bounds.left - grabOffset.current, view, bounds.width))
       }}
-      onPointerUp={() => finish(docBeforeDrag)}
-      onPointerCancel={() => finish(docBeforeDrag)}
-      onLostPointerCapture={() => finish(docBeforeDrag)}
+      onPointerUp={() => drag.current.end()}
+      onPointerCancel={() => drag.current.end()}
+      onLostPointerCapture={() => drag.current.end()}
     />
   )
 }
