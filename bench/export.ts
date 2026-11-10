@@ -36,15 +36,32 @@ const H264_HIGH_LEVEL_5 = 'avc1.640032'
 
 /** A deep zoom at the frame’s lower left corner, so its edge, border and shadow fill part of the view. */
 const COMPARED_ZOOM: ZoomSegment = { start: 8000, end: 15000, depth: 2.5, focus: { x: 0, y: SOURCE_SIZE.height } }
+const FRAME_MS = MS_PER_SECOND / SOURCE_FPS
+const framesFrom = (startMs: number, count: number, stepMs: number) => Array.from({ length: count }, (_, i) => startMs + i * stepMs)
+/** The camera holds at depth 1 and 2.5, and moves through every frame of the zoom in and the zoom out. */
 const COMPARED_FRAMES: Record<string, number[]> = {
-  'depth 1': Array.from({ length: 10 }, (_, i) => 500 + i * 600),
-  'zooming in': [7150, 7300, 7450, 7600],
-  'depth 2.5': Array.from({ length: 10 }, (_, i) => 9000 + i * 550),
-  'zooming out': [15050, 15200, 15350, 15500]
+  'depth 1': framesFrom(500, 10, 600),
+  'zooming in': framesFrom(7100 + FRAME_MS, 60, FRAME_MS),
+  'depth 2.5': framesFrom(9000, 10, 550),
+  'zooming out': framesFrom(15000 + FRAME_MS, 60, FRAME_MS)
 }
-const MOST_A_CHANNEL_MAY_DIFFER = 3
+/** A frame of one picture, with the camera held or its blur off, shows the stage’s own difference. */
+const STAGE_TOLERANCE = 3
+/**
+ * Camera-blurred frames average copies of the picture on the GPU, less exactly than 8-bit arithmetic: from pictures at
+ * most 1 level apart, the copies of these frames end up to 5 levels apart on the bench PC.
+ */
+const CAMERA_BLURRED_TOLERANCE = 6
 
-interface Difference { frames: number; depths: number[]; largest: number; channelsOverOne: number; channelsOverLimit: number; meanAbsolute: number }
+interface Difference {
+  tolerance: number
+  frames: number
+  depths: number[]
+  largest: number
+  channelsOverOne: number
+  channelsOverTolerance: number
+  meanAbsolute: number
+}
 
 interface RunResult {
   totalMs: number
@@ -117,14 +134,15 @@ async function pixelsOf(canvas: OffscreenCanvas): Promise<Uint8ClampedArray> {
   return reader.getImageData(0, 0, canvas.width, canvas.height).data
 }
 
-function addDifference(total: Difference, staged: Uint8ClampedArray, live: Uint8ClampedArray, depth: number) {
+function addDifference(differences: Record<string, Difference>, name: string, tolerance: number, staged: Uint8ClampedArray, live: Uint8ClampedArray, depth: number) {
+  const total = (differences[name] ??= { tolerance, frames: 0, depths: [], largest: 0, channelsOverOne: 0, channelsOverTolerance: 0, meanAbsolute: 0 })
   let sum = 0
   for (let i = 0; i < staged.length; i++) {
     const difference = Math.abs(staged[i] - live[i])
     sum += difference
     if (difference > total.largest) total.largest = difference
     if (difference > 1) total.channelsOverOne++
-    if (difference > MOST_A_CHANNEL_MAY_DIFFER) total.channelsOverLimit++
+    if (difference > tolerance) total.channelsOverTolerance++
   }
   total.meanAbsolute = (total.meanAbsolute * total.frames + sum / staged.length) / (total.frames + 1)
   total.frames++
@@ -133,8 +151,8 @@ function addDifference(total: Difference, staged: Uint8ClampedArray, live: Uint8
 
 /**
  * Every compared frame drawn twice at one canvas px per output px: as the export draws it, over the cached stage, and as
- * the preview draws it, with the shadow cast live. Each frame blends the same samples either way. The camera blur is off,
- * so a frame is one picture, and a difference is the stage’s own: averaging moving copies in 8 bits would amplify it.
+ * the preview draws it, with the shadow cast live. Each frame blends the same samples either way. A frame the camera
+ * blurs is compared again with the camera blur off, where it is one picture.
  */
 async function compareStage(fixtureBytes: Uint8Array, entry: RecordingEntry, doc: Doc & { recording: RecordingDoc }) {
   const input = new Input({ source: new BufferSource(fixtureBytes), formats: ALL_FORMATS })
@@ -143,46 +161,53 @@ async function compareStage(fixtureBytes: Uint8Array, entry: RecordingEntry, doc
     if (!track) throw new Error('The fixture has no video.')
     const firstFrameSeconds = await track.getFirstTimestamp()
     const unzoomed = recordingScene(entry, doc, DEFAULT_HOUSE_STYLE, null, new OffscreenCanvas(1, 1))!
-    const scene: RecordingScene = {
-      ...unzoomed,
-      view: withOneZoom(unzoomed.view, COMPARED_ZOOM, doc.recording),
-      settings: { ...unzoomed.settings, cameraBlur: 0 }
-    }
+    const scene: RecordingScene = { ...unzoomed, view: withOneZoom(unzoomed.view, COMPARED_ZOOM, doc.recording) }
+    const sharpCamera: RecordingScene = { ...scene, settings: { ...scene.settings, cameraBlur: 0 } }
     const frames = Object.entries(COMPARED_FRAMES).flatMap(([group, times]) => times.map((outputMs) => ({ group, outputMs })))
     const sourceSeconds = frames.map(({ outputMs }) => Math.max(outputToSource(scene.view.map, outputMs) / MS_PER_SECOND, firstFrameSeconds))
-    const differences: Record<string, Difference> = Object.fromEntries(Object.keys(COMPARED_FRAMES).map((group) =>
-      [group, { frames: 0, depths: [], largest: 0, channelsOverOne: 0, channelsOverLimit: 0, meanAbsolute: 0 }]))
+    const differences: Record<string, Difference> = {}
+
+    const compare = async (name: string, tolerance: number, frameScene: RecordingScene, outputMs: number) => {
+      const [exported, previewed] = [framePlan(frameScene, outputMs, 'export'), framePlan(frameScene, outputMs, 'preview')]
+      if (exported.camera !== previewed.camera || exported.cursor !== previewed.cursor) {
+        throw new Error(`At ${outputMs} ms the export and the preview blend different samples, so the frame can’t compare the stage alone.`)
+      }
+      const [staged, live] = await Promise.all([pixelsOf(drawnFrame(frameScene, outputMs, 'export')), pixelsOf(drawnFrame(frameScene, outputMs, 'preview'))])
+      addDifference(differences, name, tolerance, staged, live, cameraAt(scene.view.camera, outputMs).depth)
+    }
 
     let index = 0
     for await (const sample of new VideoSampleSink(track).samplesAtTimestamps(sourceSeconds)) {
       try {
         if (!sample) throw new Error('The fixture has no picture at a compared frame.')
         const { group, outputMs } = frames[index]
-        const frameScene = { ...scene, video: sample.toCanvasImageSource() }
-        const [exported, previewed] = [framePlan(frameScene, outputMs, 'export'), framePlan(frameScene, outputMs, 'preview')]
-        if (exported.camera !== previewed.camera || exported.cursor !== previewed.cursor) {
-          throw new Error(`At ${outputMs} ms the export and the preview blend different samples, so the frame can’t compare the stage alone.`)
+        const video = sample.toCanvasImageSource()
+        if (framePlan({ ...scene, video }, outputMs, 'export').camera === 1) {
+          await compare(`${group}, camera held`, STAGE_TOLERANCE, { ...scene, video }, outputMs)
+        } else {
+          await compare(`${group}, camera blur off`, STAGE_TOLERANCE, { ...sharpCamera, video }, outputMs)
+          await compare(`${group}, camera blurred`, CAMERA_BLURRED_TOLERANCE, { ...scene, video }, outputMs)
         }
-        const [staged, live] = await Promise.all([pixelsOf(drawnFrame(frameScene, outputMs, 'export')), pixelsOf(drawnFrame(frameScene, outputMs, 'preview'))])
-        addDifference(differences[group], staged, live, cameraAt(scene.view.camera, outputMs).depth)
       } finally {
         sample?.close()
       }
       index++
     }
 
-    const lines = Object.entries(differences).map(([group, difference]) =>
-      `${group}: ${difference.frames} frames at depth ${Math.min(...difference.depths)}–${Math.max(...difference.depths)}, largest channel difference ${difference.largest}`
-      + `, ${difference.channelsOverOne} channels off by more than 1, mean ${difference.meanAbsolute.toFixed(4)}`)
-    for (const line of lines) window.bench.progress(line)
-    const failing = Object.entries(differences).filter(([, difference]) => difference.largest > MOST_A_CHANNEL_MAY_DIFFER)
+    for (const [name, difference] of Object.entries(differences)) {
+      window.bench.progress(`${name}: ${difference.frames} frames at depth ${Math.min(...difference.depths)}–${Math.max(...difference.depths)}`
+        + `, largest channel difference ${difference.largest} (at most ${difference.tolerance}), ${difference.channelsOverOne} channels off by more than 1`
+        + `, mean ${difference.meanAbsolute.toFixed(4)}`)
+    }
+    const failing = Object.entries(differences).filter(([, difference]) => difference.largest > difference.tolerance)
     if (failing.length > 0) {
-      await window.bench.fail(`the cached stage differs from the live shadow by more than ${MOST_A_CHANNEL_MAY_DIFFER} in ${failing.map(([group]) => group).join(', ')}`)
+      await window.bench.fail(`the cached stage differs from the live shadow by more than allowed in ${failing.map(([name]) => name).join('; ')}`)
       return
     }
     await window.bench.finish({
-      line: `stage compare ${doc.size.width}×${doc.size.height}: every channel within ${MOST_A_CHANNEL_MAY_DIFFER} of the live shadow`,
-      compare: { zoom: COMPARED_ZOOM, frames: COMPARED_FRAMES, tolerance: MOST_A_CHANNEL_MAY_DIFFER, differences }
+      line: `stage compare ${doc.size.width}×${doc.size.height}: every channel within ${STAGE_TOLERANCE} of the live shadow in one picture,`
+        + ` and within ${CAMERA_BLURRED_TOLERANCE} with the camera blurred`,
+      compare: { zoom: COMPARED_ZOOM, frames: COMPARED_FRAMES, differences }
     })
   } finally {
     input.dispose()

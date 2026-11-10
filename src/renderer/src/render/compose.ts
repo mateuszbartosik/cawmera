@@ -136,7 +136,7 @@ function drawBackdrop(ctx: Ctx, picture: ImageBitmap, size: Size) {
 }
 
 const FRAME_SHADOW = { blur: 80, offsetY: 28, underside: '#05070d' }
-type ShadowStyle = Pick<HouseStyle, 'shadow'>
+export type ShadowStyle = Pick<HouseStyle, 'shadow'>
 
 function fillFrameUnderside(ctx: Ctx, frame: Rect, radius: number) {
   ctx.fillStyle = FRAME_SHADOW.underside
@@ -144,24 +144,9 @@ function fillFrameUnderside(ctx: Ctx, frame: Rect, radius: number) {
   ctx.fill()
 }
 
-/** Drawn first, as a filled shape under the frame. Shadow lengths are device px, hence * k. */
-export function drawFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number) {
+/** The underside with its shadow, the underside moved `awayPx` device px to the left and its shadow moved back. */
+function castFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number, awayPx: number) {
   if (style.shadow <= 0) return
-  ctx.save()
-  ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
-  ctx.shadowBlur = FRAME_SHADOW.blur * k
-  ctx.shadowOffsetY = FRAME_SHADOW.offsetY * k
-  fillFrameUnderside(ctx, frame, radius)
-  ctx.restore()
-}
-
-/**
- * drawFrameShadow’s shadow without its shape, on a canvas scaled by k alone. The shape sits a whole number of device px
- * left of the canvas, and its shadow comes back by as many, to where drawFrameShadow puts it.
- */
-export function drawFrameShadowAlone(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number) {
-  if (style.shadow <= 0) return
-  const awayPx = Math.ceil((frame.x + frame.w) * k) + 1
   ctx.save()
   ctx.shadowColor = `rgba(0, 0, 0, ${style.shadow})`
   ctx.shadowBlur = FRAME_SHADOW.blur * k
@@ -169,6 +154,19 @@ export function drawFrameShadowAlone(ctx: Ctx, frame: Rect, radius: number, styl
   ctx.shadowOffsetY = FRAME_SHADOW.offsetY * k
   fillFrameUnderside(ctx, rect(frame.x - awayPx / k, frame.y, frame.w, frame.h), radius)
   ctx.restore()
+}
+
+/** Drawn first, as a filled shape under the frame. Shadow lengths are device px, hence * k. */
+export function drawFrameShadow(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle, k: number) {
+  castFrameShadow(ctx, frame, radius, style, k, 0)
+}
+
+/**
+ * drawFrameShadow’s shadow without its shape, at one canvas px per px. The shape sits a whole number of px left of the
+ * canvas, and its shadow comes back by as many, to where drawFrameShadow puts it.
+ */
+export function drawFrameShadowAlone(ctx: Ctx, frame: Rect, radius: number, style: ShadowStyle) {
+  castFrameShadow(ctx, frame, radius, style, 1, Math.ceil(frame.x + frame.w) + 1)
 }
 
 /** What drawFrameShadow lays over its shadow, for a frame drawn over drawFrameShadowAlone’s. */

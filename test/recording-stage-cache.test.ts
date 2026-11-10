@@ -4,7 +4,7 @@ import { drawRecordingFrame, type RecordingScene } from '../src/renderer/src/rec
 import { recordingLayout } from '../src/renderer/src/recording/layout'
 import { cameraMatrixAt } from '../src/renderer/src/recording/shutter'
 import { stageKey } from '../src/renderer/src/recording/stage-cache'
-import type { Matrix } from '../src/renderer/src/render/geometry'
+import { compose, translation, type Matrix } from '../src/renderer/src/render/geometry'
 import { fakeContext } from './fake-canvas'
 import { output, stillScene, track, viewOf, zoomScene } from './recording-scenes'
 
@@ -34,6 +34,39 @@ function watchedTarget() {
     }
   })
   return { ...fake, ctx, offscreenDraws }
+}
+
+interface LayerDraw { layer: unknown; call: 'drawImage' | 'fill'; args: unknown[]; transform: Matrix; fillStyle: unknown }
+
+/** Every image drawn and every path filled on an offscreen layer, with the layer’s transform and fill at the time. */
+function watchLayers(): LayerDraw[] {
+  const draws: LayerDraw[] = []
+  const Layer = globalThis.OffscreenCanvas as unknown as new (width: number, height: number) => {
+    getContext(type: string, settings?: unknown): CanvasRenderingContext2D
+  }
+  globalThis.OffscreenCanvas = class extends Layer {
+    getContext(type: string, settings?: unknown) {
+      const layer = this
+      const ctx = super.getContext(type, settings)
+      let transform: Matrix = [1, 0, 0, 1, 0, 0]
+      let fillStyle: unknown = null
+      return new Proxy(ctx, {
+        get(target, name) {
+          const value = Reflect.get(target, name) as (...args: unknown[]) => unknown
+          if (name === 'setTransform') return (...matrix: Matrix) => { transform = matrix; return value(...matrix) }
+          if (name === 'drawImage' || name === 'fill') {
+            return (...args: unknown[]) => { draws.push({ layer, call: name, args, transform, fillStyle }); return value(...args) }
+          }
+          return value
+        },
+        set(target, name, value) {
+          if (name === 'fillStyle') fillStyle = value
+          return Reflect.set(target, name, value)
+        }
+      })
+    }
+  } as unknown as typeof OffscreenCanvas
+  return draws
 }
 
 describe('stageKey', () => {
@@ -122,12 +155,31 @@ describe('the export’s stage', () => {
     expect(shadowsCast(secondFrame)).toBe(0)
   })
 
-  it('lays the stage under the camera inside a re-projected picture', () => {
-    const fake = fakeContext()
-    drawRecordingFrame(fake.ctx, zoomScene, 2700, 'export')
-    const picture = fake.layers.find((layer) => (layer.argsAtCall['drawImage'] ?? []).some((args) => (args[0] as { tag?: string }).tag === 'video'))!
-    expect((picture.argsAtCall['drawImage'] ?? []).filter((args) => isStage(args[0]))).toHaveLength(1)
-    expect(shadowsCast(fake.calls)).toBe(1)
+  it('lays the stage inside a re-projected picture under the picture’s view, where the live frame casts its shadow', () => {
+    const t = 2700
+    const exported = fakeContext()
+    const exportedDraws = watchLayers()
+    drawRecordingFrame(exported.ctx, zoomScene, t, 'export')
+    const previewed = fakeContext()
+    const previewedDraws = watchLayers()
+    drawRecordingFrame(previewed.ctx, zoomScene, t, 'preview', 1)
+
+    const holdsVideo = (draw: LayerDraw) => draw.call === 'drawImage' && (draw.args[0] as { tag?: string }).tag === 'video'
+    const exportedPicture = exportedDraws.find(holdsVideo)!.layer
+    const previewedPicture = previewedDraws.find(holdsVideo)!.layer
+    const stages = exportedDraws.filter((draw) => draw.call === 'drawImage' && isStage(draw.args[0]))
+    expect(stages).toHaveLength(1)
+    expect(stages[0].layer).toBe(exportedPicture)
+    expect(stages[0].args.slice(1)).toEqual([0, 0])
+
+    const copies = (exported.argsAtCall['drawImage'] ?? []).filter((args) => args[0] === exportedPicture)
+    expect(copies.length).toBeGreaterThan(1)
+    const margin = -(copies[0][5] as number)
+    expect(margin).toBeGreaterThan(0)
+    expect(stages[0].transform).toEqual(compose(translation(margin, margin), cameraMatrixAt(zoomScene, t)))
+    const liveShadow = previewedDraws.find((draw) => draw.layer === previewedPicture && draw.call === 'fill' && draw.fillStyle === '#05070d')!
+    expect(stages[0].transform).toEqual(liveShadow.transform)
+    expect(shadowsCast(exported.calls)).toBe(1)
   })
 
   it('needs no stage when the house style casts no shadow', () => {

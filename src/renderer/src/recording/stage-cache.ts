@@ -1,8 +1,5 @@
-import type { HouseStyle } from '../app/house-style'
-import { drawFrameShadowAlone } from '../render/compose'
+import { drawFrameShadowAlone, type ShadowStyle } from '../render/compose'
 import type { Rect, Size } from '../render/geometry'
-
-type ShadowStyle = Pick<HouseStyle, 'shadow'>
 
 const stages = new WeakMap<object, { key: string; canvas: OffscreenCanvas }>()
 
@@ -21,7 +18,7 @@ export function stageFor(owner: object, size: Size, content: Rect, radius: numbe
   const canvas = new OffscreenCanvas(size.width, size.height)
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('The browser could not create a canvas for the export.')
-  drawFrameShadowAlone(ctx, content, radius, style, 1)
+  drawFrameShadowAlone(ctx, content, radius, style)
   stages.set(owner, { key, canvas })
   return canvas
 }
