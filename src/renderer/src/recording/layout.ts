@@ -1,5 +1,5 @@
 import type { HouseStyle } from '../app/house-style'
-import { rect, type Rect, type Size } from '../render/geometry'
+import { rect, type Point, type Rect, type Size } from '../render/geometry'
 
 /** Export px. `content` is where the whole video sits before any zoom. */
 export interface RecordingLayout {
@@ -15,3 +15,7 @@ export function recordingLayout(video: Size, output: Size, style: Pick<HouseStyl
   const content = rect(Math.round((output.width - width) / 2), Math.round((output.height - height) / 2), width, height)
   return { content, scale }
 }
+
+/** From frame px to composition px. */
+export const toComposition = ({ content, scale }: RecordingLayout, point: Point): Point =>
+  ({ x: content.x + point.x * scale, y: content.y + point.y * scale })

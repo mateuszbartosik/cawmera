@@ -1,4 +1,4 @@
-import { rect, type Point, type Rect } from '../render/geometry'
+import { rect, transformPoint, type Matrix, type Point, type Rect } from '../render/geometry'
 import type { CursorFrame } from './cursor'
 import type { CursorShape } from './track'
 
@@ -71,7 +71,7 @@ export function leansWhileMoving(shape: CursorShape): boolean {
 }
 
 /** `tilt` is in radians, clockwise, about the hotspot, for the shapes that lean while moving. */
-export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, tilt = 0): [number, number, number, number, number, number] {
+export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, tilt = 0): Matrix {
   const scale = heightPx / ART_BOX
   const { hotspot } = CURSOR_ART[shape]
   const lean = leansWhileMoving(shape) ? tilt : 0
@@ -87,8 +87,8 @@ export function cursorMatrix(shape: CursorShape, at: Point, heightPx: number, ti
  * outline stay inside the art box; a canvas shadow is a Gaussian of σ = blur / 2, gone within 4σ.
  */
 export function cursorBounds(shape: CursorShape, heightPx: number, tilt = 0): Rect {
-  const [a, b, c, d, e, f] = cursorMatrix(shape, { x: 0, y: 0 }, heightPx, tilt)
-  const corners = [[0, 0], [ART_BOX, 0], [0, ART_BOX], [ART_BOX, ART_BOX]].map(([x, y]) => ({ x: a * x + c * y + e, y: b * x + d * y + f }))
+  const matrix = cursorMatrix(shape, { x: 0, y: 0 }, heightPx, tilt)
+  const corners = [{ x: 0, y: 0 }, { x: ART_BOX, y: 0 }, { x: 0, y: ART_BOX }, { x: ART_BOX, y: ART_BOX }].map((corner) => transformPoint(matrix, corner))
   const left = Math.min(...corners.map((corner) => corner.x)) - SHADOW_REACH
   const top = Math.min(...corners.map((corner) => corner.y)) - SHADOW_REACH
   const right = Math.max(...corners.map((corner) => corner.x)) + SHADOW_REACH

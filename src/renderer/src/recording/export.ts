@@ -2,10 +2,11 @@ import { ALL_FORMATS, BufferTarget, CanvasSource, Input, Mp4OutputFormat, Output
 import { recordingUrl } from '@shared/media'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
-import { drawRecordingFrame, framePlan, type SampleCounts } from './frame'
+import { drawRecordingFrame } from './frame'
 import type { RecordingEntry } from './registry'
 import { recordingScene } from './scene'
 import type { RecordingDoc } from './settings'
+import { framePlan, type SampleCounts } from './shutter'
 import { outputFrameTimes, outputToSource } from './timemap'
 
 const MS_PER_SECOND = 1000

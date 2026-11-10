@@ -1,5 +1,6 @@
-import { clamp, type Point, type Size } from '../render/geometry'
+import { clamp, type Matrix, type Point, type Size } from '../render/geometry'
 import { firstIndexWhere } from './binary-search'
+import { toComposition, type RecordingLayout } from './layout'
 import { springFor, springStep, type Spring } from './spring'
 import type { ZoomSegment } from './zooms'
 
@@ -79,4 +80,13 @@ export function cameraAt(path: CameraPath, t: number): CameraState {
   const [logDepth, x, y] = movedFrom(knots[index], t - knots[index].at).map(({ value }) => value)
   const depth = Math.max(1, Math.exp(logDepth))
   return { depth, focus: clampFocus({ x, y }, depth, frame) }
+}
+
+/** From composition px to output px, as the camera shows them. */
+export function viewMatrix(camera: CameraState, layout: RecordingLayout, output: Size): Matrix {
+  const s = camera.depth
+  const focus = toComposition(layout, camera.focus)
+  const px = clamp(focus.x, output.width / (2 * s), output.width - output.width / (2 * s))
+  const py = clamp(focus.y, output.height / (2 * s), output.height - output.height / (2 * s))
+  return [s, 0, 0, s, output.width / 2 - px * s, output.height / 2 - py * s]
 }

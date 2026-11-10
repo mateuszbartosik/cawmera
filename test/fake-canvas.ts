@@ -2,17 +2,21 @@ const gradientStub = () => ({ addColorStop: () => undefined })
 
 const GRADIENT_METHODS = new Set(['createLinearGradient', 'createRadialGradient'])
 
-interface FakeLayer {
+export interface FakeLayer {
   ctx: CanvasRenderingContext2D
   alphaAtCall: Record<string, number[]>
+  argsAtCall: Record<string, unknown[][]>
+  canvas: OffscreenCanvas
+  settings: unknown
 }
 
 /**
- * Offscreen layers share the target's `calls` but keep their own alphas, listed in `layers`. Drawing anything tagged, like a
- * fake video or an offscreen canvas, also records `drawImage:<tag>`.
+ * Offscreen layers share the target's `calls` but keep their own alphas and arguments, listed in `layers`. Drawing anything
+ * tagged, like a fake video or an offscreen canvas, also records `drawImage:<tag>`.
  */
 function buildFake(calls: string[], width: number, height: number) {
   const alphaAtCall: Record<string, number[]> = {}
+  const argsAtCall: Record<string, unknown[][]> = {}
   let properties = new Map<string | symbol, unknown>([
     ['globalAlpha', 1],
     ['canvas', { width, height }]
@@ -28,6 +32,9 @@ function buildFake(calls: string[], width: number, height: number) {
         const alphas = alphaAtCall[method] ?? []
         alphas.push(properties.get('globalAlpha') as number)
         alphaAtCall[method] = alphas
+        const argsSoFar = argsAtCall[method] ?? []
+        argsSoFar.push(args)
+        argsAtCall[method] = argsSoFar
         const tag = (args[0] as { tag?: string } | undefined)?.tag
         if (method === 'drawImage' && tag) calls.push(`drawImage:${tag}`)
         if (method === 'save') saved.push(new Map(properties))
@@ -41,13 +48,14 @@ function buildFake(calls: string[], width: number, height: number) {
       return true
     }
   })
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, alphaAtCall }
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls, alphaAtCall, argsAtCall }
 }
 
 export function fakeContext(size = { width: 1920, height: 1080 }): {
   ctx: CanvasRenderingContext2D
   calls: string[]
   alphaAtCall: Record<string, number[]>
+  argsAtCall: Record<string, unknown[][]>
   layers: FakeLayer[]
 } {
   const calls: string[] = []
@@ -59,9 +67,9 @@ export function fakeContext(size = { width: 1920, height: 1080 }): {
       public width: number,
       public height: number
     ) {}
-    getContext() {
+    getContext(_type: string, settings?: unknown) {
       const layer = buildFake(calls, this.width, this.height)
-      layers.push(layer)
+      layers.push({ ...layer, canvas: this as unknown as OffscreenCanvas, settings })
       return layer.ctx
     }
   } as unknown as typeof OffscreenCanvas

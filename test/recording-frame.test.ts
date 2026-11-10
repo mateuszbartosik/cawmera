@@ -1,29 +1,29 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as cursorArt from '../src/renderer/src/recording/cursor-art'
 import * as effects from '../src/renderer/src/recording/effects'
-import { recordingLayout } from '../src/renderer/src/recording/layout'
-import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
-import {
-  cameraMatrixAt,
-  cornerTravelPx,
-  drawRecordingFrame,
-  framePlan,
-  sampleCount,
-  shutterTimes,
-  viewMatrix,
-  type Matrix,
-  type RecordingScene
-} from '../src/renderer/src/recording/frame'
-import { buildCameraPath, cameraAt, cameraTargets } from '../src/renderer/src/recording/camera'
-import { tiltAt } from '../src/renderer/src/recording/cursor'
+import { cameraAt } from '../src/renderer/src/recording/camera'
+import { cursorPositionAt, tiltAt } from '../src/renderer/src/recording/cursor'
+import { drawRecordingFrame, stampWeights, type RecordingScene } from '../src/renderer/src/recording/frame'
+import { recordingLayout } from '../src/renderer/src/recording/layout'
 import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
-import { takeViewFor, type TakeView } from '../src/renderer/src/recording/take-view'
-import { wholeTake } from '../src/renderer/src/recording/timemap'
-import type { CursorSample, RecordingTrack } from '../src/renderer/src/recording/track'
-import type { ZoomSegment } from '../src/renderer/src/recording/zooms'
-import type { Point, Rect } from '../src/renderer/src/render/geometry'
-import { fakeContext } from './fake-canvas'
+import { cameraMatrixAt, cornerTravelPx, framePlan, shutterTimes } from '../src/renderer/src/recording/shutter'
+import { takeViewFor } from '../src/renderer/src/recording/take-view'
+import type { Matrix, Point } from '../src/renderer/src/render/geometry'
+import { fakeContext, type FakeLayer } from './fake-canvas'
+import {
+  movingCursorScene,
+  output,
+  settings,
+  still,
+  stillScene,
+  track,
+  video,
+  viewOf,
+  withZooms,
+  zoomIntoTheMiddle,
+  zoomScene
+} from './recording-scenes'
 
 vi.mock('../src/renderer/src/recording/cursor-art', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/renderer/src/recording/cursor-art')>()
@@ -34,35 +34,13 @@ vi.mock('../src/renderer/src/recording/effects', async (importOriginal) => {
   return { ...original, drawClickEffect: vi.fn(original.drawClickEffect) }
 })
 
-const output = { width: 1920, height: 1080 }
-const layout = { content: { x: 96, y: 54, w: 1728, h: 972 }, scale: 0.675 }
+type Fake = ReturnType<typeof fakeContext>
 
-const video = { tag: 'video' } as unknown as CanvasImageSource
-const still: CursorSample[] = Array.from({ length: 400 }, (_, i) => ({ t: i * 16, x: 1280, y: 720, shape: 'arrow' }))
-const track: RecordingTrack = { kind: 'window', width: 2560, height: 1440, fps: 60, durationMs: 6400, scale: 1, cursor: still, clicks: [] }
-const settings: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 0, end: 6400 }, pieces: wholeTake(6400) }
-const viewOf = (take: RecordingTrack, crop: Rect | null = null, recording = settings) =>
-  takeViewFor({ id: 'frame', name: 'Recording', poster: null, track: take }, recording, crop)
-const withZooms = (view: TakeView, zooms: ZoomSegment[]): TakeView =>
-  ({ ...view, zooms, camera: buildCameraPath(cameraTargets(zooms, view.frame, settings.zoomSpeed), settings.zoomSpeed, view.frame) })
-const zoomIntoTheMiddle: ZoomSegment = { start: 3000, end: 5000, depth: 2, focus: { x: 1280, y: 720 } }
+const identity: Matrix = [1, 0, 0, 1, 0, 0]
+const halfShutter = (0.5 * 1000) / 60 / 2
 
-const zoomScene: RecordingScene = {
-  video,
-  videoSize: { width: 2560, height: 1440 },
-  view: withZooms(viewOf(track), [zoomIntoTheMiddle]),
-  doc: { ...DEFAULT_DOC, size: output },
-  settings,
-  style: DEFAULT_HOUSE_STYLE,
-  backdrop: null
-}
-/** At 4000 the camera holds the zoom and the cursor rests in sight. */
-const stillScene: RecordingScene = { ...zoomScene, settings: { ...settings, hideWhenStill: false } }
-
-const fullHd = { width: 1920, height: 1080 }
-const sweep: CursorSample[] = still.map((sample) => ({ ...sample, x: 300 + 3 * Math.min(Math.max(sample.t - 700, 0), 500), y: 540 }))
-/** From 700 to 1200 ms the cursor moves 3 video px per ms. */
-const movingCursorScene: RecordingScene = { ...zoomScene, videoSize: fullHd, view: viewOf({ ...track, ...fullHd, cursor: sweep }) }
+const transformed = ([a, b, c, d, e, f]: Matrix, { x, y }: Point): Point => ({ x: a * x + c * y + e, y: b * x + d * y + f })
+const scaled = (matrix: Matrix, k: number) => matrix.map((value) => value * k) as Matrix
 
 const videoDraws = (scene: RecordingScene, t: number) => {
   const fake = fakeContext()
@@ -70,65 +48,56 @@ const videoDraws = (scene: RecordingScene, t: number) => {
   return fake.calls.filter((c) => c === 'drawImage:video').length
 }
 
-const transformed = ([a, b, c, d, e, f]: Matrix, { x, y }: Point): Point => ({ x: a * x + c * y + e, y: b * x + d * y + f })
+/** Where the cursor’s hotspot belongs on a canvas `k` px per output px: the camera’s view of the path at that time. */
+function hotspotOnCanvas(scene: RecordingScene, t: number, k: number): Point {
+  const { content, scale } = recordingLayout(scene.view.frame, scene.doc.size, scene.style)
+  const onPath = cursorPositionAt(scene.view.cursor, t)
+  return transformed(scaled(cameraMatrixAt(scene, t), k), { x: content.x + onPath.x * scale, y: content.y + onPath.y * scale })
+}
 
-describe('viewMatrix', () => {
-  it('is the identity when wide', () => {
-    expect(viewMatrix({ depth: 1, focus: { x: 1280, y: 720 } }, layout, output)).toEqual([1, 0, 0, 1, 0, 0])
-  })
-  it('centres the focus at full depth when it is far from the edges', () => {
-    const [a, , , d, e, f] = viewMatrix({ depth: 2, focus: { x: 1280, y: 720 } }, layout, output)
-    const fx = 96 + 1280 * 0.675
-    const fy = 54 + 720 * 0.675
-    expect(a).toBe(2)
-    expect(d).toBe(2)
-    expect(fx * a + e).toBeCloseTo(960)
-    expect(fy * d + f).toBeCloseTo(540)
-  })
-  it('never shows outside the composition', () => {
-    const [a, , , , e] = viewMatrix({ depth: 2, focus: { x: 0, y: 0 } }, layout, output)
-    expect(e).toBeLessThanOrEqual(0)
-    expect(1920 * a + e).toBeGreaterThanOrEqual(1920)
+/** The sprite layer, the transform the cursor was drawn under in it, and where that put the hotspot. */
+function spriteOf(fake: Fake) {
+  const [spriteContext, frame] = vi.mocked(cursorArt.drawCursor).mock.lastCall!
+  const layer = fake.layers.find((candidate) => candidate.ctx === spriteContext)!
+  const transform = layer.argsAtCall['setTransform'].at(-1) as Matrix
+  return { layer, transform, hotspot: transformed(transform, frame) }
+}
+
+/** Where a layer drawn with `drawImage` puts its own (0, 0), checking it is copied without scaling. */
+function placement(args: unknown[]): Point {
+  const [, sx, sy, sw, sh, dx, dy, dw, dh] = args as number[]
+  expect([dw, dh]).toEqual([sw, sh])
+  return { x: dx - sx, y: dy - sy }
+}
+
+const drawsOf = (layer: Pick<FakeLayer, 'argsAtCall'>, image: unknown) => (layer.argsAtCall['drawImage'] ?? []).filter((args) => args[0] === image)
+
+function expectCloseTo(actual: Point, expected: Point) {
+  expect(actual.x).toBeCloseTo(expected.x, 6)
+  expect(actual.y).toBeCloseTo(expected.y, 6)
+}
+
+describe('stampWeights', () => {
+  it('weighs n cursor copies in whole 255ths, spread evenly, adding up to exactly one', () => {
+    expect(stampWeights(1)).toEqual([255])
+    for (const n of [2, 12, 19, 46, 47, 48]) {
+      const weights = stampWeights(n)
+      const light = Math.floor(255 / n)
+      expect(weights).toHaveLength(n)
+      expect(weights.every((weight) => weight === light || weight === light + 1)).toBe(true)
+      weights.reduce((sum, weight, i) => {
+        expect(Math.abs(sum + weight - (255 * (i + 1)) / n)).toBeLessThan(1)
+        return sum + weight
+      }, 0)
+      expect(weights.reduce((sum, weight) => sum + weight, 0)).toBe(255)
+    }
   })
 })
 
-describe('shutterTimes', () => {
-  it('spreads the shutter by blur strength', () => {
-    expect(shutterTimes(1000, 60, 0, 8)).toEqual([1000])
-    const ts = shutterTimes(1000, 60, 0.5, 3)
-    expect(ts[0]).toBeCloseTo(1000 - 4.1667, 3)
-    expect(ts[2]).toBeCloseTo(1000 + 4.1667, 3)
-  })
-})
-
-describe('motion blur samples', () => {
-  it('counts samples so neighbours sit at most 2 px apart, up to the cap', () => {
-    expect([sampleCount(0.2, 24), sampleCount(1, 24), sampleCount(10, 24), sampleCount(500, 24)]).toEqual([1, 2, 6, 24])
-  })
-
-  it('measures how far the picture’s corners travel', () => {
-    const identity: Matrix = [1, 0, 0, 1, 0, 0]
-    expect(cornerTravelPx(identity, identity, output)).toBe(0)
-    expect(cornerTravelPx(identity, [1, 0, 0, 1, 10, 0], output)).toBe(10)
-  })
-
-  it('measures a zoom’s travel on screen, where the picture is seen', () => {
-    const centredAt = (depth: number): Matrix => [depth, 0, 0, depth, 960 * (1 - depth), 540 * (1 - depth)]
-    expect(cornerTravelPx(centredAt(2), centredAt(2.2), output)).toBeCloseTo(Math.hypot(96, 54), 9)
-  })
-
+describe('drawRecordingFrame', () => {
   it('draws one sharp frame when nothing moves', () => {
     expect(framePlan(stillScene, 4000, 'export')).toEqual({ camera: 1, cursor: 1 })
     expect(videoDraws(stillScene, 4000)).toBe(1)
-  })
-
-  it('blurs only the cursor while it moves and the camera rests, with copies at most 2 px apart', () => {
-    // a 1920 × 1080 take in a 1920 × 1080 output (layout scale 0.822); the cursor moves 3 video px per ms; Cursor blur 50% at 60 fps
-    const plan = framePlan(movingCursorScene, 1000, 'export')
-    expect(plan.camera).toBe(1)
-    expect(plan.cursor).toBeGreaterThanOrEqual(11)
-    expect(plan.cursor).toBeLessThanOrEqual(13)
-    expect(framePlan(movingCursorScene, 1000, 'preview', 0.5).cursor).toBeLessThan(plan.cursor)
   })
 
   it('smears a zoom with camera copies at most 2 px apart and draws the picture once', () => {
@@ -139,44 +108,6 @@ describe('motion blur samples', () => {
     expect(videoDraws(zoomScene, t)).toBe(1)
   })
 
-  it('keeps one sample at 0% blur, however fast things move', () => {
-    expect(framePlan({ ...zoomScene, settings: { ...zoomScene.settings, cameraBlur: 0, cursorBlur: 0 } }, 2700, 'export'))
-      .toEqual({ camera: 1, cursor: 1 })
-  })
-
-  it('keeps blurring a camera still settling at a zoom’s start, and calls motion under about a quarter pixel either side rest', () => {
-    const panning = { ...zoomScene, view: withZooms(viewOf(track), [{ start: 3000, end: 5000, depth: 2, focus: { x: 900, y: 500 } }]) }
-    expect(framePlan(panning, 3000, 'export').camera).toBeGreaterThan(1)
-    expect(framePlan(panning, 3500, 'export').camera).toBe(1)
-    expect(framePlan(panning, 4000, 'export').camera).toBe(1)
-  })
-
-  it('keeps a cursor gliding to a stop sharp once it moves under about a quarter pixel either side', () => {
-    const glideThenRest = { ...track, cursor: still.map((sample, i) => ({ ...sample, x: 400 + Math.min(i, 150) * 6 })) }
-    const settling = { ...stillScene, view: withZooms(viewOf(glideThenRest), []) }
-    expect(framePlan(settling, 2300, 'export').cursor).toBeGreaterThan(1)
-    expect(framePlan(settling, 2800, 'export').cursor).toBe(1)
-  })
-
-  it('blurs a resting cursor while the camera carries it across the screen', () => {
-    const offCentre = { ...track, cursor: still.map((sample) => ({ ...sample, x: 800, y: 500 })) }
-    const carried = { ...stillScene, view: withZooms(viewOf(offCentre), [zoomIntoTheMiddle]) }
-    expect(framePlan(carried, 2700, 'export').cursor).toBeGreaterThan(1)
-  })
-
-  it('keeps each frame’s shutter on its own side of a cut, where the cursor jumps', () => {
-    const jumpsWithTheCut = { ...track, cursor: still.map((sample) => ({ ...sample, x: sample.t < 4000 ? 500 : 1800 })) }
-    const cut: RecordingDoc = {
-      ...settings,
-      hideWhenStill: false,
-      pieces: [{ start: 0, end: 3000, rate: 1, cut: false }, { start: 3000, end: 4000, rate: 1, cut: true }, { start: 4000, end: 6400, rate: 1, cut: false }]
-    }
-    const scene = { ...zoomScene, settings: cut, view: viewOf(jumpsWithTheCut, null, cut) }
-    for (const t of [2996, 3000, 3004]) expect(framePlan(scene, t, 'export')).toEqual({ camera: 1, cursor: 1 })
-  })
-})
-
-describe('drawRecordingFrame', () => {
   it('averages camera samples as a running mean and leaves the context as it found it', () => {
     const fake = fakeContext()
     fake.ctx.globalAlpha = 0.8
@@ -189,14 +120,14 @@ describe('drawRecordingFrame', () => {
   it('re-projects one picture to where the camera has it at each shutter time', () => {
     const t = 2700
     const fake = fakeContext()
-    let current: Matrix = [1, 0, 0, 1, 0, 0]
-    const copies: { transform: Matrix; at: number[] }[] = []
+    let current: Matrix = identity
+    const copies: { transform: Matrix; args: unknown[] }[] = []
     const watched = new Proxy(fake.ctx, {
       get(target, name) {
         if (name === 'setTransform') return (...matrix: Matrix) => { current = matrix }
         if (name === 'drawImage') {
-          return (image: { tag?: string }, ...at: number[]) => {
-            if (image.tag === 'offscreen') copies.push({ transform: current, at })
+          return (...args: unknown[]) => {
+            if ((args[0] as { tag?: string }).tag === 'offscreen') copies.push({ transform: current, args })
           }
         }
         return Reflect.get(target, name)
@@ -209,16 +140,38 @@ describe('drawRecordingFrame', () => {
     const times = shutterTimes(t, settings.fps, settings.cameraBlur, camera)
     expect(camera).toBeGreaterThan(2)
     expect(copies).toHaveLength(camera)
-    copies.forEach(({ transform, at }, i) => {
+    copies.forEach(({ transform, args }, i) => {
       for (const corner of [{ x: 0, y: 0 }, { x: output.width, y: output.height }]) {
-        const shown = transformed(transform, transformed(cameraMatrixAt(zoomScene, t), corner))
-        const expected = transformed(cameraMatrixAt(zoomScene, times[i]), corner)
-        expect(shown.x).toBeCloseTo(expected.x, 6)
-        expect(shown.y).toBeCloseTo(expected.y, 6)
+        expectCloseTo(transformed(transform, transformed(cameraMatrixAt(zoomScene, t), corner)), transformed(cameraMatrixAt(zoomScene, times[i]), corner))
       }
-      expect(at[0]).toBe(at[1])
-      expect(at[0]).toBeLessThan(0)
+      const margin = -placement(args).x
+      expect(placement(args)).toEqual({ x: -margin, y: -margin })
+      expect(margin).toBeGreaterThan(0)
     })
+  })
+
+  it('reuses one picture layer as the camera speeds up and slows down, with a margin of the travel plus 2 px', () => {
+    const fake = fakeContext()
+    const frames = [2200, 2300, 2500, 2700, 2900].map((t) => {
+      const before = fake.argsAtCall['drawImage']?.length ?? 0
+      drawRecordingFrame(fake.ctx, zoomScene, t, 'export')
+      return { t, copies: fake.argsAtCall['drawImage'].slice(before) }
+    })
+
+    const pictures = fake.layers.filter((layer) => drawsOf(layer, video).length > 0)
+    expect(pictures).toHaveLength(1)
+    const [picture] = pictures
+    for (const { t, copies } of frames) {
+      const travel = cornerTravelPx(cameraMatrixAt(zoomScene, t - halfShutter), cameraMatrixAt(zoomScene, t + halfShutter), output)
+      const margin = Math.ceil(travel) + 2
+      expect(copies.length).toBeGreaterThan(1)
+      for (const args of copies) {
+        expect(args[0]).toBe(picture.canvas)
+        expect(args.slice(1, 5)).toEqual([0, 0, output.width + 2 * margin, output.height + 2 * margin])
+        expect(placement(args)).toEqual({ x: -margin, y: -margin })
+        expect(picture.canvas.width).toBeGreaterThanOrEqual(output.width + 2 * margin)
+      }
+    }
   })
 
   it('stamps cursor copies additively', () => {
@@ -227,15 +180,111 @@ describe('drawRecordingFrame', () => {
     expect(fake.calls).toContain('globalCompositeOperation=lighter')
   })
 
-  it('stamps one sprite at 1/n per copy, then lays the copies on the picture', () => {
+  it('stamps one sprite in a float16 layer, weighed in whole 255ths that add up to one, then lays the copies on the picture', () => {
     vi.mocked(cursorArt.drawCursor).mockClear()
     const fake = fakeContext()
     drawRecordingFrame(fake.ctx, movingCursorScene, 1000, 'export')
     const { cursor } = framePlan(movingCursorScene, 1000, 'export')
+    const sprite = spriteOf(fake)
+    const stamps = fake.layers.find((layer) => drawsOf(layer, sprite.layer.canvas).length > 0)!
     expect(cursorArt.drawCursor).toHaveBeenCalledTimes(1)
-    expect(fake.layers.map((layer) => layer.alphaAtCall['drawImage'])).toContainEqual(Array(cursor).fill(1 / cursor))
+    expect(stamps.settings).toEqual({ colorType: 'float16' })
+    expect(stamps.alphaAtCall['drawImage']).toEqual(stampWeights(cursor).map((weight) => weight / 255))
     expect(fake.calls.filter((c) => c.startsWith('drawImage:'))).toHaveLength(1 + cursor + 1)
     expect(fake.alphaAtCall['drawImage']).toEqual([1, 1])
+  })
+
+  it('keeps an 8-bit stamps layer, weighed the same, where the browser refuses float16', () => {
+    const fake = fakeContext()
+    const WithFloat16 = globalThis.OffscreenCanvas as unknown as new (width: number, height: number) => {
+      getContext(type: string, settings?: { colorType?: string }): unknown
+    }
+    globalThis.OffscreenCanvas = class extends WithFloat16 {
+      getContext(type: string, settings?: { colorType?: string }) {
+        return settings?.colorType === 'float16' ? null : super.getContext(type, settings)
+      }
+    } as unknown as typeof OffscreenCanvas
+    drawRecordingFrame(fake.ctx, movingCursorScene, 1000, 'export')
+    const { cursor } = framePlan(movingCursorScene, 1000, 'export')
+    const stamps = fake.layers.find((layer) => layer.alphaAtCall['drawImage']?.length === cursor)!
+    expect(stamps.settings).toBeUndefined()
+    expect(stamps.alphaAtCall['drawImage']).toEqual(stampWeights(cursor).map((weight) => weight / 255))
+  })
+
+  it('puts a still cursor’s hotspot where the camera shows it, scaled by the zoom and the canvas', () => {
+    const t = 4000
+    const k = 0.75
+    vi.mocked(cursorArt.drawCursor).mockClear()
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, stillScene, t, 'preview', k)
+
+    expect(framePlan(stillScene, t, 'preview', k).cursor).toBe(1)
+    const sprite = spriteOf(fake)
+    const depth = cameraAt(stillScene.view.camera, t).depth
+    expect(depth).toBeGreaterThan(1.9)
+    expect(sprite.transform.slice(0, 4).map((value) => value / (depth * k))).toEqual([1, 0, 0, 1])
+    const shown = drawsOf(fake, sprite.layer.canvas)
+    expect(shown).toHaveLength(1)
+    expect(fake.argsAtCall['setTransform'].at(-1)).toEqual(identity)
+    const origin = placement(shown[0])
+    expect(Number.isInteger(origin.x) && Number.isInteger(origin.y)).toBe(true)
+    expectCloseTo({ x: origin.x + sprite.hotspot.x, y: origin.y + sprite.hotspot.y }, hotspotOnCanvas(stillScene, t, k))
+  })
+
+  it('stamps the cursor’s hotspot where the camera shows it at every shutter time', () => {
+    const t = 2700
+    const k = 0.75
+    const sweeping = { ...track, cursor: still.map((sample) => ({ ...sample, x: 500 + sample.t / 2 })) }
+    const scene = { ...zoomScene, view: withZooms(viewOf(sweeping), [zoomIntoTheMiddle]) }
+    vi.mocked(cursorArt.drawCursor).mockClear()
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, scene, t, 'preview', k)
+
+    const { camera, cursor } = framePlan(scene, t, 'preview', k)
+    expect(camera).toBeGreaterThan(1)
+    expect(cursor).toBeGreaterThan(2)
+    const sprite = spriteOf(fake)
+    const depth = cameraAt(scene.view.camera, t).depth
+    expect(sprite.transform.slice(0, 4).map((value) => value / (depth * k))).toEqual([1, 0, 0, 1])
+    const stamps = fake.layers.find((layer) => drawsOf(layer, sprite.layer.canvas).length > 0)!
+    expect(stamps.argsAtCall['setTransform'].every((matrix) => matrix.every((value, i) => value === identity[i]))).toBe(true)
+    const layerOrigin = placement(drawsOf(fake, stamps.canvas)[0])
+    expect(fake.argsAtCall['setTransform'].at(-1)).toEqual(identity)
+
+    const times = shutterTimes(t, settings.fps, settings.cursorBlur, cursor)
+    const copies = drawsOf(stamps, sprite.layer.canvas)
+    expect(copies).toHaveLength(cursor)
+    copies.forEach((args, i) => {
+      const stampOrigin = placement(args)
+      const landed = { x: layerOrigin.x + stampOrigin.x + sprite.hotspot.x, y: layerOrigin.y + stampOrigin.y + sprite.hotspot.y }
+      expectCloseTo(landed, hotspotOnCanvas(scene, times[i], k))
+    })
+  })
+
+  it('keeps the cursor’s layer within the canvas however far the cursor flies in one frame', () => {
+    const raw: RecordingDoc = { ...settings, smoothing: 0, hideWhenStill: false, cursorBlur: 1 }
+    const flick = { ...track, cursor: still.map((sample) => ({ ...sample, x: sample.t < 4000 ? 100 : 2400 })) }
+    const scene = { ...zoomScene, settings: raw, view: withZooms(viewOf(flick, null, raw), [zoomIntoTheMiddle]) }
+    const t = 3992
+    const reach = [hotspotOnCanvas(scene, 3984, 1).x, hotspotOnCanvas(scene, 4000, 1).x]
+    expect(reach[0]).toBeLessThan(0)
+    expect(reach[1]).toBeGreaterThan(output.width)
+
+    vi.mocked(cursorArt.drawCursor).mockClear()
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, scene, t, 'export')
+
+    const sprite = spriteOf(fake)
+    const stamps = fake.layers.find((layer) => drawsOf(layer, sprite.layer.canvas).length > 0)!
+    expect(stamps.canvas.width).toBeLessThanOrEqual(output.width)
+    expect(stamps.canvas.height).toBeLessThanOrEqual(output.height)
+    const [, sx, sy, sw, sh, dx, dy] = drawsOf(fake, stamps.canvas)[0] as number[]
+    expect([sx, sy]).toEqual([0, 0])
+    expect(dx).toBeGreaterThanOrEqual(0)
+    expect(dy).toBeGreaterThanOrEqual(0)
+    expect(dx + sw).toBeLessThanOrEqual(output.width)
+    expect(dy + sh).toBeLessThanOrEqual(output.height)
+    expect(stamps.argsAtCall['clearRect'][0]).toEqual([0, 0, sw, sh])
   })
 
   it('lays a smeared cursor on the picture at its opacity', () => {
@@ -264,6 +313,24 @@ describe('drawRecordingFrame', () => {
     const fake = fakeContext()
     drawRecordingFrame(fake.ctx, zoomScene, 1600, 'export')
     expect(fake.alphaAtCall['drawImage']).toEqual([1, 0.5])
+  })
+
+  it('holds the cursor on a click at the video’s end as one sharp copy, though the take moved it on', () => {
+    const click = { t: 6000, x: 1000, y: 600, button: 'left' as const, up: 6090 }
+    const movesOn = { ...track, clicks: [click], cursor: still.map((sample) => ({ ...sample, x: 1000 + 2 * (sample.t - 6000), y: 600 })) }
+    const scene = { ...stillScene, view: withZooms(viewOf(movesOn), []) }
+    const t = 6200
+    vi.mocked(cursorArt.drawCursor).mockClear()
+    const fake = fakeContext()
+    drawRecordingFrame(fake.ctx, scene, t, 'export')
+
+    expect(framePlan(scene, t, 'export')).toEqual({ camera: 1, cursor: 1 })
+    expect(fake.calls).not.toContain('globalCompositeOperation=lighter')
+    expect(cursorArt.drawCursor).toHaveBeenCalledTimes(1)
+    const sprite = spriteOf(fake)
+    const origin = placement(drawsOf(fake, sprite.layer.canvas)[0])
+    const { content, scale } = recordingLayout(scene.view.frame, output, DEFAULT_HOUSE_STYLE)
+    expectCloseTo({ x: origin.x + sprite.hotspot.x, y: origin.y + sprite.hotspot.y }, { x: content.x + click.x * scale, y: content.y + click.y * scale })
   })
 
   it('leans the cursor with its speed while tilt is on, and keeps it upright with tilt off', () => {
@@ -303,13 +370,8 @@ describe('drawRecordingFrame', () => {
     const cropped = { ...zoomScene, view: viewOf(track, { x: 640, y: 360, w: 1280, h: 720 }), settings: { ...settings, cursorBlur: 0, cameraBlur: 0 } }
     const { content } = recordingLayout(cropped.view.frame, output, DEFAULT_HOUSE_STYLE)
     const fake = fakeContext()
-    const videoDrawn: unknown[][] = []
-    const recordVideoDraws = (...args: unknown[]) => {
-      if (args[0] === video) videoDrawn.push(args.slice(1))
-    }
-    const ctx = new Proxy(fake.ctx, { get: (target, name) => (name === 'drawImage' ? recordVideoDraws : Reflect.get(target, name)) })
-    drawRecordingFrame(ctx, cropped, 1000, 'export')
-    expect(videoDrawn).toEqual([[640, 360, 1280, 720, content.x, content.y, content.w, content.h]])
+    drawRecordingFrame(fake.ctx, cropped, 1000, 'export')
+    expect(drawsOf(fake, video).map((args) => args.slice(1))).toEqual([[640, 360, 1280, 720, content.x, content.y, content.w, content.h]])
   })
 
   it('draws the ring and the press of a click made just before the video starts', () => {

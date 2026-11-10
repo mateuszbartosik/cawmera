@@ -40,8 +40,7 @@ vi.mock('../src/renderer/src/recording/scene', () => ({
 }))
 
 vi.mock('../src/renderer/src/recording/frame', () => ({
-  drawRecordingFrame: () => { throw new Error('The draw failed.') },
-  framePlan: () => ({ camera: 1, cursor: 1 })
+  drawRecordingFrame: () => { throw new Error('The draw failed.') }
 }))
 
 describe('an export that fails midway', () => {

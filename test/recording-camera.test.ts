@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCameraPath, cameraAt, cameraTargets, ZOOM_TRANSITION_MS, type ZoomSpeed } from '../src/renderer/src/recording/camera'
+import { buildCameraPath, cameraAt, cameraTargets, viewMatrix, ZOOM_TRANSITION_MS, type ZoomSpeed } from '../src/renderer/src/recording/camera'
 import type { ZoomSegment } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
@@ -164,5 +164,28 @@ describe('cameraAt', () => {
         previous = current
       }
     }
+  })
+})
+
+describe('viewMatrix', () => {
+  const output = { width: 1920, height: 1080 }
+  const layout = { content: { x: 96, y: 54, w: 1728, h: 972 }, scale: 0.675 }
+
+  it('is the identity when wide', () => {
+    expect(viewMatrix({ depth: 1, focus: { x: 1280, y: 720 } }, layout, output)).toEqual([1, 0, 0, 1, 0, 0])
+  })
+  it('centres the focus at full depth when it is far from the edges', () => {
+    const [a, , , d, e, f] = viewMatrix({ depth: 2, focus: { x: 1280, y: 720 } }, layout, output)
+    const fx = 96 + 1280 * 0.675
+    const fy = 54 + 720 * 0.675
+    expect(a).toBe(2)
+    expect(d).toBe(2)
+    expect(fx * a + e).toBeCloseTo(960)
+    expect(fy * d + f).toBeCloseTo(540)
+  })
+  it('never shows outside the composition', () => {
+    const [a, , , , e] = viewMatrix({ depth: 2, focus: { x: 0, y: 0 } }, layout, output)
+    expect(e).toBeLessThanOrEqual(0)
+    expect(1920 * a + e).toBeGreaterThanOrEqual(1920)
   })
 })

@@ -69,6 +69,25 @@ export function sameRect(a: Rect | null, b: Rect | null): boolean {
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
 }
 
+/** A 2D affine transform in canvas order: x′ = a·x + c·y + e, y′ = b·x + d·y + f. */
+export type Matrix = [number, number, number, number, number, number]
+
+export const translation = (x: number, y: number): Matrix => [1, 0, 0, 1, x, y]
+
+/** `outer` applied after `inner`. */
+export function compose([a, b, c, d, e, f]: Matrix, [p, q, r, s, u, v]: Matrix): Matrix {
+  return [a * p + c * q, b * p + d * q, a * r + c * s, b * r + d * s, a * u + c * v + e, b * u + d * v + f]
+}
+
+export function inverse([a, b, c, d, e, f]: Matrix): Matrix {
+  const det = a * d - b * c
+  return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det]
+}
+
+export function transformPoint([a, b, c, d, e, f]: Matrix, { x, y }: Point): Point {
+  return { x: a * x + c * y + e, y: b * x + d * y + f }
+}
+
 export type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 
 export const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
