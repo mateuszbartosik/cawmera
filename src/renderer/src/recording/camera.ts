@@ -38,7 +38,10 @@ export function cameraTargets(zooms: ZoomSegment[], frame: Size, speed: ZoomSpee
   const targets: CameraTarget[] = []
   const enterZoomAt = (zoom: ZoomSegment, entry: number) => {
     targets.push({ at: entry, state: stateOf(zoom) })
-    for (const { at, focus } of zoom.follow ?? []) targets.push({ at: Math.max(entry, at - lead), state: { depth: zoom.depth, focus } })
+    for (const { at, focus } of zoom.follow ?? []) {
+      const panAt = Math.max(entry, at - lead)
+      if (panAt < zoom.end) targets.push({ at: panAt, state: { depth: zoom.depth, focus } })
+    }
   }
   zooms.forEach((zoom, i) => {
     const previous = zooms[i - 1]

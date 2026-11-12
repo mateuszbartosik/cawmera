@@ -6,7 +6,7 @@ import { isShownClick, type Click } from './track'
 import { autoHoldLimits, autoZoomsWithClicks, clickGroupsAtDepth, focusOn, ZOOM_RULES, type ZoomSegment } from './zooms'
 
 export type ZoomAim = 'auto' | 'manual'
-/** A zoom as the shot stores it: its hold in source ms, its focus in video px. */
+/** Its hold is in source ms, its focus in video px. */
 export interface ZoomEdit { id: string; start: number; end: number; depth: number; aim: ZoomAim; focus: Point }
 
 export const ZOOM_DEPTH_RANGE = { min: 1.2, max: 3 }
@@ -35,19 +35,25 @@ const SAME_TIME_MS = 1e-6
 const sameTime = (a: number, b: number) => Math.abs(a - b) <= SAME_TIME_MS
 const takesIn = (span: Span, t: number) => span.start <= t && t <= span.end
 
-const mappedInTimeOrder = (edits: ZoomEdit[], map: TimeMap): MappedZoom[] =>
-  edits.map((edit) => ({ edit, start: snapToOutput(map, edit.start), end: snapToOutput(map, edit.end) })).sort((a, b) => a.start - b.start)
+const keptInTimeOrder = (edits: ZoomEdit[], map: TimeMap): MappedZoom[] =>
+  edits
+    .map((edit) => ({ edit, start: snapToOutput(map, edit.start), end: snapToOutput(map, edit.end) }))
+    .filter((zoom) => zoom.end - zoom.start >= MIN_MAPPED_HOLD_MS)
+    .sort((a, b) => a.start - b.start)
 
-/** From the settle time before the zoom to its end, or on to the video's end while its end sits where the last second's clamp puts it. */
-function windowOf(zoom: MappedZoom, lastHoldEnd: number, outputMs: number, speed: ZoomSpeed): Span {
-  return { start: zoom.start - ZOOM_TRANSITION_MS[speed], end: sameTime(zoom.end, lastHoldEnd) ? outputMs : zoom.end }
+/** From the settle time before the zoom to its end. An edge where the first or last second's clamp puts it reaches on to the video's start or end. */
+function windowOf(zoom: MappedZoom, holdLimits: Span, outputMs: number, speed: ZoomSpeed): Span {
+  return {
+    start: sameTime(zoom.start, holdLimits.start) ? 0 : zoom.start - ZOOM_TRANSITION_MS[speed],
+    end: sameTime(zoom.end, holdLimits.end) ? outputMs : zoom.end
+  }
 }
 
 /** A shown click belongs to the zoom that holds it, or else to the first zoom whose window takes it in. */
 function clicksByWindow(zooms: MappedZoom[], view: Pick<TakeView, 'map' | 'frame' | 'track'>, speed: ZoomSpeed): Click[][] {
   const { outputMs } = view.map
-  const lastHoldEnd = autoHoldLimits({ start: 0, end: outputMs }, speed).end
-  const windows = zooms.map((zoom) => windowOf(zoom, lastHoldEnd, outputMs, speed))
+  const holdLimits = autoHoldLimits({ start: 0, end: outputMs }, speed)
+  const windows = zooms.map((zoom) => windowOf(zoom, holdLimits, outputMs, speed))
   const owned = zooms.map((): Click[] => [])
   for (const click of view.track.clicks) {
     if (!isShownClick(click, view.frame)) continue
@@ -58,11 +64,18 @@ function clicksByWindow(zooms: MappedZoom[], view: Pick<TakeView, 'map' | 'frame
   return owned
 }
 
-/** A zoom that keeps an automatic zoom's hold keeps the clicks that zoom was found from, so storing the automatic zooms moves none of them. */
+/**
+ * A zoom that keeps an automatic zoom's hold keeps the clicks that zoom was found from, so storing the automatic zooms moves none
+ * of them. A click another zoom holds still goes to that zoom.
+ */
 function clicksByZoom(zooms: MappedZoom[], view: Pick<TakeView, 'map' | 'frame' | 'track'>, speed: ZoomSpeed): Click[][] {
   const found = autoZoomsWithClicks(view.track.clicks, view.frame, { start: 0, end: view.map.outputMs }, speed)
   const byWindow = clicksByWindow(zooms, view, speed)
-  return zooms.map((zoom, i) => found.find((automatic) => sameTime(automatic.start, zoom.start) && sameTime(automatic.end, zoom.end))?.clicks ?? byWindow[i])
+  const heldByAnother = (click: Click, own: MappedZoom) => zooms.some((zoom) => zoom !== own && takesIn(zoom, click.t))
+  return zooms.map((zoom, i) => {
+    const foundClicks = found.find((automatic) => sameTime(automatic.start, zoom.start) && sameTime(automatic.end, zoom.end))?.clicks
+    return foundClicks ? foundClicks.filter((click) => !heldByAnother(click, zoom)) : byWindow[i]
+  })
 }
 
 /** Just before the group's first click, unless the move there, which waits for the last click of the group before, arrives later. */
@@ -78,21 +91,24 @@ function aimedSegment({ edit, start, end }: MappedZoom, clicks: Click[], view: P
   }
   const groups = clickGroupsAtDepth(clicks, frame, depth)
   const segment = { start, end, depth, focus: focusOn(groups[0], frame, depth) }
-  if (groups.length === 1) return segment
-  const follow = groups.slice(1).map((group, i) => ({ at: arrivalAt(group, groups[i], speed), focus: focusOn(group, frame, depth) }))
-  return { ...segment, follow }
+  const startsMovingInHold = ({ at }: { at: number }) => at - ZOOM_TRANSITION_MS[speed] < end
+  const follow = groups
+    .slice(1)
+    .map((group, i) => ({ at: arrivalAt(group, groups[i], speed), focus: focusOn(group, frame, depth) }))
+    .filter(startsMovingInHold)
+  return follow.length === 0 ? segment : { ...segment, follow }
 }
 
 export function segmentsFromEdits(edits: ZoomEdit[], view: Pick<TakeView, 'map' | 'crop' | 'frame' | 'track'>, speed: ZoomSpeed): ZoomSegment[] {
-  const zooms = mappedInTimeOrder(edits, view.map)
+  const zooms = keptInTimeOrder(edits, view.map)
   const covered = clicksByZoom(zooms, view, speed)
-  return zooms.flatMap((zoom, i) => (zoom.end - zoom.start < MIN_MAPPED_HOLD_MS ? [] : [aimedSegment(zoom, covered[i], view, speed)]))
+  return zooms.map((zoom, i) => aimedSegment(zoom, covered[i], view, speed))
 }
 
-/** The clicks that aim the zoom when it is Auto, in output ms and frame px. */
 export function clicksCovered(edit: ZoomEdit, view: Pick<TakeView, 'map' | 'frame' | 'track' | 'edits'>, speed: ZoomSpeed): Click[] {
-  const zooms = mappedInTimeOrder([edit, ...view.edits.filter((other) => other.id !== edit.id)], view.map)
-  return clicksByZoom(zooms, view, speed)[zooms.findIndex((zoom) => zoom.edit === edit)]
+  const zooms = keptInTimeOrder([edit, ...view.edits.filter((other) => other.id !== edit.id)], view.map)
+  const index = zooms.findIndex((zoom) => zoom.edit === edit)
+  return index === -1 ? [] : clicksByZoom(zooms, view, speed)[index]
 }
 
 export function materialize(edits: ZoomEdit[], newId: () => string): { edits: ZoomEdit[]; ids: Map<string, string> } {
@@ -108,7 +124,6 @@ export function materialize(edits: ZoomEdit[], newId: () => string): { edits: Zo
 
 const replacing = (edits: ZoomEdit[], zoom: ZoomEdit) => edits.map((edit) => (edit.id === zoom.id ? zoom : edit))
 
-/** Where a zoom may go: from the end of the zooms before it to the start of those after it, inside the bounds. */
 function roomOf(edits: ZoomEdit[], zoom: ZoomEdit, bounds: Span): Span {
   const others = edits.filter((other) => other.id !== zoom.id)
   return {
@@ -132,10 +147,10 @@ export function stretchZoom(edits: ZoomEdit[], id: string, edge: 'start' | 'end'
   if (!zoom) return edits
   const room = roomOf(edits, zoom, bounds)
   if (edge === 'start') {
-    const latest = zoom.end - ZOOM_RULES.minHoldMs
-    return room.start > latest ? edits : replacing(edits, { ...zoom, start: clamp(at, room.start, latest) })
+    const latest = Math.min(zoom.end, room.end) - ZOOM_RULES.minHoldMs
+    return latest < room.start ? edits : replacing(edits, { ...zoom, start: clamp(at, room.start, latest) })
   }
-  const earliest = zoom.start + ZOOM_RULES.minHoldMs
+  const earliest = Math.max(zoom.start, room.start) + ZOOM_RULES.minHoldMs
   return earliest > room.end ? edits : replacing(edits, { ...zoom, end: clamp(at, earliest, room.end) })
 }
 

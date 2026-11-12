@@ -112,7 +112,8 @@ describe('storing the automatic zooms', () => {
     'the realistic take': { clicks: [click(1200, 480, 300), click(2400, 520, 320), click(6000, 1000, 700)], durationMs: 9100, trim: { start: 0, end: 8400 } },
     'a take whose click the automatic zooms dropped where two zooms met': wholeOf([click(6000, 100, 100), click(6300, 1800, 1000)]),
     'a take whose click the automatic zooms dropped in the first second': wholeOf([click(300, 1700, 900), click(1500, 200, 200)]),
-    'a take whose click the automatic zooms dropped inside the last zoom': wholeOf([click(16_000, 500, 500), click(16_800, 520, 520), click(17_800, 1800, 1000)])
+    'a take whose click the automatic zooms dropped inside the last zoom': wholeOf([click(16_000, 500, 500), click(16_800, 520, 520), click(17_800, 1800, 1000)]),
+    'a take whose first zoom has a click in the first second': wholeOf([click(200, 900, 500), click(1500, 1000, 560)])
   }
   const viewOf = ({ clicks, durationMs, trim: takeTrim }: Take, zoomSpeed: ZoomSpeed, zooms: ZoomEdit[] | null = null) => takeViewFor(
     { id: 'stored', name: 'Recording', poster: null, track: { kind: 'monitor', ...frame, fps: 60, durationMs, scale: 1, cursor: [], clicks } },
@@ -149,6 +150,22 @@ describe('storing the automatic zooms', () => {
     }
   })
 
+  it.each([['calm', 2.2], ['calm', 3], ['quick', 2.2], ['quick', 3]] as const)(
+    'keeps a deepened last zoom’s moves inside its hold and ends the video wide (%s, %s×)', (speed, depth) => {
+      const wandering = takes['stage 1’s wandering take']
+      const edits = stored(viewOf(wandering, speed))
+      const deepened = viewOf(wandering, speed, setZoom(edits, edits[edits.length - 1].id, { depth }))
+      const last = deepened.zooms[deepened.zooms.length - 1]
+      for (const { at } of last.follow ?? []) expect(at - ZOOM_TRANSITION_MS[speed]).toBeLessThan(last.end)
+      const times = cameraTargets(deepened.zooms, deepened.frame, speed).map(({ at }) => at)
+      expect(times).toEqual([...times].sort((a, b) => a - b))
+      // One settle time after the zoom-out starts, the camera is 2% short of wide, give or take a hair.
+      for (let t = deepened.map.outputMs - 1000; t <= deepened.map.outputMs; t += 5) {
+        expect(Math.log(cameraAt(deepened.camera, t).depth)).toBeLessThanOrEqual(1.001 * 0.02 * Math.log(depth))
+      }
+    }
+  )
+
   describe('the clicks after the last zoom’s end', () => {
     const wandering = takes['stage 1’s wandering take']
     const automatic = viewOf(wandering, 'calm')
@@ -164,17 +181,40 @@ describe('storing the automatic zooms', () => {
       expect(segmentsFromEdits(laterStart, automatic, 'calm').at(-1)!.focus).toEqual(automatic.zooms.at(-1)!.focus)
     })
 
-    it('go to a zoom added over them', () => {
-      const withAdded = addZoom(stretchZoom(edits, last.id, 'start', last.start + 50, wandering.trim), 10_300, { x: 960, y: 540 }, wandering.trim, 'added')!
-      const covered = (id: string) => clicksCovered(withAdded.find((zoom) => zoom.id === id)!, { ...automatic, edits: withAdded }, 'calm').map((c) => Math.round(c.t))
-      expect(covered(last.id)).toEqual([6597, 7397])
-      expect(covered('added')).toEqual([9397])
+    it('go to an Auto zoom added over them, from the untouched zoom too', () => {
+      for (const before of [edits, stretchZoom(edits, last.id, 'start', last.start + 50, wandering.trim)]) {
+        const withAdded = setZoom(addZoom(before, 10_300, { x: 960, y: 540 }, wandering.trim, 'added')!, 'added', { aim: 'auto' })
+        const covered = (id: string) => clicksCovered(withAdded.find((zoom) => zoom.id === id)!, { ...automatic, edits: withAdded }, 'calm').map((c) => Math.round(c.t))
+        expect(covered(last.id)).toEqual([6597, 7397])
+        expect(covered('added')).toEqual([9397])
+      }
     })
 
     it('aren’t covered once the zoom is moved or stretched away from it', () => {
       expect(coveredTimes(stretchZoom(edits, last.id, 'end', last.end - 100, wandering.trim))).toEqual([6597, 7397])
       expect(coveredTimes(moveZoom(edits, last.id, last.start - 100, wandering.trim))).toEqual([6597, 7397])
       expect(segmentsFromEdits(moveZoom(edits, last.id, last.start - 100, wandering.trim), automatic, 'calm').at(-1)!.focus).not.toEqual(automatic.zooms.at(-1)!.focus)
+    })
+  })
+
+  describe('the clicks before the first zoom’s start', () => {
+    const early = takes['a take whose first zoom has a click in the first second']
+    const automatic = viewOf(early, 'calm')
+    const edits = stored(automatic)
+    const [first] = edits
+    const coveredTimes = (changed: ZoomEdit[]) => clicksCovered(changed[0], { ...automatic, edits: changed }, 'calm').map((c) => Math.round(c.t))
+
+    it('stay covered while the zoom’s start sits on the first second’s boundary', () => {
+      expect(automatic.zooms[0].start).toBe(1000 + ZOOM_TRANSITION_MS.calm)
+      expect(coveredTimes(edits)).toEqual([200, 1500])
+      const laterEnd = stretchZoom(edits, first.id, 'end', first.end + 100, early.trim)
+      expect(coveredTimes(laterEnd)).toEqual([200, 1500])
+      expect(segmentsFromEdits(laterEnd, automatic, 'calm')[0].focus).toEqual(automatic.zooms[0].focus)
+    })
+
+    it('aren’t covered once the zoom is moved or stretched away from it', () => {
+      expect(coveredTimes(stretchZoom(edits, first.id, 'start', first.start + 100, early.trim))).toEqual([1500])
+      expect(coveredTimes(moveZoom(edits, first.id, first.start + 100, early.trim))).toEqual([1500])
     })
   })
 })
@@ -204,6 +244,15 @@ describe('editing zooms', () => {
     expect(stretchZoom(edits, 'b', 'start', 1000, trim)[1].start).toBe(4000)
     expect(stretchZoom(edits, 'b', 'start', 7900, trim)[1].start).toBe(7400)
     expect(stretchZoom(edits, 'a', 'start', -300, trim)[0].start).toBe(0)
+  })
+
+  it('keeps 600 ms of a stretched zoom inside the trim, even one that runs past it', () => {
+    const pastTheEnd = [edit('a', 2000, 4000), edit('b', 9000, 11_000)]
+    expect(stretchZoom(pastTheEnd, 'b', 'start', 10_500, trim)[1]).toMatchObject({ start: 9400, end: 11_000 })
+    const crowded = [edit('a', 2000, 9500), edit('b', 9500, 11_000)]
+    expect(stretchZoom(crowded, 'b', 'start', 9600, trim)).toBe(crowded)
+    const beforeTheStart = [edit('a', 500, 2500), edit('b', 6000, 8000)]
+    expect(stretchZoom(beforeTheStart, 'a', 'end', 1000, { start: 2000, end: 10_000 })[0]).toMatchObject({ start: 500, end: 2600 })
   })
 
   it('adds a 2 s manual zoom at 2× where there is room, and none where there isn’t', () => {
@@ -288,6 +337,18 @@ describe('aiming a zoom', () => {
     const segments = segmentsFromEdits([edit('short', 4000, 5592), edit('kept', 5600, 8000)], fast, 'calm')
     expect(segments).toEqual([{ start: 4200, end: 4500, depth: 2, focus: { x: 960, y: 540 } }])
   })
+
+  it('gives no clicks to a zoom that a cut or a speed-up leaves under 300 ms', () => {
+    const cut = viewFor(timeMapOf({ start: 0, end: 20_000 }, [piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 20_000)]), [click(3900, 500, 500)])
+    const afterCut: ZoomEdit = { ...autoEdit('after', 6300, 8000, 2), focus: { x: 1700, y: 100 } }
+    const insideCut = edit('inside', 4200, 5800)
+    expect(segmentsFromEdits([afterCut], cut, 'calm')[0].focus).toEqual({ x: 500, y: 500 })
+    expect(segmentsFromEdits([insideCut, afterCut], cut, 'calm')).toEqual([{ start: 4300, end: 6000, depth: 2, focus: { x: 500, y: 500 } }])
+    expect(clicksCovered(insideCut, { ...cut, edits: [insideCut, afterCut] }, 'calm')).toEqual([])
+    const fast = viewFor(timeMapOf({ start: 0, end: 20_000 }, [piece(0, 4000), piece(4000, 8000, 8), piece(8000, 20_000)]), [click(4800, 500, 500)])
+    const kept: ZoomEdit = { ...autoEdit('kept', 5600, 8000, 2), focus: { x: 1700, y: 100 } }
+    expect(segmentsFromEdits([autoEdit('short', 4000, 5592, 2), kept], fast, 'calm')).toEqual([{ start: 4200, end: 4500, depth: 2, focus: { x: 500, y: 500 } }])
+  })
 })
 
 describe('the clicks a zoom covers', () => {
@@ -338,6 +399,14 @@ describe('the camera on a zoom that follows its clicks', () => {
   it('aims the camera at each followed group in turn', () => {
     const targets = cameraTargets([{ ...z(3000, 6000, 3, 400, 300), follow: [{ at: 4500, focus: { x: 1300, y: 700 } }] }], frame, 'calm')
     expect(targets).toContainEqual({ at: 4500 - ZOOM_TRANSITION_MS.calm, state: { depth: 3, focus: { x: 1300, y: 700 } } })
+  })
+
+  it('never starts a pan once the zoom has ended', () => {
+    const late = { ...z(3000, 6000, 3, 400, 300), follow: [{ at: 6000 + ZOOM_TRANSITION_MS.calm, focus: { x: 1300, y: 700 } }] }
+    expect(cameraTargets([late], frame, 'calm')).toEqual([
+      { at: 3000 - ZOOM_TRANSITION_MS.calm, state: { depth: 3, focus: { x: 400, y: 300 } } },
+      { at: 6000, state: { depth: 1, focus: { x: 960, y: 540 } } }
+    ])
   })
 
   it('is on each group by its time and stays continuous while it pans between them', () => {

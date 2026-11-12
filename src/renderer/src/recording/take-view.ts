@@ -20,7 +20,6 @@ export interface TakeView {
   /** The track's clicks, and those just before the video whose ring or press still runs at its start. */
   effectClicks: Click[]
   zooms: ZoomSegment[]
-  /** The zooms the shot stores, or the automatic ones until it stores any, in source ms and video px. */
   edits: ZoomEdit[]
   camera: CameraPath
   cursor: CursorPath
@@ -109,7 +108,7 @@ function mappedTake(track: RecordingTrack, trim: Trim, pieces: Piece[], crop: Re
   }
 }
 
-/** Stored zooms are aimed in the take. Automatic ones drive the camera just as found and stand in as edits until the first edit. */
+/** Until the shot stores zooms, the camera runs on the automatic zooms just as found. */
 function zoomsOf(take: MappedTake, storedZooms: ZoomEdit[] | null, speed: ZoomSpeed): Pick<TakeView, 'zooms' | 'edits'> {
   if (storedZooms) return { zooms: segmentsFromEdits(storedZooms, take, speed), edits: storedZooms }
   const zooms = autoZooms(take.track.clicks, take.frame, { start: 0, end: take.map.outputMs }, speed)

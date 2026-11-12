@@ -47,12 +47,10 @@ function fitsAtDepth(clicks: Click[], frame: Size, depth: number, rules: ZoomRul
   return box.right - box.left <= frame.width / depth && box.bottom - box.top <= frame.height / depth
 }
 
-/** Where the camera looks to show these clicks at this depth: their padded box's centre, kept far enough in to stay inside the frame. */
 export function focusOn(clicks: Click[], frame: Size, depth: number, rules = ZOOM_RULES): Point {
   return clampFocus(centreOf(paddedBoxAround(clicks, frame, rules)), depth, frame)
 }
 
-/** Clicks in time order, a new group starting at each click that wouldn't fit in view at this depth with the group before it. */
 export function clickGroupsAtDepth(clicks: Click[], frame: Size, depth: number, rules = ZOOM_RULES): Click[][] {
   const forgivingDepth = depth / (1 + FIT_TOLERANCE)
   const groups: Click[][] = []
@@ -111,13 +109,11 @@ function resolveOverlaps(zooms: ClickedZoom[], frame: Size, holdLimits: Span, ru
   return resolved
 }
 
-/** Where automatic zooms may hold: the first and last second stay wide, and so do the moves into and out of a zoom. */
 export function autoHoldLimits(trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): Span {
   const wideAndTransitionMs = rules.wideEdgeMs + ZOOM_TRANSITION_MS[speed]
   return { start: trim.start + wideAndTransitionMs, end: trim.end - wideAndTransitionMs }
 }
 
-/** The automatic zooms, each with the shown clicks it was found from. */
 export function autoZoomsWithClicks(clicks: Click[], frame: Size, trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): ClickedZoom[] {
   const holdLimits = autoHoldLimits(trim, speed, rules)
   const shownClicks = clicks.filter((click) => isShownClick(click, frame) && click.t >= trim.start && click.t <= trim.end)

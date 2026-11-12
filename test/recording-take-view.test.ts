@@ -11,7 +11,7 @@ import { cropOf, takeViewFor, type TakeView } from '../src/renderer/src/recordin
 import { outputFrameTimes, outputToSource, wholeTake, type Piece, type Rate } from '../src/renderer/src/recording/timemap'
 import type { Click, CursorSample, CursorShape, RecordingTrack } from '../src/renderer/src/recording/track'
 import type { Trim } from '../src/renderer/src/recording/trim'
-import { moveZoom, segmentsFromEdits, type ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
+import { moveZoom, segmentsFromEdits, stretchZoom, type ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 import { autoZooms } from '../src/renderer/src/recording/zooms'
 
 const frame = { width: 1920, height: 1080 }
@@ -187,11 +187,13 @@ describe('the take view', () => {
     expect(takeViewFor(entry, recording(), null).zooms).toEqual(stage1)
   })
 
-  it('keeps an edge zoom aimed at all its clicks, stored or not, until it is moved', () => {
+  it('keeps an edge zoom aimed at all its clicks, stored or stretched at its end, until it is moved', () => {
     const early = { ...entry, track: { ...entry.track, clicks: [click(1200, 900, 500), click(2500, 1000, 560)] } }
     const view = takeViewFor(early, recording(), null)
     expect(view.zooms).toEqual([{ start: 1900, end: 3000, depth: 2.5, focus: { x: 950, y: 530 } }])
     expect(segmentsFromEdits(view.edits, view, 'calm')).toEqual(view.zooms)
+    const laterEnd = stretchZoom(view.edits, 'auto-0', 'end', view.edits[0].end + 100, recording().trim)
+    expect(segmentsFromEdits(laterEnd, view, 'calm')[0].focus).toEqual({ x: 950, y: 530 })
     const moved = moveZoom(view.edits, 'auto-0', view.edits[0].start + 100, recording().trim)
     expect(segmentsFromEdits(moved, view, 'calm')[0].focus).toEqual({ x: 1000, y: 560 })
   })
