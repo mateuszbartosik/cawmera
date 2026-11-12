@@ -21,6 +21,7 @@ import { registerDrafts } from './drafts'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
 import { connectDirectly, disableProxyResolution } from './no-network'
 import { cancelWarmTake, recordingVideoFile, registerRecording, stopLiveTake } from './recording'
+import { isUncOrDevicePath } from './renderer-paths'
 
 registerMediaScheme()
 disableProxyResolution(app.commandLine)
@@ -437,7 +438,7 @@ function registerIpc() {
   })
 
   ipcMain.handle('file:reveal', (_event, path: unknown) => {
-    if (typeof path === 'string' && existsSync(path)) shell.showItemInFolder(path)
+    if (typeof path === 'string' && !isUncOrDevicePath(path) && existsSync(path)) shell.showItemInFolder(path)
   })
 }
 

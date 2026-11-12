@@ -1,11 +1,19 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream, existsSync, writeFileSync, type ReadStream, type WriteStream } from 'node:fs'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Writable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { crc32 } from 'node:zlib'
-import { describe, expect, it } from 'vitest'
-import { DRAFT_LIMITS, DraftFileError, draftParts, readDraft, writeDraft, type DraftParts } from '../src/main/draft-file'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { ZipFile } from 'yazl'
+import { DRAFT_LIMITS, DraftFileError, draftParts, readDraft, writeDraft, type DraftLimits, type DraftParts } from '../src/main/draft-file'
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual, createReadStream: vi.fn(actual.createReadStream), createWriteStream: vi.fn(actual.createWriteStream) }
+})
 
 const UUID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'
 const MANIFEST = '{"format":"cawmera-draft","version":1}'
@@ -13,6 +21,36 @@ const TRACK = '{"version":1}'
 const png = new Uint8Array(randomBytes(4096))
 const noop = () => {}
 const text = (value: string) => new TextEncoder().encode(value)
+
+/** Exactly what `partsIn` holds, so one byte or entry less refuses it. */
+const AT_LIMITS: DraftLimits = {
+  manifestBytes: MANIFEST.length,
+  screenshotBytes: png.length,
+  trackBytes: TRACK.length,
+  bufferedBytes: MANIFEST.length + png.length + TRACK.length,
+  entries: 4
+}
+
+const tempDirs: string[] = []
+
+afterAll(() => Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 }))))
+
+async function tempDir() {
+  const dir = await mkdtemp(join(tmpdir(), 'cawmera-draft-'))
+  tempDirs.push(dir)
+  return dir
+}
+
+/** A destination that fails once more than `capacity` bytes reach it. */
+function diskFullAfter(capacity: number) {
+  let written = 0
+  return new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      written += chunk.length
+      callback(written > capacity ? new Error('ENOSPC: no space left on device, write') : null)
+    }
+  }) as unknown as WriteStream
+}
 
 const reasonOf = (reading: Promise<unknown>) =>
   reading.then(
@@ -25,13 +63,13 @@ const takeFolders = async (root: string) => (existsSync(root) ? await readdir(ro
 const rising = (shares: number[]) => shares.every((share, i) => share >= 0 && share <= 1 && (i === 0 || share > shares[i - 1]))
 
 async function workspace() {
-  const dir = await mkdtemp(join(tmpdir(), 'cawmera-draft-'))
+  const dir = await tempDir()
   return { dir, root: join(dir, 'recordings'), newId: () => randomUUID() }
 }
 
-async function partsIn(dir: string): Promise<DraftParts> {
+async function partsIn(dir: string, videoBytes = 100_000): Promise<DraftParts> {
   const video = join(dir, 'video.mp4')
-  await writeFile(video, randomBytes(100_000))
+  await writeFile(video, randomBytes(videoBytes))
   return { manifest: MANIFEST, screenshots: [{ key: 's1', bytes: png }], recordings: [{ key: 'r1', video, track: TRACK }] }
 }
 
@@ -113,7 +151,7 @@ const ON_DISK = { timeout: 30_000 }
 
 describe('writing and reading a draft', ON_DISK, () => {
   it('writes a draft and reads it back, streaming the video into a new take folder', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'cawmera-draft-'))
+    const dir = await tempDir()
     const video = join(dir, 'video.mp4')
     await writeFile(video, randomBytes(3_000_000))
     const target = join(dir, 'a.cawmera')
@@ -153,15 +191,41 @@ describe('writing and reading a draft', ON_DISK, () => {
     const { dir } = await workspace()
     const parts = await partsIn(dir)
     const target = join(dir, 'a.cawmera')
-    for (const screenshots of [[{ key: 'Shot-1', bytes: png }], [{ key: 's1', bytes: png }, { key: 's1', bytes: png }]]) {
-      await expect(writeDraft(target, { ...parts, screenshots }, noop)).rejects.toThrow()
-    }
-    for (const over of [{ manifestBytes: MANIFEST.length - 1 }, { screenshotBytes: png.length - 1 }, { trackBytes: TRACK.length - 1 }, { entries: 3 }]) {
-      await expect(writeDraft(target, parts, noop, { ...DRAFT_LIMITS, ...over })).rejects.toThrow()
-    }
+    const refusals: [DraftParts, DraftLimits, string][] = [
+      [{ ...parts, screenshots: [{ key: 'Shot-1', bytes: png }] }, AT_LIMITS, 'The draft key “Shot-1” is invalid or repeated'],
+      [{ ...parts, screenshots: [{ key: 's1', bytes: png }, { key: 's1', bytes: png }] }, DRAFT_LIMITS, 'The draft key “s1” is invalid or repeated'],
+      [parts, { ...AT_LIMITS, manifestBytes: MANIFEST.length - 1 }, `draft.json is over ${MANIFEST.length - 1} bytes`],
+      [parts, { ...AT_LIMITS, screenshotBytes: png.length - 1 }, `screenshots/s1.png is over ${png.length - 1} bytes`],
+      [parts, { ...AT_LIMITS, trackBytes: TRACK.length - 1 }, `recordings/r1/track.json is over ${TRACK.length - 1} bytes`],
+      [
+        parts,
+        { ...AT_LIMITS, bufferedBytes: AT_LIMITS.bufferedBytes - 1 },
+        `The manifest, screenshots and tracks are over ${AT_LIMITS.bufferedBytes - 1} bytes together`
+      ],
+      [parts, { ...AT_LIMITS, entries: 3 }, 'A draft holds at most 3 entries']
+    ]
+    for (const [refused, limits, message] of refusals) await expect(writeDraft(target, refused, noop, limits)).rejects.toThrow(message)
     expect(existsSync(target) || existsSync(`${target}.partial`)).toBe(false)
-    await writeDraft(target, parts, noop, { manifestBytes: MANIFEST.length, screenshotBytes: png.length, trackBytes: TRACK.length, entries: 4 })
+    await writeDraft(target, parts, noop, AT_LIMITS)
     expect(existsSync(target)).toBe(true)
+  })
+
+  it('closes the video it was reading and removes the partial file when the disk fills up partway', async () => {
+    const { dir } = await workspace()
+    const parts = await partsIn(dir, 3_000_000)
+    const target = join(dir, 'a.cawmera')
+    await writeFile(target, 'the previous draft')
+    vi.mocked(createReadStream).mockClear()
+    vi.mocked(createWriteStream).mockImplementationOnce((path) => {
+      writeFileSync(path, 'the first megabyte')
+      return diskFullAfter(1_000_000)
+    })
+    await expect(writeDraft(target, parts, noop)).rejects.toThrow('ENOSPC')
+    const sources = vi.mocked(createReadStream).mock.results.map(({ value }) => value as ReadStream)
+    expect(sources).toHaveLength(1)
+    await vi.waitFor(() => expect(sources[0].closed).toBe(true))
+    expect(existsSync(`${target}.partial`)).toBe(false)
+    expect(await readFile(target, 'utf8')).toBe('the previous draft')
   })
 })
 
@@ -197,15 +261,31 @@ describe('reading a draft from anyone', ON_DISK, () => {
     expect(await reasonOf(readDraft(hugeManifestDraft, root, newId, noop, { ...DRAFT_LIMITS, manifestBytes: MANIFEST.length - 1 }))).toBe('too-large')
   })
 
-  it('refuses screenshots, tracks and entries over their limits before reading anything, and opens a draft right at them', async () => {
+  it('refuses parts, their total and entries over the limits before reading anything, and opens a draft right at them', async () => {
     const { dir, root, newId } = await workspace()
     const draft = await savedDraft(dir)
-    const exact = { manifestBytes: MANIFEST.length, screenshotBytes: png.length, trackBytes: TRACK.length, entries: 4 }
-    for (const over of [{ screenshotBytes: png.length - 1 }, { trackBytes: TRACK.length - 1 }, { entries: 3 }]) {
-      expect(await reasonOf(readDraft(draft, root, newId, noop, { ...exact, ...over }))).toBe('too-large')
-    }
+    const overs = [{ screenshotBytes: png.length - 1 }, { trackBytes: TRACK.length - 1 }, { bufferedBytes: AT_LIMITS.bufferedBytes - 1 }, { entries: 3 }]
+    for (const over of overs) expect(await reasonOf(readDraft(draft, root, newId, noop, { ...AT_LIMITS, ...over }))).toBe('too-large')
     expect(await takeFolders(root)).toEqual([])
-    expect((await readDraft(draft, root, newId, noop, exact)).recordings).toHaveLength(1)
+    expect((await readDraft(draft, root, newId, noop, AT_LIMITS)).recordings).toHaveLength(1)
+  })
+
+  it('reads a draft written in ZIP64', async () => {
+    const { dir, root } = await workspace()
+    const file = join(dir, 'zip64.cawmera')
+    const video = randomBytes(100_000)
+    const zip = new ZipFile()
+    const forced = { compress: false, forceZip64Format: true }
+    zip.addBuffer(Buffer.from(MANIFEST), 'draft.json', forced)
+    zip.addBuffer(Buffer.from(png), 'screenshots/s1.png', forced)
+    zip.addBuffer(video, 'recordings/r1/video.mp4', forced)
+    zip.addBuffer(Buffer.from(TRACK), 'recordings/r1/track.json', forced)
+    zip.end({ forceZip64Format: true, comment: '' })
+    await pipeline(zip.outputStream, createWriteStream(file))
+    expect((await readFile(file)).includes(Buffer.from([0x50, 0x4b, 0x06, 0x06]))).toBe(true)
+    const opened = await readDraft(file, root, () => UUID, noop)
+    expect(opened).toEqual({ manifest: MANIFEST, screenshots: [{ key: 's1', bytes: png }], recordings: [{ key: 'r1', id: UUID, track: TRACK }] })
+    expect((await readFile(join(root, UUID, 'video.mp4'))).equals(video)).toBe(true)
   })
 
   it('ignores unknown entries and keys that don’t fit', async () => {
@@ -268,7 +348,14 @@ describe('draft parts from the renderer', () => {
       screenshots: [{ key: 's1', bytes: png }],
       recordings: [{ key: 'r1', video: join(folder, 'video.mp4'), track: TRACK }]
     })
-    expect(() => draftParts({ ...files, recordings: [{ key: 'r1', id: randomUUID(), track: TRACK }] }, takeFolder)).toThrow()
+    expect(() => draftParts({ ...files, recordings: [{ key: 'r1', id: randomUUID(), track: TRACK }] }, takeFolder)).toThrow(
+      'A recording in this draft is no longer available'
+    )
+  })
+
+  it('refuses parts it couldn’t open again, before anything asks where to save', () => {
+    expect(() => draftParts({ ...files, screenshots: [{ key: 'Image-1', bytes: png }] }, takeFolder)).toThrow('The draft key “Image-1” is invalid or repeated')
+    expect(() => draftParts(files, takeFolder, { ...DRAFT_LIMITS, screenshotBytes: png.length - 1 })).toThrow(`screenshots/s1.png is over ${png.length - 1} bytes`)
   })
 
   it('refuses files of the wrong shape', () => {
@@ -281,6 +368,6 @@ describe('draft parts from the renderer', () => {
       { ...files, recordings: [{ key: 'r1', id: UUID }] },
       { ...files, recordings: [{ key: 1, id: UUID, track: TRACK }] }
     ]
-    for (const bad of malformed) expect(() => draftParts(bad, takeFolder)).toThrow()
+    for (const bad of malformed) expect(() => draftParts(bad, takeFolder)).toThrow('The draft’s files are malformed')
   })
 })

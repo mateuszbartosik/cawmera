@@ -1,5 +1,5 @@
-import { createWriteStream } from 'node:fs'
-import { mkdir, open, rename, rm } from 'node:fs/promises'
+import { createReadStream, createWriteStream, type ReadStream } from 'node:fs'
+import { lstat, mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -10,8 +10,14 @@ import { DRAFT_KEY } from '../shared/draft-key'
 import type { DraftFiles, DraftOpenFailure } from '../shared/types'
 import { recordingDir, removeRecording } from './recording-files'
 
-/** Far above what Cawmera writes: 500 shots make at most 1,001 entries. */
-export const DRAFT_LIMITS = { manifestBytes: 50_000_000, screenshotBytes: 200_000_000, trackBytes: 200_000_000, entries: 5_000 }
+/** Far above any draft Cawmera writes: 500 shots make at most 1,001 entries. */
+export const DRAFT_LIMITS = {
+  manifestBytes: 50_000_000,
+  screenshotBytes: 200_000_000,
+  trackBytes: 200_000_000,
+  bufferedBytes: 1_000_000_000,
+  entries: 5_000
+}
 
 export type DraftLimits = typeof DRAFT_LIMITS
 
@@ -55,12 +61,17 @@ interface Layout {
 
 const damaged = (message: string) => new DraftFileError('damaged', message)
 
-/** Whole percents, only rising. 1 is left for the end of the work. */
+const overLimit = (name: string, limit: number) => `${name} is over ${limit} bytes`
+
+const overBufferedLimit = (limit: number) => `The manifest, screenshots and tracks are over ${limit} bytes together`
+
+const LAST_PERCENT_BEFORE_DONE = 99
+
 function progressReporter(onProgress: (share: number) => void) {
   let percent = -1
   return (done: number, total: number) => {
     if (total <= 0) return
-    const next = Math.min(99, Math.floor((done / total) * 100))
+    const next = Math.min(LAST_PERCENT_BEFORE_DONE, Math.floor((done / total) * 100))
     if (next <= percent) return
     percent = next
     onProgress(next / 100)
@@ -75,23 +86,45 @@ function assertKeys(keys: string[]) {
   }
 }
 
-function assertWithin(size: number, limit: number, what: string) {
-  if (size > limit) throw new Error(`${what} is over ${limit} bytes`)
+function assertWithin(size: number, limit: number, message: string) {
+  if (size > limit) throw new Error(message)
 }
 
 /** What the reader would refuse is never written: a draft that can't be opened again loses the work in it. */
 function assertReadable({ manifest, screenshots, recordings }: DraftParts, limits: DraftLimits) {
   assertKeys(screenshots.map(({ key }) => key))
   assertKeys(recordings.map(({ key }) => key))
-  assertWithin(Buffer.byteLength(manifest), limits.manifestBytes, MANIFEST)
-  for (const { key, bytes } of screenshots) assertWithin(bytes.byteLength, limits.screenshotBytes, screenshotName(key))
-  for (const { key, track } of recordings) assertWithin(Buffer.byteLength(track), limits.trackBytes, trackName(key))
-  assertWithin(1 + screenshots.length + 2 * recordings.length, limits.entries, 'The number of entries')
+  let buffered = Buffer.byteLength(manifest)
+  assertWithin(buffered, limits.manifestBytes, overLimit(MANIFEST, limits.manifestBytes))
+  for (const { key, bytes } of screenshots) {
+    assertWithin(bytes.byteLength, limits.screenshotBytes, overLimit(screenshotName(key), limits.screenshotBytes))
+    buffered += bytes.byteLength
+  }
+  for (const { key, track } of recordings) {
+    const trackBytes = Buffer.byteLength(track)
+    assertWithin(trackBytes, limits.trackBytes, overLimit(trackName(key), limits.trackBytes))
+    buffered += trackBytes
+  }
+  assertWithin(buffered, limits.bufferedBytes, overBufferedLimit(limits.bufferedBytes))
+  assertWithin(1 + screenshots.length + 2 * recordings.length, limits.entries, `A draft holds at most ${limits.entries} entries`)
 }
 
 const bufferOf = (bytes: Uint8Array) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
-/** Entries are stored uncompressed, with ZIP64 where sizes need it. The draft appears at `target` only once it is complete. */
+export const partialFileOf = (target: string) => `${target}.partial`
+
+async function regularFileSize(path: string) {
+  const info = await stat(path)
+  if (!info.isFile()) throw new Error(`${path} isn’t a file`)
+  return info.size
+}
+
+async function removePartial(partial: string) {
+  const info = await lstat(partial).catch(() => null)
+  // `recursive` only so that Node retries while antivirus holds the fresh file; the path is a file.
+  if (info?.isFile()) await rm(partial, { recursive: true, force: true, maxRetries: 3 })
+}
+
 export async function writeDraft(
   target: string,
   parts: DraftParts,
@@ -99,6 +132,7 @@ export async function writeDraft(
   limits: DraftLimits = DRAFT_LIMITS
 ): Promise<void> {
   assertReadable(parts, limits)
+  const videoSizes = await Promise.all(parts.recordings.map(({ video }) => regularFileSize(video)))
   const report = progressReporter(onProgress)
   let written = 0
   let total = 0
@@ -109,25 +143,32 @@ export async function writeDraft(
       callback(null, chunk)
     }
   })
+  const sources: ReadStream[] = []
   const zip = new ZipWriter()
   zip.on('error', (error: Error) => counter.destroy(error))
   const stored = { compress: false }
   zip.addBuffer(Buffer.from(parts.manifest), MANIFEST, stored)
   for (const { key, bytes } of parts.screenshots) zip.addBuffer(bufferOf(bytes), screenshotName(key), stored)
-  for (const { key, video, track } of parts.recordings) {
-    zip.addFile(video, videoName(key), stored)
+  for (const [index, { key, video, track }] of parts.recordings.entries()) {
+    zip.addReadStreamLazy(videoName(key), { ...stored, size: videoSizes[index] }, (callback) => {
+      const source = createReadStream(video)
+      source.on('error', (error) => counter.destroy(error))
+      sources.push(source)
+      callback(null, source)
+    })
     zip.addBuffer(Buffer.from(track), trackName(key), stored)
   }
   // yazl calls back with the archive's final size; its typings leave the argument out.
   zip.end(undefined, ((size: number) => {
     total = size
   }) as () => void)
-  const partial = `${target}.partial`
+  const partial = partialFileOf(target)
   try {
     await pipeline(zip.outputStream, counter, createWriteStream(partial))
     await rename(partial, target)
   } catch (error) {
-    await rm(partial, { force: true }).catch(() => {})
+    for (const source of sources) source.destroy()
+    await removePartial(partial).catch(() => {})
     throw error
   }
   onProgress(1)
@@ -192,11 +233,22 @@ function recordingsOf(known: KnownEntry[]): Layout['recordings'] {
   })
 }
 
-function bufferedLimit(part: Part, limits: DraftLimits) {
+function bufferLimit(part: Part, limits: DraftLimits) {
   if (part.kind === 'manifest') return limits.manifestBytes
   if (part.kind === 'screenshot') return limits.screenshotBytes
   if (part.kind === 'track') return limits.trackBytes
-  return Infinity
+  return null
+}
+
+function assertBufferable(known: KnownEntry[], limits: DraftLimits) {
+  let buffered = 0
+  for (const { part, entry } of known) {
+    const limit = bufferLimit(part, limits)
+    if (limit === null) continue
+    if (entry.uncompressedSize > limit) throw new DraftFileError('too-large', overLimit(entry.fileName, limit))
+    buffered += entry.uncompressedSize
+  }
+  if (buffered > limits.bufferedBytes) throw new DraftFileError('too-large', overBufferedLimit(limits.bufferedBytes))
 }
 
 function layoutOf(known: KnownEntry[], fileSize: number, limits: DraftLimits): Layout {
@@ -205,10 +257,7 @@ function layoutOf(known: KnownEntry[], fileSize: number, limits: DraftLimits): L
   assertSound(known, fileSize)
   const screenshots = known.flatMap(({ part, entry }) => (part.kind === 'screenshot' ? [{ key: part.key, entry }] : []))
   const recordings = recordingsOf(known)
-  for (const { part, entry } of known) {
-    const limit = bufferedLimit(part, limits)
-    if (entry.uncompressedSize > limit) throw new DraftFileError('too-large', `${entry.fileName} is over ${limit} bytes`)
-  }
+  assertBufferable(known, limits)
   return { manifest: manifest.entry, screenshots, recordings }
 }
 
@@ -323,11 +372,14 @@ const fieldsOf = (value: unknown): Fields => (typeof value === 'object' && value
 
 const malformed = () => new Error('The draft’s files are malformed')
 
-/** The renderer names takes by id only; a video's path always comes from `takeFolder`, which knows only finished and adopted takes. */
-export function draftParts(files: unknown, takeFolder: (id: string) => string | null): DraftParts {
+/**
+ * The renderer names takes by id only; a video's path always comes from `takeFolder`, which knows only finished and
+ * adopted takes. Everything writeDraft would refuse is refused here already, before anyone picks where to save.
+ */
+export function draftParts(files: unknown, takeFolder: (id: string) => string | null, limits: DraftLimits = DRAFT_LIMITS): DraftParts {
   const { manifest, screenshots, recordings } = fieldsOf(files)
   if (typeof manifest !== 'string' || !Array.isArray(screenshots) || !Array.isArray(recordings)) throw malformed()
-  return {
+  const parts = {
     manifest,
     screenshots: screenshots.map((screenshot: unknown) => {
       const { key, bytes } = fieldsOf(screenshot)
@@ -342,4 +394,6 @@ export function draftParts(files: unknown, takeFolder: (id: string) => string | 
       return { key, video: join(folder, TAKE_VIDEO), track }
     })
   }
+  assertReadable(parts, limits)
+  return parts
 }

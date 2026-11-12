@@ -10,6 +10,6 @@ export function recordingDir(root: string, id: string) {
   return join(root, id)
 }
 
-export const removeRecording = (root: string, id: string) => rm(recordingDir(root, id), { recursive: true, force: true })
+export const removeRecording = (root: string, id: string) => rm(recordingDir(root, id), { recursive: true, force: true, maxRetries: 3 })
 
 export const clearRecordings = (root: string) => rm(root, { recursive: true, force: true })

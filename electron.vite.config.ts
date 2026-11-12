@@ -32,7 +32,7 @@ const alias = {
 }
 
 export default defineConfig({
-  main: { resolve: { alias } },
+  main: { resolve: { alias }, build: { externalizeDeps: { exclude: ['yazl', 'yauzl'] } } },
   preload: {
     resolve: { alias },
     build: {
