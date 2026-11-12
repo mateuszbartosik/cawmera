@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Redaction } from '../src/renderer/src/app/doc'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE } from '../src/renderer/src/app/house-style'
-import { MIN_BOX_MS, movedBoxTime, newBoxTime, isShownAt, REDACTION_PAD_MS, stretchedBoxTime } from '../src/renderer/src/recording/blur-boxes'
+import { boxesShownAt, MIN_BOX_MS, movedBoxTime, newBoxTime, isShownAt, REDACTION_PAD_MS, stretchedBoxTime, wideViewPoint } from '../src/renderer/src/recording/blur-boxes'
 import { drawRecordingFrame, type RecordingScene } from '../src/renderer/src/recording/frame'
 import { recordingEditLayout } from '../src/renderer/src/recording/edit-layout'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
@@ -11,7 +11,10 @@ import { outputFrameTimes, outputToSource, timeMapOf } from '../src/renderer/src
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
 import * as compose from '../src/renderer/src/render/compose'
 import { fakeContext } from './fake-canvas'
-import { output, piece, video } from './recording-scenes'
+import { output, piece, video, zoomScene } from './recording-scenes'
+import { cameraMatrixAt } from '../src/renderer/src/recording/shutter'
+import { sourceToOutput } from '../src/renderer/src/render/layout'
+import { transformPoint } from '../src/renderer/src/render/geometry'
 
 vi.mock('../src/renderer/src/render/compose', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/renderer/src/render/compose')>()
@@ -247,5 +250,37 @@ describe('boxes in the picture', () => {
     const scene = sceneWith([box(3000, 5000)])
     expect(draws(scene, 0, 4000)).toBe(1)
     expect(draws(scene, 4000, 0)).toBe(0)
+  })
+})
+
+describe('boxesShownAt', () => {
+  const boxes = ['a', 'b', 'c'].map((id, i) => ({ ...box(i * 3000, i * 3000 + 2000), id }))
+
+  it('lists the boxes shown at the playhead, plus the selected one', () => {
+    expect(boxesShownAt(boxes, 4000, new Set(['c'])).map((b) => b.id)).toEqual(['b', 'c'])
+  })
+
+  it('lists a box with no time, and keeps the list in order', () => {
+    const untimed = { ...box(0, 0), id: 'u', time: null }
+    expect(boxesShownAt([...boxes, untimed], 100, new Set(['b'])).map((b) => b.id)).toEqual(['a', 'b', 'u'])
+  })
+})
+
+describe('wideViewPoint', () => {
+  const sourceMs = 4000
+  const { view, doc, style } = zoomScene
+  const layout = recordingEditLayout(view, zoomScene.videoSize, output, style)
+  const wideOut = sourceToOutput(layout, { x: 1500, y: 900 })
+
+  it('leaves a point alone while the canvas is wide', () => {
+    expect(wideViewPoint(wideOut, true, view, doc.size, style, sourceMs)).toEqual(wideOut)
+  })
+
+  it('takes a point on the zoomed camera back to where it sits in the wide frame', () => {
+    const shown = transformPoint(cameraMatrixAt(zoomScene, view.map.spans[0].outputStart + sourceMs), wideOut)
+    expect(shown.x).not.toBeCloseTo(wideOut.x, 0)
+    const back = wideViewPoint(shown, false, view, doc.size, style, sourceMs)
+    expect(back.x).toBeCloseTo(wideOut.x, 6)
+    expect(back.y).toBeCloseTo(wideOut.y, 6)
   })
 })

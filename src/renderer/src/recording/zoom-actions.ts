@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { newId, store, updateDoc, type TimelineSelection } from '../app/store'
+import { newId, store, updateDoc, type Selection, type TimelineSelection } from '../app/store'
 import type { Point } from '../render/geometry'
 import { setRecording } from './actions'
 import { cursorPositionAt } from './cursor'
@@ -27,6 +27,11 @@ export function selectedZoomOf(edits: ZoomEdit[], selection: TimelineSelection =
   if (selection?.kind !== 'zoom') return null
   const { id } = selection
   return edits.find((edit) => edit.id === id) ?? null
+}
+
+/** The canvas shows the whole frame, with nothing zoomed, while a blur box or a zoom is selected. */
+export function showsWideFrame(selection: Selection, edits: ZoomEdit[], timelineSelection: TimelineSelection): boolean {
+  return selection.some((box) => box.kind === 'redaction') || selectedZoomOf(edits, timelineSelection) !== null
 }
 
 /** A selected zoom shows the wide frame, which playback never does, so selecting one pauses it. */

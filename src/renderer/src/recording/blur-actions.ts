@@ -1,4 +1,5 @@
 import { newId, store, updateDoc } from '../app/store'
+import type { Rect } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { movedBoxTime, newBoxTime, stretchedBoxTime } from './blur-boxes'
 import { recordingEditLayout } from './edit-layout'
@@ -26,6 +27,17 @@ export function selectRedaction(id: string) {
   if (time && (playhead < time.start || playhead > time.end)) scrubTo(time.start)
 }
 
+function addTimedBox(box: Rect, history: boolean): string | null {
+  const take = activeTake()
+  if (!take) return null
+  const { entry, recording } = take
+  const id = newId()
+  const time = newBoxTime(currentPlayhead(), recording.trim, entry.track.fps, entry.track.durationMs)
+  updateDoc((current) => ({ redactions: [...current.redactions, { id, rect: box, time }] }), { history })
+  selectRedaction(id)
+  return id
+}
+
 /** A box over the middle of the frame, from the playhead to the end of the trim. */
 export function addTimedRedaction() {
   const take = activeTake()
@@ -34,12 +46,14 @@ export function addTimedRedaction() {
   const videoSize = { width: entry.track.width, height: entry.track.height }
   const view = takeViewFor(entry, recording, doc.crop)
   const layout = recordingEditLayout(view, videoSize, doc.size, store.get().style)
-  const id = newId()
   const offset = doc.redactions.length * 12
   const box = centeredBox(layout, 0.28, 0.07)
-  const time = newBoxTime(currentPlayhead(), recording.trim, entry.track.fps, entry.track.durationMs)
-  updateDoc((current) => ({ redactions: [...current.redactions, { id, rect: { ...box, x: box.x + offset, y: box.y + offset }, time }] }))
-  selectRedaction(id)
+  addTimedBox({ ...box, x: box.x + offset, y: box.y + offset }, true)
+}
+
+/** A box drawn by hand joins the drag that draws it, so the drag stays one undo step. */
+export function addDrawnRedaction(box: Rect): string | null {
+  return addTimedBox(box, false)
 }
 
 function editRedactionTime(id: string, timeAfter: (time: Span, take: NonNullable<ReturnType<typeof activeTake>>) => Span, history: boolean) {

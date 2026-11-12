@@ -1,10 +1,12 @@
 import type { RedactStyle, Redaction } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import { drawRedaction } from '../render/compose'
-import type { Size } from '../render/geometry'
+import { inverse, transformPoint, type Matrix, type Point, type Size } from '../render/geometry'
+import { cameraAt, viewMatrix } from './camera'
 import { recordingEditLayout } from './edit-layout'
+import { recordingLayout } from './layout'
 import { moveSpan, stretchSpan } from '../timeline/scale'
-import type { Span } from './timemap'
+import { snapToOutput, type Span } from './timemap'
 import type { TakeView } from './take-view'
 import type { Trim } from './trim'
 
@@ -17,6 +19,28 @@ const GRID_TOLERANCE = 1e-9
 export function isShownAt(redaction: Redaction, sourceMs: number): boolean {
   const { time } = redaction
   return time === null || (sourceMs >= time.start - REDACTION_PAD_MS && sourceMs <= time.end + REDACTION_PAD_MS)
+}
+
+/** What the canvas offers to edit at the playhead: the boxes on screen, and the selected ones wherever they are. */
+export function boxesShownAt(redactions: Redaction[], sourceMs: number, selected: ReadonlySet<string>): Redaction[] {
+  return redactions.filter((redaction) => selected.has(redaction.id) || isShownAt(redaction, sourceMs))
+}
+
+/** What the camera does to the wide frame (output px) at the playhead: the canvas shows it that way while it isn't wide. */
+export function cameraViewMatrix(view: Pick<TakeView, 'camera' | 'frame' | 'map'>, output: Size, style: HouseStyle, sourceMs: number): Matrix {
+  return viewMatrix(cameraAt(view.camera, snapToOutput(view.map, sourceMs)), recordingLayout(view.frame, output, style), output)
+}
+
+/** A point on the canvas (output px) as it sits in the wide frame, where boxes are edited: undoes the camera when the canvas isn't wide. */
+export function wideViewPoint(
+  point: Point,
+  wide: boolean,
+  view: Pick<TakeView, 'camera' | 'frame' | 'map'>,
+  output: Size,
+  style: HouseStyle,
+  sourceMs: number
+): Point {
+  return wide ? point : transformPoint(inverse(cameraViewMatrix(view, output, style, sourceMs)), point)
 }
 
 export const snapDownToFrame = (ms: number, fps: number): number => (Math.floor((ms * fps) / MS_PER_SECOND + GRID_TOLERANCE) * MS_PER_SECOND) / fps

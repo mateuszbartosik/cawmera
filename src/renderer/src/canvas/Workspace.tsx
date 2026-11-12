@@ -1,7 +1,7 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ImageSquare, Trash, X } from '@phosphor-icons/react'
 import type { HouseStyle } from '../app/house-style'
-import type { Doc } from '../app/doc'
+import type { Doc, Redaction } from '../app/doc'
 import { deleteShot, enterCrop, leaveCrop, removeSelected, shotFileName } from '../app/actions'
 import {
   boxKey,
@@ -18,17 +18,21 @@ import {
   toggleShotPicked,
   updateDoc,
   useApp,
+  type AppState,
   type BoxRef,
   type ShotRecord
 } from '../app/store'
 import { drawnRecordingCrop, keepsDrawnCrop, RECORDING_CROP_MIN_PX, settleRecordingCrop, useCropFrame } from '../recording/crop'
 import { drawRecordingFrame } from '../recording/frame'
-import { togglePlayback } from '../recording/playback'
+import { addDrawnRedaction, selectRedaction } from '../recording/blur-actions'
+import { boxesShownAt, cameraViewMatrix, wideViewPoint } from '../recording/blur-boxes'
+import { recordingEditLayout } from '../recording/edit-layout'
+import { pausePlayback, togglePlayback } from '../recording/playback'
 import { stepSpaceTap } from './space-tap'
 import { recordingScene } from '../recording/scene'
 import { POSTER_OUTPUT_MS, POSTER_SOURCE_MS, useRecording } from '../recording/registry'
-import type { TakeView } from '../recording/take-view'
-import { aimZoomByHand } from '../recording/zoom-actions'
+import { takeViewFor, type TakeView } from '../recording/take-view'
+import { aimZoomByHand, showsWideFrame } from '../recording/zoom-actions'
 import { areaGrabAt, draggedFraming, type AreaGrab } from '../recording/zoom-area'
 import { useDragSession } from '../timeline/drag-session'
 import { drawScene } from '../render/compose'
@@ -89,6 +93,8 @@ type Drag =
 /** A drag that edits the shot, as one undo step. */
 type EditDrag = Exclude<Drag, { kind: 'view-pan' | 'marquee' }>
 const isEditDrag = (drag: Drag): drag is EditDrag => drag.kind !== 'view-pan' && drag.kind !== 'marquee'
+const isBoxDrag = (drag: EditDrag): drag is Extract<EditDrag, { kind: 'item-move' | 'item-resize' | 'redaction-draw' }> =>
+  drag.kind === 'item-move' || drag.kind === 'item-resize' || drag.kind === 'redaction-draw'
 
 interface Item {
   box: BoxRef
@@ -98,9 +104,9 @@ interface Item {
   src: Rect
 }
 
-function itemsFor(doc: Doc, layout: Layout): Item[] {
+function itemsFor(doc: Doc, layout: Layout, redactions: Redaction[] = doc.redactions): Item[] {
   const items: Item[] = []
-  for (const r of [...doc.redactions].reverse()) {
+  for (const r of [...redactions].reverse()) {
     items.push({ box: { kind: 'redaction', id: r.id }, out: sourceRectToOutput(layout, r.rect), src: r.rect })
   }
   if (doc.spotlight.on && doc.spotlight.rect) {
@@ -298,6 +304,16 @@ export function Workspace() {
   const g = workspaceGeometry(state)
   const active = activeIndex(state)
   const layout = source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size) : null
+  const entry = useRecording(doc.sourceId)
+  const recordingTake = useMemo(
+    () => (entry && doc.recording ? { entry, view: takeViewFor(entry, doc.recording, doc.crop), video: { width: entry.track.width, height: entry.track.height } } : null),
+    [entry, doc.recording, doc.crop]
+  )
+  const editLayout = recordingTake ? recordingEditLayout(recordingTake.view, recordingTake.video, doc.size, style) : layout
+  const wideNow = (s: AppState) => recordingTake !== null && showsWideFrame(s.selection, recordingTake.view.edits, s.timelineSelection)
+  const cameraView = recordingTake && !wideNow(state) ? cameraViewMatrix(recordingTake.view, doc.size, style, state.playback.time) : null
+  const itemsOf = (s: AppState, shotLayout: Layout) =>
+    itemsFor(s.doc, shotLayout, recordingTake ? boxesShownAt(s.doc.redactions, s.playback.time, new Set(s.selection.flatMap((box) => (box.kind === 'redaction' ? [box.id] : [])))) : s.doc.redactions)
   const cropFrame = useCropFrame()
   const video = cropSubject(state)
   const target = video && { width: video.width, height: video.height, bitmap: doc.recording ? cropFrame : (source?.bitmap ?? null) }
@@ -406,6 +422,13 @@ export function Workspace() {
   }
   /** Export px inside the active shot. */
   const inActive = (p: Point): Point => ({ x: p.x - rects[active].x, y: p.y })
+  /** Where boxes are edited: the wide frame, whatever the camera shows. */
+  const inEditSpace = (world: Point): Point => {
+    const p = inActive(world)
+    if (!recordingTake) return p
+    const s = store.get()
+    return wideViewPoint(p, wideNow(s), recordingTake.view, doc.size, style, s.playback.time)
+  }
   const unitsPerPx = 1 / g.k
   const tolerance = (HANDLE_PX / 2 + 4) * unitsPerPx
 
@@ -446,9 +469,9 @@ export function Workspace() {
         clearPickedShots()
         const { zoom, area, take, scale } = zoomArea
         dragRef.current = { kind: 'zoom-area', id: zoom.id, grab: areaGrab, start: inActive(world), area, take, scale, moved: false }
-      } else if (index === active && layout) {
-        const p = inActive(world)
-        const items = itemsFor(s.doc, layout)
+      } else if (index === active && editLayout) {
+        const p = inEditSpace(world)
+        const items = itemsOf(s, editLayout)
         const chosen = items.filter((item) => hasBox(s.selection, item.box))
         const single = chosen.length === 1 ? chosen[0] : null
         const handle = single && !multi ? hitHandle(single.out, p, tolerance) : null
@@ -456,17 +479,20 @@ export function Workspace() {
         if (single && handle) {
           clearPickedShots()
           dragRef.current = { kind: 'item-resize', target: single.box, handle, start: p, rect: single.src }
-        } else if (event.altKey && contains(layout.content, p)) {
+        } else if (event.altKey && contains(editLayout.content, p)) {
+          if (recordingTake) pausePlayback()
           store.set({ selection: [], shotSelection: [] })
           dragRef.current = { kind: 'redaction-draw', id: null, start: p }
-        } else if (hit && multi) {
+        } else if (hit && multi && !recordingTake) {
           const key = boxKey(hit.box)
           const selection = hasBox(s.selection, hit.box) ? s.selection.filter((box) => boxKey(box) !== key) : [...s.selection, hit.box]
           store.set({ selection, shotSelection: [] })
         } else if (hit) {
           // Dragging one of several selected boxes moves them all.
           const group = hasBox(s.selection, hit.box) && chosen.length > 1 ? chosen : [hit]
-          store.set({ selection: group.map((item) => item.box), shotSelection: [] })
+          if (recordingTake && hit.box.kind === 'redaction') selectRedaction(hit.box.id)
+          else store.set({ selection: group.map((item) => item.box) })
+          store.set({ shotSelection: [] })
           dragRef.current = { kind: 'item-move', targets: group.map((item) => item.box), start: p, rects: group.map((item) => item.src) }
         } else if (multi) {
           toggleShotPicked(s.activeId)
@@ -498,6 +524,54 @@ export function Workspace() {
       root.setPointerCapture(event.pointerId)
       if (started.kind !== 'view-pan') setDragging(true)
       if (isEditDrag(started)) editDrag.begin()
+    }
+  }
+
+  /** Moves, resizes and draws boxes; `p` is where the pointer is in the frame the boxes sit in (export px). */
+  const dragBox = (drag: Extract<EditDrag, { kind: 'item-move' | 'item-resize' | 'redaction-draw' }>, p: Point, full: Rect) => {
+    if (!editLayout) return
+    switch (drag.kind) {
+      case 'item-move': {
+        // Move the group as one, keeping all of it on the image.
+        const bounds = drag.rects.reduce(union)
+        const moved = confineMove({ ...bounds, x: bounds.x + (p.x - drag.start.x) / editLayout.scale, y: bounds.y + (p.y - drag.start.y) / editLayout.scale }, full)
+        const dx = moved.x - bounds.x
+        const dy = moved.y - bounds.y
+        setItemRects(drag.targets, drag.rects.map((r) => ({ ...r, x: r.x + dx, y: r.y + dy })))
+        break
+      }
+      case 'item-resize': {
+        const sdx = (p.x - drag.start.x) / editLayout.scale
+        const sdy = (p.y - drag.start.y) / editLayout.scale
+        setItemRect(drag.target, clipTo(resizeRect(drag.rect, drag.handle, sdx, sdy, MIN_ITEM), full))
+        break
+      }
+      case 'redaction-draw': {
+        const a = drag.start
+        if (!drag.id && Math.hypot(p.x - a.x, p.y - a.y) < 4 * unitsPerPx) break
+        const box = clipTo(
+          normalize(
+            rect(
+              editLayout.sel.x + (a.x - editLayout.content.x) / editLayout.scale,
+              editLayout.sel.y + (a.y - editLayout.content.y) / editLayout.scale,
+              (p.x - a.x) / editLayout.scale,
+              (p.y - a.y) / editLayout.scale
+            )
+          ),
+          full
+        )
+        if (drag.id) {
+          setItemRect({ kind: 'redaction', id: drag.id }, box)
+        } else if (recordingTake) {
+          drag.id = addDrawnRedaction(box)
+        } else {
+          const id = newId()
+          drag.id = id
+          updateDoc((d) => ({ redactions: [...d.redactions, { id, rect: box, time: null }] }), { history: false })
+          store.set({ selection: [{ kind: 'redaction', id }] })
+        }
+        break
+      }
     }
   }
 
@@ -546,12 +620,16 @@ export function Workspace() {
     const s = store.get()
     const recordingVideo = s.doc.recording ? cropSubject(s) : null
     if (recordingVideo) {
-      dragRecordingCrop(drag, world, recordingVideo)
+      if (isBoxDrag(drag)) dragBox(drag, inEditSpace(world), rect(0, 0, recordingVideo.width, recordingVideo.height))
+      else dragRecordingCrop(drag, world, recordingVideo)
       return
     }
     const src = getSource(s.doc.sourceId)
     if (!src) return
-    const full = rect(0, 0, src.width, src.height)
+    if (isBoxDrag(drag)) {
+      dragBox(drag, inActive(world), rect(0, 0, src.width, src.height))
+      return
+    }
 
     switch (drag.kind) {
       case 'sel-move': {
@@ -571,51 +649,6 @@ export function Workspace() {
           const cap = capFor(s.doc)
           const next = openSelection(drawnSelection(drag.start, world, src, cap), src, cap, s.doc.edge)
           updateDoc({ crop: settleSelection(next, src) }, { history: false })
-        }
-        break
-      }
-      case 'item-move': {
-        if (!layout) break
-        const p = inActive(world)
-        // Move the group as one, keeping all of it on the screenshot.
-        const bounds = drag.rects.reduce(union)
-        const moved = confineMove({ ...bounds, x: bounds.x + (p.x - drag.start.x) / layout.scale, y: bounds.y + (p.y - drag.start.y) / layout.scale }, full)
-        const dx = moved.x - bounds.x
-        const dy = moved.y - bounds.y
-        setItemRects(drag.targets, drag.rects.map((r) => ({ ...r, x: r.x + dx, y: r.y + dy })))
-        break
-      }
-      case 'item-resize': {
-        if (!layout) break
-        const p = inActive(world)
-        const sdx = (p.x - drag.start.x) / layout.scale
-        const sdy = (p.y - drag.start.y) / layout.scale
-        setItemRect(drag.target, clipTo(resizeRect(drag.rect, drag.handle, sdx, sdy, MIN_ITEM), full))
-        break
-      }
-      case 'redaction-draw': {
-        if (!layout) break
-        const p = inActive(world)
-        const a = drag.start
-        if (!drag.id && Math.hypot(p.x - a.x, p.y - a.y) < 4 * unitsPerPx) break
-        const box = clipTo(
-          normalize(
-            rect(
-              layout.sel.x + (a.x - layout.content.x) / layout.scale,
-              layout.sel.y + (a.y - layout.content.y) / layout.scale,
-              (p.x - a.x) / layout.scale,
-              (p.y - a.y) / layout.scale
-            )
-          ),
-          full
-        )
-        if (!drag.id) {
-          const id = newId()
-          drag.id = id
-          updateDoc((d) => ({ redactions: [...d.redactions, { id, rect: box, time: null }] }), { history: false })
-          store.set({ selection: [{ kind: 'redaction', id }] })
-        } else {
-          setItemRect({ kind: 'redaction', id: drag.id }, box)
         }
         break
       }
@@ -681,10 +714,10 @@ export function Workspace() {
       if (handle) cursor = HANDLE_CURSOR[handle]
       else if (movable && contains(sel, world)) cursor = 'move'
       else if (contains(rect(0, 0, target.width, target.height), world)) cursor = 'crosshair'
-    } else if (layout && shotAt(sizes, world) === active) {
-      const p = inActive(world)
+    } else if (editLayout && shotAt(sizes, world) === active) {
+      const p = inEditSpace(world)
       const s = store.get()
-      const items = itemsFor(s.doc, layout)
+      const items = itemsOf(s, editLayout)
       const chosen = items.filter((candidate) => hasBox(s.selection, candidate.box))
       const handle = chosen.length === 1 ? hitHandle(chosen[0].out, p, tolerance) : null
       const hit = items.find((candidate) => contains(candidate.out, p))
@@ -816,7 +849,7 @@ export function Workspace() {
       </>
     )
   } else {
-    const items = layout ? itemsFor(doc, layout) : []
+    const items = editLayout ? itemsOf(state, editLayout) : []
     const chosenItems = items.filter((item) => hasBox(selection, item.box))
     const chosenBounds = chosenItems.length > 0 ? chosenItems.map((item) => item.out).reduce(union) : null
     const deleteAt =
@@ -894,7 +927,7 @@ export function Workspace() {
           />
         )}
 
-        {layout && (
+        {editLayout && (
           <svg
             className="pointer-events-none absolute overflow-visible"
             style={{ left: activeBox.left, top: activeBox.top, width: activeBox.width, height: activeBox.height }}
@@ -902,37 +935,39 @@ export function Workspace() {
             preserveAspectRatio="none"
             aria-hidden
           >
-            {chosenItems.length > 1 && chosenBounds && (
-              <rect
-                x={chosenBounds.x}
-                y={chosenBounds.y}
-                width={chosenBounds.w}
-                height={chosenBounds.h}
-                fill="none"
-                stroke="var(--tc-accent)"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                vectorEffect="non-scaling-stroke"
-                data-testid="box-group"
-              />
-            )}
-            {items.map((item) => {
-              const key = boxKey(item.box)
-              if (hasBox(selection, item.box)) {
-                return (
-                  <g key={key} data-testid="selected-box">
-                    <rect x={item.out.x} y={item.out.y} width={item.out.w} height={item.out.h} fill="none" stroke="var(--tc-accent)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-                    {chosenItems.length === 1 && handlesFor(item.out, unitsPerPx, '#fff', 'var(--tc-accent)')}
-                  </g>
-                )
-              }
-              if (hover.item === key) {
-                return (
-                  <rect key={key} x={item.out.x} y={item.out.y} width={item.out.w} height={item.out.h} fill="none" stroke="var(--tc-accent)" strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
-                )
-              }
-              return null
-            })}
+            <g transform={cameraView ? `matrix(${cameraView.join(' ')})` : undefined}>
+              {chosenItems.length > 1 && chosenBounds && (
+                <rect
+                  x={chosenBounds.x}
+                  y={chosenBounds.y}
+                  width={chosenBounds.w}
+                  height={chosenBounds.h}
+                  fill="none"
+                  stroke="var(--tc-accent)"
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                  vectorEffect="non-scaling-stroke"
+                  data-testid="box-group"
+                />
+              )}
+              {items.map((item) => {
+                const key = boxKey(item.box)
+                if (hasBox(selection, item.box)) {
+                  return (
+                    <g key={key} data-testid="selected-box">
+                      <rect x={item.out.x} y={item.out.y} width={item.out.w} height={item.out.h} fill="none" stroke="var(--tc-accent)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                      {chosenItems.length === 1 && handlesFor(item.out, unitsPerPx, '#fff', 'var(--tc-accent)')}
+                    </g>
+                  )
+                }
+                if (hover.item === key) {
+                  return (
+                    <rect key={key} x={item.out.x} y={item.out.y} width={item.out.w} height={item.out.h} fill="none" stroke="var(--tc-accent)" strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+                  )
+                }
+                return null
+              })}
+            </g>
           </svg>
         )}
 

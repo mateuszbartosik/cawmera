@@ -10,7 +10,8 @@ const { registerRecording } = await import('../src/renderer/src/recording/regist
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
 const { wholeTake } = await import('../src/renderer/src/recording/timemap')
 const { dragSession } = await import('../src/renderer/src/timeline/drag-session')
-const { moveRedactionTo, selectRedaction, stretchRedactionTo } = await import('../src/renderer/src/recording/blur-actions')
+const { showsWideFrame } = await import('../src/renderer/src/recording/zoom-actions')
+const { addDrawnRedaction, moveRedactionTo, selectRedaction, stretchRedactionTo } = await import('../src/renderer/src/recording/blur-actions')
 
 const entry: RecordingEntry = {
   id: 'blur-take',
@@ -106,5 +107,51 @@ describe('adding a box on a recording', () => {
     expect(added.time!.end).toBeCloseTo(9000, 0)
     expect(added.rect.x + added.rect.w / 2).toBeCloseTo(960 + 12, 0)
     expect(store.get().selection).toEqual([{ kind: 'redaction', id: added.id }])
+  })
+})
+
+describe('drawing a box on a recording', () => {
+  const drawn = { x: 40, y: 60, w: 200, h: 90 }
+
+  it('gets its time from the playhead, joins the open drag without an undo step, and is selected', () => {
+    scrubTo(2000)
+    const id = addDrawnRedaction(drawn)
+    const added = store.get().doc.redactions[1]
+    expect(added.id).toBe(id)
+    expect(added.rect).toEqual(drawn)
+    expect(added.time!.start).toBeCloseTo(2000, 0)
+    expect(added.time!.end).toBeCloseTo(9000, 0)
+    expect(store.get().selection).toEqual([{ kind: 'redaction', id }])
+    expect(store.get().past).toHaveLength(0)
+  })
+
+  it('pauses playback and clears a zoom selection', () => {
+    setPlaying(true)
+    store.set({ timelineSelection: { kind: 'zoom', id: 'z' } })
+    addDrawnRedaction(drawn)
+    expect(store.get().playback.playing).toBe(false)
+    expect(store.get().timelineSelection).toBeNull()
+  })
+
+  it('makes one undo step with the rest of its drag', () => {
+    const session = dragSession()
+    session.begin()
+    const id = addDrawnRedaction(drawn)!
+    updateDoc((doc) => ({ redactions: doc.redactions.map((r) => (r.id === id ? { ...r, rect: { ...drawn, w: 300 } } : r)) }), { history: false })
+    session.end()
+    expect(store.get().past).toHaveLength(1)
+    undo()
+    expect(store.get().doc.redactions).toHaveLength(1)
+  })
+})
+
+describe('showsWideFrame', () => {
+  const zoom = { id: 'z', start: 1000, end: 2000, depth: 2, aim: 'manual' as const, focus: { x: 10, y: 10 } }
+
+  it('is wide for a selected blur box or zoom, and not for a spotlight alone', () => {
+    expect(showsWideFrame([{ kind: 'redaction', id: 'box' }], [], null)).toBe(true)
+    expect(showsWideFrame([], [zoom], { kind: 'zoom', id: 'z' })).toBe(true)
+    expect(showsWideFrame([{ kind: 'spotlight' }], [zoom], null)).toBe(false)
+    expect(showsWideFrame([], [zoom], { kind: 'range', start: 0, end: 500 })).toBe(false)
   })
 })

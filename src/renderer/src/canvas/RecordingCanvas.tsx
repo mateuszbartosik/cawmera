@@ -10,7 +10,7 @@ import { POSTER_OUTPUT_MS, POSTER_SOURCE_MS, useRecording } from '../recording/r
 import { recordingScene } from '../recording/scene'
 import { takeViewFor } from '../recording/take-view'
 import { snapToOutput, timeMapOf } from '../recording/timemap'
-import { selectedZoomOf } from '../recording/zoom-actions'
+import { showsWideFrame } from '../recording/zoom-actions'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
 
@@ -36,12 +36,12 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   const entry = useRecording(doc.sourceId)
   const entryId = entry?.id ?? null
   const trim = doc.recording?.trim
-  const boxSelected = useApp((s) => s.selection.length > 0)
+  const selection = useApp((s) => s.selection)
   const timelineSelection = useApp((s) => s.timelineSelection)
   const takeView = entry && doc.recording ? takeViewFor(entry, doc.recording, doc.crop) : null
   const edits = takeView?.edits ?? []
   const map = takeView?.map
-  const wide = boxSelected || selectedZoomOf(edits, timelineSelection) !== null
+  const wide = showsWideFrame(selection, edits, timelineSelection)
 
   useEffect(() => {
     if (!entryId || !entry) return
