@@ -1,5 +1,6 @@
 import type { Rect, Size } from '../render/geometry'
 import type { RecordingDoc } from '../recording/settings'
+import type { Span } from '../recording/timemap'
 import { DEFAULT_SIZE } from './size'
 
 /** Pixel density a screenshot was taken at (OS display scaling). */
@@ -48,6 +49,8 @@ export interface Redaction {
   id: string
   /** Source pixels, so a box stays on its text whatever the framing or zoom. */
   rect: Rect
+  /** Source ms, on a recording; null on a screenshot, where a box is always there. */
+  time: Span | null
 }
 
 export interface Spotlight {

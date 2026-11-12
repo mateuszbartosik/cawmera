@@ -532,7 +532,7 @@ export function addRedaction() {
   const id = newId()
   const offset = store.get().doc.redactions.length * 12
   const box = centeredBox(layout, 0.28, 0.07)
-  updateDoc((doc) => ({ redactions: [...doc.redactions, { id, rect: { ...box, x: box.x + offset, y: box.y + offset } }] }))
+  updateDoc((doc) => ({ redactions: [...doc.redactions, { id, rect: { ...box, x: box.x + offset, y: box.y + offset }, time: null }] }))
   store.set({ selection: [{ kind: 'redaction', id }] })
 }
 

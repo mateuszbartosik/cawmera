@@ -26,7 +26,7 @@ import { drawRecordingFrame } from '../recording/frame'
 import { togglePlayback } from '../recording/playback'
 import { stepSpaceTap } from './space-tap'
 import { recordingScene } from '../recording/scene'
-import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
+import { POSTER_OUTPUT_MS, POSTER_SOURCE_MS, useRecording } from '../recording/registry'
 import type { TakeView } from '../recording/take-view'
 import { aimZoomByHand } from '../recording/zoom-actions'
 import { areaGrabAt, draggedFraming, type AreaGrab } from '../recording/zoom-area'
@@ -240,7 +240,7 @@ const ShotCanvas = memo(function ShotCanvas({ doc, style, backdrop, box, active,
     ctx.clearRect(0, 0, backingWidth, canvas.height)
     if (recording) {
       const scene = recording.poster && recordingScene(recording, doc, style, backdrop, recording.poster)
-      if (scene) drawRecordingFrame(ctx, scene, POSTER_OUTPUT_MS, 'preview', backingWidth / doc.size.width)
+      if (scene) drawRecordingFrame(ctx, scene, POSTER_OUTPUT_MS, 'preview', backingWidth / doc.size.width, POSTER_SOURCE_MS)
       return
     }
     const source = getSource(doc.sourceId)
@@ -612,7 +612,7 @@ export function Workspace() {
         if (!drag.id) {
           const id = newId()
           drag.id = id
-          updateDoc((d) => ({ redactions: [...d.redactions, { id, rect: box }] }), { history: false })
+          updateDoc((d) => ({ redactions: [...d.redactions, { id, rect: box, time: null }] }), { history: false })
           store.set({ selection: [{ kind: 'redaction', id }] })
         } else {
           setItemRect({ kind: 'redaction', id: drag.id }, box)

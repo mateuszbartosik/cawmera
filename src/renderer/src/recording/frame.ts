@@ -5,11 +5,13 @@ import { clamp, compose, inverse, transformPoint, translation, type Matrix, type
 import { CURSOR_BASE_PX, cursorBounds, drawCursor } from './cursor-art'
 import { tiltAt, type CursorFrame } from './cursor'
 import { activeClicks, drawClickEffect, pressScale } from './effects'
+import { drawBlurBoxes } from './blur-boxes'
 import { toComposition, type RecordingLayout } from './layout'
 import type { RecordingDoc } from './settings'
 import { sampleFrame, type CameraSamples, type CursorSamples, type FrameQuality } from './shutter'
 import { stageFor } from './stage-cache'
 import type { TakeView } from './take-view'
+import { outputToSource } from './timemap'
 
 export interface RecordingScene {
   video: CanvasImageSource
@@ -73,10 +75,10 @@ function layerFor(target: Ctx, role: LayerRole, width: number, height: number): 
 }
 
 /**
- * The background, the frame with its shadow, the video, the border and the click effects, over an opaque base. With a
+ * The background, the frame with its shadow, the video, the blur boxes shown at `sourceMs`, the border and the click effects, over an opaque base. With a
  * stage, the shadow comes from it.
  */
-function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout, t: number, matrix: Matrix, base: Size, stage: OffscreenCanvas | null): void {
+function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout, t: number, sourceMs: number, matrix: Matrix, base: Size, stage: OffscreenCanvas | null): void {
   const { video, view, doc, settings, style, backdrop } = scene
   const { crop, frame, track, effectClicks } = view
   const { content } = layout
@@ -101,6 +103,7 @@ function drawPicture(target: Ctx, scene: RecordingScene, layout: RecordingLayout
   ctx.clip()
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, content.x, content.y, content.w, content.h)
+  drawBlurBoxes(ctx, scene, sourceMs)
   ctx.restore()
   drawBorder(ctx, content, radius, style)
 
@@ -121,6 +124,7 @@ function drawReprojected(
   scene: RecordingScene,
   layout: RecordingLayout,
   t: number,
+  sourceMs: number,
   atFrameTime: Matrix,
   camera: CameraSamples,
   stage: OffscreenCanvas | null
@@ -134,7 +138,7 @@ function drawReprojected(
   picture.ctx.beginPath()
   picture.ctx.rect(0, 0, used.width, used.height)
   picture.ctx.clip()
-  drawPicture(picture.ctx, scene, layout, t, compose(translation(margin, margin), atFrameTime), used, stage)
+  drawPicture(picture.ctx, scene, layout, t, sourceMs, compose(translation(margin, margin), atFrameTime), used, stage)
   picture.ctx.restore()
 
   const backToComposition = inverse(atFrameTime)
@@ -214,15 +218,23 @@ function stageOf(owner: Ctx, scene: RecordingScene, layout: RecordingLayout, qua
 
 /**
  * Nothing blurs at rest. The picture blurs by how far the camera moves it on the canvas, and the cursor by how far it moves
- * on the canvas, camera included; each layer blends just enough samples.
+ * on the canvas, camera included; each layer blends just enough samples. `pictureMs` is the source time of the video frame
+ * drawn, which a paused preview inside a cut or a poster doesn’t get from the output time.
  */
-export function drawRecordingFrame(ctx: Ctx, scene: RecordingScene, outputMs: number, quality: FrameQuality, k = 1): void {
+export function drawRecordingFrame(
+  ctx: Ctx,
+  scene: RecordingScene,
+  outputMs: number,
+  quality: FrameQuality,
+  k = 1,
+  pictureMs = outputToSource(scene.view.map, outputMs)
+): void {
   const { layout, view, camera, cursor } = sampleFrame(scene, outputMs, quality, k)
   const stage = stageOf(ctx, scene, layout, quality, k)
   ctx.save()
   ctx.globalAlpha = 1
-  if (camera.views.length === 1) drawPicture(ctx, scene, layout, outputMs, view, ctx.canvas, stage)
-  else drawReprojected(ctx, scene, layout, outputMs, view, camera, stage)
+  if (camera.views.length === 1) drawPicture(ctx, scene, layout, outputMs, pictureMs, view, ctx.canvas, stage)
+  else drawReprojected(ctx, scene, layout, outputMs, pictureMs, view, camera, stage)
   if (cursor) drawCursorStamps(ctx, scene, layout, outputMs, view, cursor)
   ctx.restore()
 }

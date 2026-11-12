@@ -368,7 +368,7 @@ describe('redaction', () => {
     for (const redactStyle of ['blur', 'pixelate'] as const) {
       const fake = fakeContext()
       const shot = { tag: 'shot' } as unknown as CanvasImageSource
-      const doc = { ...DEFAULT_DOC, redactions: [{ id: 'box', rect: { x: 200, y: 160, w: 360, h: 72 } }], redactStyle }
+      const doc = { ...DEFAULT_DOC, redactions: [{ id: 'box', rect: { x: 200, y: 160, w: 360, h: 72 }, time: null }], redactStyle }
       drawScene(fake.ctx, { source: { image: shot, width: 1600, height: 1000 }, doc, style })
       const [small] = fake.layers
       expect(small.argsAtCall['drawImage'].map((args) => args[0])).toEqual([shot])

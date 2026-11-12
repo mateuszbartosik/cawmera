@@ -196,7 +196,7 @@ export function drawBorder(ctx: Ctx, frame: Rect, radius: number, style: HouseSt
 
 const REDACT_BLOCK: Record<RedactStyle, number> = { blur: 18, pixelate: 12, solid: 1 }
 
-function drawRedaction(ctx: Ctx, source: SourceImage, layout: Layout, box: Rect, mode: RedactStyle) {
+export function drawRedaction(ctx: Ctx, source: SourceImage, layout: Layout, box: Rect, mode: RedactStyle) {
   const region = intersect(box, visibleSource(layout))
   if (!region || region.w < 1 || region.h < 1) return
   const dst = sourceRectToOutput(layout, region)

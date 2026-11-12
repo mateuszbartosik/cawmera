@@ -9,6 +9,7 @@ export interface RecordingEntry {
 }
 
 export const POSTER_OUTPUT_MS = 0
+export const POSTER_SOURCE_MS = 0
 
 const recordings = new Map<string, RecordingEntry>()
 const listeners = new Set<() => void>()
