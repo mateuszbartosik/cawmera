@@ -4,7 +4,7 @@ import type { MenuCommand } from '@shared/types'
 import { CropBar } from '../canvas/CropBar'
 import { SelectionBar } from '../canvas/SelectionBar'
 import { Workspace } from '../canvas/Workspace'
-import { isNarrow, PANEL_GAP, timelineShows, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
+import { isNarrow, PANEL_GAP, timelineEditable, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge } from '../platform/bridge'
@@ -126,7 +126,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.shiftKey && event.code === 'Digit2') return run('fit-shot')
   if (key === 'c' && s.doc.sourceId) return void (s.mode === 'crop' ? leaveCrop() : enterCrop())
   if (key === 'r') return void shuffleLook()
-  if (key === 's' && !event.shiftKey && timelineShows(s)) return void (event.preventDefault(), splitAtPlayhead())
+  if (key === 's' && !event.shiftKey && timelineEditable(s)) return void (event.preventDefault(), splitAtPlayhead())
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
   const escape = key === 'escape' ? escapeAction(s) : null
   if (escape === 'clear-boxes') return void store.set({ selection: [] })

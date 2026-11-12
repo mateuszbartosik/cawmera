@@ -201,15 +201,7 @@ function dotBackground(g: WorkspaceGeometry) {
 // ---------------------------------------------------------------------------
 // One shot, drawn with the same renderer as the export.
 
-const ShotCanvas = memo(function ShotCanvas({
-  doc,
-  style,
-  backdrop,
-  box,
-  active,
-  outlined,
-  faded
-}: {
+interface ShotCanvasProps {
   doc: Doc
   style: HouseStyle
   backdrop: ImageBitmap | null
@@ -217,7 +209,21 @@ const ShotCanvas = memo(function ShotCanvas({
   active: boolean
   outlined: boolean
   faded: boolean
-}) {
+}
+
+const sameShotCanvasProps = (a: ShotCanvasProps, b: ShotCanvasProps) =>
+  a.doc === b.doc &&
+  a.style === b.style &&
+  a.backdrop === b.backdrop &&
+  a.active === b.active &&
+  a.outlined === b.outlined &&
+  a.faded === b.faded &&
+  a.box.left === b.box.left &&
+  a.box.top === b.box.top &&
+  a.box.width === b.box.width &&
+  a.box.height === b.box.height
+
+const ShotCanvas = memo(function ShotCanvas({ doc, style, backdrop, box, active, outlined, faded }: ShotCanvasProps) {
   const ref = useRef<HTMLCanvasElement>(null)
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
   const backingWidth = Math.max(1, Math.min(4096, Math.round(box.width * dpr)))
@@ -266,7 +272,7 @@ const ShotCanvas = memo(function ShotCanvas({
       )}
     </div>
   )
-})
+}, sameShotCanvasProps)
 
 // ---------------------------------------------------------------------------
 
@@ -296,6 +302,9 @@ export function Workspace() {
   const video = cropSubject(state)
   const target = video && { width: video.width, height: video.height, bitmap: doc.recording ? cropFrame : (source?.bitmap ?? null) }
   const cropping = g.cropping && target !== null
+  /** The shot as it was on entering crop mode: the hidden canvas doesn't redraw for every drag move. */
+  const stillDoc = useRef<Doc | null>(null)
+  stillDoc.current = cropping && doc.recording ? (stillDoc.current ?? doc) : null
   const activeBox = toScreen(g, rects[active])
 
   const zoomArea = useZoomArea(doc, style, state.timelineSelection, state.playback.time)
@@ -758,13 +767,36 @@ export function Workspace() {
     })
   }
 
+  // Outlined shots: the picked ones (or what the box being drawn would pick); otherwise the active one.
+  const picked = new Set(marquee ? marquee.ids : state.shotSelection)
+  const highlighted = (id: string, index: number) => (marquee || picked.size > 0 ? picked.has(id) : shots.length > 1 && index === active)
+
+  // A recording's canvas owns its player, so while its crop mode shows the still, the shots stay mounted out of sight.
+  const keepShots = cropping && doc.recording !== null
+  const shotGeometry = keepShots ? workspaceGeometry({ ...state, mode: 'compose' }) : g
+  const shotLayer = (!cropping || keepShots) && (
+    <div className={keepShots ? 'invisible' : undefined} aria-hidden={keepShots || undefined}>
+      {shots.map((record, index) => (
+        <ShotCanvas
+          key={record.id}
+          doc={keepShots && record.id === state.activeId && stillDoc.current ? stillDoc.current : record.doc}
+          style={style}
+          backdrop={backdrop}
+          box={toScreen(shotGeometry, rects[index])}
+          active={index === active}
+          outlined={!keepShots && highlighted(record.id, index)}
+          faded={!keepShots && reorder?.id === record.id}
+        />
+      ))}
+    </div>
+  )
+
   let content: ReactNode
   if (cropping && target) {
     const box = toScreen(g, rect(0, 0, target.width, target.height))
     const sel = selectionFor(doc)!
     content = (
       <>
-        {doc.recording && <KeptShot doc={doc} style={style} backdrop={backdrop} box={toScreen(workspaceGeometry({ ...state, mode: 'compose' }), rects[active])} />}
         {target.bitmap && <CropImage bitmap={target.bitmap} box={box} label={doc.recording ? 'Frame at the playhead' : 'Whole screenshot'} />}
         <svg
           className="pointer-events-none absolute overflow-visible"
@@ -793,27 +825,11 @@ export function Workspace() {
         : null
     const deleteLabel =
       chosenItems.length > 1 ? `Delete ${chosenItems.length} boxes` : chosenItems[0]?.box.kind === 'spotlight' ? 'Remove spotlight' : 'Delete blur box'
-    // Outlined shots: the picked ones (or what the box being drawn would pick); otherwise the active one.
-    const picked = new Set(marquee ? marquee.ids : state.shotSelection)
-    const highlighted = (id: string, index: number) => (marquee || picked.size > 0 ? picked.has(id) : shots.length > 1 && index === active)
     const slotLeft = reorder ? g.originX + slotX(rects, reorder.slot) * g.k : 0
     const tallest = Math.max(...rects.map((r) => r.h)) * g.k
 
     content = (
       <>
-        {shots.map((record, index) => (
-          <ShotCanvas
-            key={record.id}
-            doc={record.doc}
-            style={style}
-            backdrop={backdrop}
-            box={toScreen(g, rects[index])}
-            active={index === active}
-            outlined={highlighted(record.id, index)}
-            faded={reorder?.id === record.id}
-          />
-        ))}
-
         {shots.map((record, index) => {
           const box = toScreen(g, rects[index])
           const isActive = index === active
@@ -980,19 +996,8 @@ export function Workspace() {
       onDoubleClick={onDoubleClick}
       onContextMenu={(event) => event.preventDefault()}
     >
+      {shotLayer}
       {content}
-    </div>
-  )
-}
-
-/**
- * Crop mode shows a still instead of the shot, but the shot's canvas stays mounted out of sight: it owns the recording's player,
- * and the playhead, the video and the pause all go with it.
- */
-function KeptShot({ doc, style, backdrop, box }: { doc: Doc; style: HouseStyle; backdrop: ImageBitmap | null; box: { left: number; top: number; width: number; height: number } }) {
-  return (
-    <div className="invisible" aria-hidden>
-      <ShotCanvas doc={doc} style={style} backdrop={backdrop} box={box} active outlined={false} faded={false} />
     </div>
   )
 }

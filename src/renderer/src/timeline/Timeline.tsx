@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowCounterClockwise, MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus, Scissors } from '@phosphor-icons/react'
 import { store, useApp } from '../app/store'
-import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
+import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineEditable, timelineShows } from '../canvas/view'
 import { rangeHasCut, rateOfRange, restoreSelection, splitAtPlayhead } from '../recording/edit-actions'
 import { togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording } from '../recording/registry'
@@ -9,7 +9,7 @@ import { takeViewFor } from '../recording/take-view'
 import { snapToOutput } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
 import { addZoomAt } from '../recording/zoom-actions'
-import { IconButton } from '../ui/controls'
+import { cn, IconButton } from '../ui/controls'
 import { ClipRow } from './ClipRow'
 import { HeaderButton } from './HeaderButton'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
@@ -58,6 +58,7 @@ function TimelinePanel() {
   const recordingId = useApp((s) => s.doc.sourceId)
   const crop = useApp((s) => s.doc.crop)
   const playing = useApp((s) => s.playback.playing)
+  const editable = useApp(timelineEditable)
   const selection = useApp((s) => s.timelineSelection)
   const storedView = useApp((s) => s.timelineView)
   const time = usePlayhead()
@@ -104,8 +105,13 @@ function TimelinePanel() {
   return (
     <section
       aria-label="Timeline"
+      aria-disabled={!editable || undefined}
+      inert={!editable}
       data-testid="timeline"
-      className="absolute flex flex-col rounded-xl border border-(--tc-line) bg-(--tc-panel) text-(--tc-fg) shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px] backdrop-saturate-150"
+      className={cn(
+        'absolute flex flex-col rounded-xl border border-(--tc-line) bg-(--tc-panel) text-(--tc-fg) shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px] backdrop-saturate-150',
+        !editable && 'pointer-events-none opacity-50'
+      )}
       style={{ left: PANEL_GAP, right: PANEL_WIDTH + PANEL_GAP * 2, bottom: PANEL_BOTTOM, height: TIMELINE_SPACE - PANEL_BOTTOM }}
     >
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-(--tc-divider) px-3">

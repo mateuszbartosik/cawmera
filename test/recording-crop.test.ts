@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
 import type { Piece } from '../src/renderer/src/recording/timemap'
 import type { Click, CursorSample, RecordingTrack } from '../src/renderer/src/recording/track'
@@ -8,7 +9,7 @@ vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { enterCrop, leaveCrop, resetAll } = await import('../src/renderer/src/app/actions')
-const { beginGesture, emptyDoc, endGesture, selectShot, addShot, store, undo, updateDoc } = await import('../src/renderer/src/app/store')
+const { beginGesture, emptyDoc, endGesture, selectShot, addShot, registerSource, store, undo, updateDoc } = await import('../src/renderer/src/app/store')
 const { currentCropFrame, drawnRecordingCrop, keepsDrawnCrop, RECORDING_CROP_MIN_PX, setCropFrame, settleRecordingCrop } = await import(
   '../src/renderer/src/recording/crop'
 )
@@ -16,6 +17,8 @@ const { attachPlayer } = await import('../src/renderer/src/recording/playback')
 const { aimedArea } = await import('../src/renderer/src/recording/zoom-area')
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
+const { recordingScene } = await import('../src/renderer/src/recording/scene')
+const { DEFAULT_HOUSE_STYLE } = await import('../src/renderer/src/app/house-style')
 const { takeViewFor } = await import('../src/renderer/src/recording/take-view')
 const { wholeTake } = await import('../src/renderer/src/recording/timemap')
 
@@ -55,7 +58,7 @@ const piece = (start: number, end: number, cut = false): Piece => ({ start, end,
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 function fakePlayer(frame: ImageBitmap | null) {
-  const player = { pause: vi.fn(), grabFrame: vi.fn(async () => frame) }
+  const player = { pause: vi.fn(), grabFrame: vi.fn(async (): Promise<ImageBitmap | null> => frame) }
   attachPlayer(player as never)
   return player
 }
@@ -70,6 +73,7 @@ function openTake() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   endGesture(beginGesture())
   setCropFrame(null)
   attachPlayer(null)
@@ -77,16 +81,42 @@ beforeEach(() => {
 })
 
 describe('crop mode on a recording', () => {
-  it('pauses playback and shows the frame at the playhead', async () => {
+  it('pauses playback, then opens on the frame at the playhead', async () => {
     const frame = bitmap()
     const player = fakePlayer(frame)
     store.set({ playback: { playing: true, time: 0 } })
     enterCrop()
-    expect(store.get().mode).toBe('crop')
     expect(player.pause).toHaveBeenCalled()
     expect(store.get().playback.playing).toBe(false)
+    expect(store.get().mode).toBe('compose')
     await flush()
+    expect(store.get().mode).toBe('crop')
     expect(currentCropFrame()).toBe(frame)
+  })
+
+  it('stays out of crop mode, and says so, when no frame can be grabbed', async () => {
+    fakePlayer(null)
+    enterCrop()
+    await flush()
+    expect(store.get().mode).toBe('compose')
+    expect(toast.error).toHaveBeenCalledWith('Couldn’t grab this frame. Try again.', expect.anything())
+  })
+
+  it('stays out of crop mode when grabbing the frame fails', async () => {
+    const player = fakePlayer(null)
+    player.grabFrame.mockRejectedValueOnce(new Error('Decoder lost'))
+    enterCrop()
+    await flush()
+    expect(store.get().mode).toBe('compose')
+    expect(toast.error).toHaveBeenCalledWith('Couldn’t grab this frame. Try again.', { description: 'Decoder lost' })
+  })
+
+  it('does nothing for a recording whose take is unknown', () => {
+    updateDoc({ sourceId: 'unknown-take' }, { history: false })
+    const player = fakePlayer(bitmap())
+    enterCrop()
+    expect(store.get().mode).toBe('compose')
+    expect(player.grabFrame).not.toHaveBeenCalled()
   })
 
   it('closes the frame on leaving crop mode', async () => {
@@ -113,6 +143,20 @@ describe('crop mode on a recording', () => {
     expect(currentCropFrame()).toBeNull()
   })
 
+  it('closes a frame that arrives after the shot switched, without opening crop mode', async () => {
+    const late = bitmap()
+    fakePlayer(late)
+    const recordingShot = store.get().activeId
+    addShot()
+    selectShot(recordingShot)
+    enterCrop()
+    selectShot(store.get().shots.find((record) => record.id !== recordingShot)!.id)
+    await flush()
+    expect(late.close).toHaveBeenCalledTimes(1)
+    expect(store.get().mode).toBe('compose')
+    expect(currentCropFrame()).toBeNull()
+  })
+
   it('closes the frame it replaces', () => {
     const first = bitmap()
     const second = bitmap()
@@ -125,20 +169,11 @@ describe('crop mode on a recording', () => {
     expect(second.close).not.toHaveBeenCalled()
   })
 
-  it('closes a frame that arrives after crop mode was left', async () => {
-    const late = bitmap()
-    fakePlayer(late)
-    enterCrop()
-    leaveCrop()
-    await flush()
-    expect(late.close).toHaveBeenCalledTimes(1)
-    expect(currentCropFrame()).toBeNull()
-  })
-
-  it('still opens crop mode on a screenshot, and not on an empty shot', () => {
+  it('still opens crop mode at once on a screenshot, and not on an empty shot', () => {
     updateDoc({ ...emptyDoc() }, { history: false })
     enterCrop()
     expect(store.get().mode).toBe('compose')
+    registerSource({ id: 'screenshot', bitmap: bitmap(), width: 800, height: 600, name: 'Shot', origin: 'file', detected: 1 })
     updateDoc({ ...emptyDoc(), sourceId: 'screenshot' }, { history: false })
     enterCrop()
     expect(store.get().mode).toBe('crop')
@@ -219,5 +254,12 @@ describe('a crop on a recording', () => {
     const edit: ZoomEdit = { id: 'z', start: 1000, end: 3000, depth: 2, aim: 'manual', focus: { x: 1640, y: 960 } }
     const view = takeViewFor(clicked, { ...settings, zooms: [edit] }, frameCrop)
     expect(aimedArea(edit, [], view, 1500).area).toEqual({ x: 320, y: 180, w: 640, h: 360 })
+  })
+
+  it('is what the export draws: the scene takes the shot’s crop', () => {
+    const scene = recordingScene(clicked, { ...DEFAULT_DOC, sourceId: clicked.id, crop: frameCrop, recording: settings }, DEFAULT_HOUSE_STYLE, null, {} as CanvasImageSource)!
+    expect(scene.view.crop).toEqual(frameCrop)
+    expect(scene.view.frame).toEqual({ width: 1280, height: 720 })
+    expect(scene.videoSize).toEqual(video)
   })
 })

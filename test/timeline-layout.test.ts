@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
-import { store } from '../src/renderer/src/app/store'
-import { TIMELINE_SPACE, timelineShows, workspaceGeometry } from '../src/renderer/src/canvas/view'
+import { store, type AppState } from '../src/renderer/src/app/store'
+import { deleteAction, escapeAction } from '../src/renderer/src/app/selection-keys'
+import { TIMELINE_SPACE, timelineEditable, timelineShows, workspaceGeometry } from '../src/renderer/src/canvas/view'
 import { registerRecording } from '../src/renderer/src/recording/registry'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
@@ -51,5 +52,22 @@ describe('crop mode on a recording', () => {
 
   it('does not crop a recording whose take is unknown', () => {
     expect(workspaceGeometry({ ...show({ ...recordingDoc, sourceId: 'gone' }, 1200), mode: 'crop' }).cropping).toBe(false)
+  })
+})
+
+describe('the timeline in crop mode', () => {
+  it('is editable only on a recording in compose mode', () => {
+    expect(timelineEditable({ ...show(recordingDoc, 1200), mode: 'compose' })).toBe(true)
+    expect(timelineEditable({ ...show(recordingDoc, 1200), mode: 'crop' })).toBe(false)
+    expect(timelineEditable({ ...show(screenshotDoc, 1200), mode: 'compose' })).toBe(false)
+    expect(timelineEditable({ ...show(recordingDoc, 700), mode: 'compose' })).toBe(false)
+  })
+
+  it('leaves Delete without a timeline edit', () => {
+    const selection: Pick<AppState, 'selection' | 'shotSelection' | 'timelineSelection'> = { selection: [], shotSelection: [], timelineSelection: { kind: 'range', start: 0, end: 500 } }
+    expect(deleteAction({ ...selection, mode: 'compose' })).toBe('cut-range')
+    expect(deleteAction({ ...selection, mode: 'crop' })).toBeNull()
+    expect(deleteAction({ ...selection, timelineSelection: { kind: 'zoom', id: 'z' }, mode: 'crop' })).toBeNull()
+    expect(escapeAction(selection)).toBe('clear-timeline')
   })
 })

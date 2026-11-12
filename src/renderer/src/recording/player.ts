@@ -62,8 +62,22 @@ export class RecordingPlayer {
 
   /** A copy of the frame on screen, or null before the first frame has loaded. */
   async grabFrame(): Promise<ImageBitmap | null> {
+    if (this.video.seeking) await this.untilSeekSettles()
     if (this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null
     return createImageBitmap(this.video)
+  }
+
+  private untilSeekSettles(): Promise<void> {
+    const { video } = this
+    return new Promise((resolve) => {
+      const settle = () => {
+        video.removeEventListener('seeked', settle)
+        video.removeEventListener('error', settle)
+        resolve()
+      }
+      video.addEventListener('seeked', settle)
+      video.addEventListener('error', settle)
+    })
   }
 
   seek(sourceMs: number) {

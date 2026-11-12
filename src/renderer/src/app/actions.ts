@@ -42,7 +42,7 @@ import {
 import { layoutFor, renderImage, type Scene } from '../render/compose'
 import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
-import { revealActive } from '../canvas/view'
+import { cropSubject, revealActive } from '../canvas/view'
 import { setCropFrame } from '../recording/crop'
 import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
 import type { RecordingDoc } from '../recording/settings'
@@ -414,21 +414,29 @@ export async function copyImage() {
 
 export function enterCrop() {
   const { doc, activeId } = store.get()
-  if (!doc.sourceId) return
-  store.set({ mode: 'crop', selection: [], shotSelection: [], cropView: FIT_ALL })
-  if (doc.recording) void showPlayheadFrameWhileCropping(activeId)
+  if (!doc.sourceId || !cropSubject({ doc })) return
+  if (doc.recording) void enterCropOnPlayheadFrame(activeId)
+  else startCropMode()
 }
 
-async function showPlayheadFrameWhileCropping(shotId: string) {
+function startCropMode() {
+  store.set({ mode: 'crop', selection: [], shotSelection: [], cropView: FIT_ALL })
+}
+
+/** A recording is cropped on the frame at the playhead, so crop mode opens only once the frame is in hand. */
+async function enterCropOnPlayheadFrame(shotId: string) {
   pausePlayback()
+  let frame: ImageBitmap | null = null
+  let failure: string | undefined
   try {
-    const frame = await grabPlayheadFrame()
-    const { mode, activeId } = store.get()
-    if (mode === 'crop' && activeId === shotId) setCropFrame(frame)
-    else frame?.close()
+    frame = await grabPlayheadFrame()
   } catch (error) {
-    toast.error('The frame could not be shown', { description: error instanceof Error ? error.message : String(error) })
+    failure = error instanceof Error ? error.message : String(error)
   }
+  if (store.get().activeId !== shotId) return frame?.close()
+  if (!frame) return void toast.error('Couldn’t grab this frame. Try again.', { description: failure })
+  setCropFrame(frame)
+  startCropMode()
 }
 
 export function leaveCrop() {

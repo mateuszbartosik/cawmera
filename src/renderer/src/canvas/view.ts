@@ -99,6 +99,11 @@ export function timelineShows(s: Pick<AppState, 'viewport' | 'doc'>): boolean {
   return !isNarrow(s) && s.doc.recording !== null
 }
 
+/** The timeline edits the take only outside crop mode, where the canvas shows the frame the crop is drawn on. */
+export function timelineEditable(s: Pick<AppState, 'viewport' | 'doc' | 'mode'>): boolean {
+  return timelineShows(s) && s.mode === 'compose'
+}
+
 function areaOf(s: AppState, cropping: boolean) {
   const narrow = isNarrow(s)
   const right = narrow ? 0 : PANEL_WIDTH + PANEL_GAP * 2
