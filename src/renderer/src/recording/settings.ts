@@ -40,6 +40,8 @@ export const DEFAULT_RECORDING: Omit<RecordingDoc, 'trim' | 'pieces' | 'zooms'> 
   fps: 60
 }
 
+export const CURSOR_SIZE_RANGE = { min: 0.5, max: 3 }
+
 export const RECORDING_SIZE: Size = { width: 1920, height: 1080 }
 
 export function recordingDocFor(track: RecordingTrack, previous: RecordingDoc | null, stopClick: Click | null = null): RecordingDoc {

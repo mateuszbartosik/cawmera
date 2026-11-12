@@ -8,7 +8,7 @@ import type { ClickEffect } from '../recording/effects'
 import type { CursorLook } from '../recording/cursor-art'
 import type { ZoomSpeed } from '../recording/camera'
 import { getRecording } from '../recording/registry'
-import { defaultsFor, differsFromDefault, type RecordingDoc } from '../recording/settings'
+import { CURSOR_SIZE_RANGE, defaultsFor, differsFromDefault, type RecordingDoc } from '../recording/settings'
 import { takeViewFor } from '../recording/take-view'
 import { autoAimAvailable, deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
 import { clicksCovered, ZOOM_DEPTH_RANGE, type ZoomAim } from '../recording/zoom-edits'
@@ -165,8 +165,8 @@ export function CursorSection() {
       <Slider
         label="Size"
         value={recording.cursorSize}
-        min={0.5}
-        max={3}
+        min={CURSOR_SIZE_RANGE.min}
+        max={CURSOR_SIZE_RANGE.max}
         step={0.1}
         format={times}
         onChange={(cursorSize) => drag.change({ cursorSize })}

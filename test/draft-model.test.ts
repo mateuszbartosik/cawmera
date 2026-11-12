@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_DOC, type Doc, type Redaction } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE, type HouseStyle } from '../src/renderer/src/app/house-style'
 import type { ShotRecord } from '../src/renderer/src/app/store'
-import { buildDraftManifest, DRAFT_FORMAT, DRAFT_VERSION, DraftError, parseDraftManifest } from '../src/renderer/src/drafts/model'
+import { DRAFT_KEY } from '@shared/draft-key'
+import { buildDraftManifest, DRAFT_FORMAT, DRAFT_LIMITS, DRAFT_VERSION, DraftError, parseDraftManifest } from '../src/renderer/src/drafts/model'
 import { newBoxTime } from '../src/renderer/src/recording/blur-boxes'
 import { normalizePieces } from '../src/renderer/src/recording/pieces'
-import { DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
+import { CURSOR_SIZE_RANGE, DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
 import { wholeTake, type Piece } from '../src/renderer/src/recording/timemap'
 import { parseTrack, serializeTrack, type RecordingTrack } from '../src/renderer/src/recording/track'
 import { ZOOM_DEPTH_RANGE, normalizeZoomEdits, type ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
@@ -47,8 +48,8 @@ const shotBox: Redaction = { id: 'r2', rect: { x: 5, y: 5, w: 50, h: 50 }, time:
 const record = (id: string, doc: Doc): ShotRecord => ({ id, doc, past: [], future: [], savedDoc: null })
 const shots: ShotRecord[] = [
   record('s0', { ...DEFAULT_DOC, angle: 100 }),
-  record('s1', { ...DEFAULT_DOC, sourceId: 'img-1', capturedAt: 2, angle: 200, redactions: [shotBox], crop: { x: 0, y: 0, w: 400, h: 300 }, fileName: 'billing' }),
-  record('s2', { ...DEFAULT_DOC, sourceId: 'take-1', size: { width: 1920, height: 1080 }, redactions: [blurBox], crop: { x: 100, y: 50, w: 800, h: 600 }, recording: editedRecording })
+  record('s1', { ...DEFAULT_DOC, sourceId: 'img1', capturedAt: 2, angle: 200, redactions: [shotBox], crop: { x: 0, y: 0, w: 400, h: 300 }, fileName: 'billing' }),
+  record('s2', { ...DEFAULT_DOC, sourceId: 'take1', size: { width: 1920, height: 1080 }, redactions: [blurBox], crop: { x: 100, y: 50, w: 800, h: 600 }, recording: editedRecording })
 ]
 const imageSize = { width: 800, height: 600 }
 
@@ -70,7 +71,7 @@ function manifestWith(doc: Record<string, unknown>): string {
 }
 
 const parsedRecording = (doc: Record<string, unknown>) => {
-  const key = recordingOnly().keys.get('take-1')!
+  const key = recordingOnly().keys.get('take1')!
   return parseDraftManifest(manifestWith(doc), new Map([[key, track]])).shots[0].doc
 }
 
@@ -124,11 +125,11 @@ describe('normalizeZoomEdits', () => {
 describe('draft manifest', () => {
   it('round-trips a canvas with an empty shot, a screenshot and an edited recording', () => {
     const { manifest, keys } = buildDraftManifest(shots, shots[2].id, style, '0.8.0', (r) => r.id)
-    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take-1')!, track]]), new Map([[keys.get('img-1')!, imageSize]]))
+    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take1')!, track]]), new Map([[keys.get('img1')!, imageSize]]))
     expect(parsed.shots.map((s) => s.kind)).toEqual(['empty', 'screenshot', 'recording'])
     expect(parsed.shots[0].doc).toEqual(shots[0].doc)
-    expect(parsed.shots[1].doc).toEqual({ ...shots[1].doc, sourceId: keys.get('img-1') })
-    expect(parsed.shots[2].doc).toEqual({ ...shots[2].doc, sourceId: keys.get('take-1') })
+    expect(parsed.shots[1].doc).toEqual({ ...shots[1].doc, sourceId: keys.get('img1') })
+    expect(parsed.shots[2].doc).toEqual({ ...shots[2].doc, sourceId: keys.get('take1') })
     expect(parsed.style).toEqual(style)
     expect(parsed.active).toBe(2)
   })
@@ -136,7 +137,7 @@ describe('draft manifest', () => {
   it('writes the format, version, app version and a key per source', () => {
     const { manifest, keys } = buildDraftManifest(shots, 's1', style, '0.8.0', (r) => `name ${r.id}`)
     expect(JSON.parse(manifest)).toMatchObject({ format: DRAFT_FORMAT, version: DRAFT_VERSION, savedBy: '0.8.0', active: 1 })
-    expect([...keys.keys()].sort()).toEqual(['img-1', 'take-1'])
+    expect([...keys.keys()].sort()).toEqual(['img1', 'take1'])
     expect(JSON.parse(manifest).shots[2]).toMatchObject({ kind: 'recording', name: 'name s2' })
   })
 
@@ -144,7 +145,7 @@ describe('draft manifest', () => {
     const copy = record('s3', shots[2].doc)
     const { keys, manifest } = buildDraftManifest([shots[2], copy], 's3', style, '0.8.0', (r) => r.id)
     expect(keys.size).toBe(1)
-    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take-1')!, track]]))
+    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take1')!, track]]))
     expect(parsed.shots.map((s) => s.kind)).toEqual(['recording', 'recording'])
     expect(parsed.active).toBe(1)
   })
@@ -185,8 +186,8 @@ describe('draft manifest', () => {
 
   it('keeps the active shot inside the canvas', () => {
     const { manifest, keys } = buildDraftManifest(shots, 's2', style, '0.8.0', (r) => r.id)
-    const tracks = new Map([[keys.get('take-1')!, track]])
-    const sizes = new Map([[keys.get('img-1')!, imageSize]])
+    const tracks = new Map([[keys.get('take1')!, track]])
+    const sizes = new Map([[keys.get('img1')!, imageSize]])
     const load = (active: unknown) => parseDraftManifest(JSON.stringify({ ...JSON.parse(manifest), active }), tracks, sizes).active
     expect([load(99), load(-3), load('x'), load(1.5)]).toEqual([0, 0, 0, 0])
   })
@@ -269,16 +270,92 @@ describe('draft manifest', () => {
     tampered.shots[0].doc.redactions = [{ id: 'r', rect: { x: 700, y: 500, w: 900, h: 900 }, time: { start: 1, end: 2 } }]
     tampered.shots[0].doc.crop = { x: -5, y: -5, w: 5000, h: 5000 }
     tampered.shots[0].doc.spotlight = { on: true, rect: { x: 100, y: 100, w: 9999, h: 50 }, dim: 0.3, outline: false }
-    const doc = parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.get('img-1')!, imageSize]])).shots[0].doc
+    const doc = parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.get('img1')!, imageSize]])).shots[0].doc
     expect(doc.redactions).toEqual([{ id: 'r', rect: { x: 700, y: 500, w: 100, h: 100 }, time: null }])
-    expect(doc.crop).toEqual({ x: 0, y: 0, w: 800, h: 600 })
+    expect(doc.crop).toBeNull()
     expect(doc.spotlight).toEqual({ on: true, rect: { x: 100, y: 100, w: 700, h: 50 }, dim: 0.3, outline: false })
     expect(doc.recording).toBeNull()
   })
 
-  it('never throws anything but a draft error', () => {
+  it('builds keys that fit the archive and stay apart when a screenshot and a take share an id', () => {
+    const same = [record('a', { ...DEFAULT_DOC, sourceId: 'same', capturedAt: 1 }), record('b', { ...DEFAULT_DOC, sourceId: 'same', recording: editedRecording })]
+    const { manifest } = buildDraftManifest([...shots, ...same], 's0', style, '0.8.0', (r) => r.id)
+    const all = [...new Set<string>(JSON.parse(manifest).shots.flatMap((shot: { key?: string }) => (shot.key ? [shot.key] : [])))]
+    expect(all.length).toBe(4)
+    for (const key of all) expect(key).toMatch(DRAFT_KEY)
+  })
+
+  it('refuses keys the archive would not accept', () => {
+    for (const key of ['Take1', 'take-1', '', 'a'.repeat(17), '..', 'a/b']) {
+      const text = JSON.stringify({ format: DRAFT_FORMAT, version: 1, shots: [{ kind: 'recording', key, doc: {} }] })
+      expect(failure(text)).toBe('damaged')
+    }
+  })
+
+  it('shares the cursor size range with the panel', () => expect(parsedRecording({ recording: { cursorSize: -4 } }).recording!.cursorSize).toBe(CURSOR_SIZE_RANGE.min))
+
+  it('settles a screenshot crop to whole pixels, or drops it when it is the whole image', () => {
+    const { manifest, keys } = buildDraftManifest([shots[1]], 's1', style, '0.8.0', (r) => r.id)
+    const crop = (rect: unknown) => {
+      const tampered = JSON.parse(manifest)
+      tampered.shots[0].doc.crop = rect
+      return parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.get('img1')!, imageSize]])).shots[0].doc.crop
+    }
+    expect(crop({ x: 10.4, y: 20.6, w: 100.2, h: 50.5 })).toEqual({ x: 10, y: 21, w: 101, h: 50 })
+    expect(crop({ x: -3, y: 0, w: 900, h: 700 })).toBeNull()
+  })
+
+  it('refuses a manifest with more shots, boxes, zooms or pieces than Cawmera could make', () => {
+    const many = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `x${i}`, rect: { x: 0, y: 0, w: 5, h: 5 }, time: { start: 600, end: 700 } }))
+    const key = recordingOnly().keys.get('take1')!
+    const read = (text: string) => { try { parseDraftManifest(text, new Map([[key, track]])); return null } catch (e) { return (e as DraftError).reason } }
+    expect(read(manifestWith({ redactions: many(DRAFT_LIMITS.redactions) }))).toBeNull()
+    expect(read(manifestWith({ redactions: many(DRAFT_LIMITS.redactions + 1) }))).toBe('damaged')
+    expect(read(manifestWith({ recording: { zooms: Array(DRAFT_LIMITS.zooms + 1).fill(0) } }))).toBe('damaged')
+    expect(read(manifestWith({ recording: { pieces: Array(DRAFT_LIMITS.pieces + 1).fill(0) } }))).toBe('damaged')
+    const shotList = Array.from({ length: DRAFT_LIMITS.shots + 1 }, () => ({ kind: 'empty', doc: {} }))
+    expect(failure(JSON.stringify({ format: DRAFT_FORMAT, version: 1, shots: shotList }))).toBe('damaged')
+  })
+
+  it('reads hostile input safely: it parses or throws only a draft error', () => {
     const base = { format: DRAFT_FORMAT, version: 1 }
-    const odd = [{ kind: 'empty', doc: { redactions: 'x', spotlight: [], size: [] } }, { kind: 'empty', doc: 5 }]
-    for (const shot of odd) expect(failure(JSON.stringify({ ...base, shots: [shot] }))).toBeNull()
+    const nastyRecording = {
+      trim: { start: 1e308, end: -1e308 },
+      pieces: [{ start: -Infinity, end: 1e308, rate: 2 }, { start: 0, end: 1e300 }],
+      zooms: [{ id: '__proto__', start: 1e9, end: 2e9, depth: 1e308, aim: 'auto', focus: { x: 1e308, y: -1e308 } }],
+      cursorSize: 1e308,
+      constructor: { prototype: { polluted: true } }
+    }
+    const nastyDoc = {
+      __proto__: { polluted: true },
+      constructor: { prototype: { polluted: true } },
+      size: { width: 1e308, height: -1e308 },
+      angle: 1e308,
+      crop: { x: 1e308, y: 1e308, w: 1e308, h: 1e308 },
+      redactions: [{ id: 'constructor', rect: { x: -1e308, y: 0, w: 1e308, h: 1e308 }, time: { start: -1e308, end: 1e308 } }, null, 5, { id: '__proto__' }],
+      spotlight: { on: true, rect: { x: 1e308, y: 0, w: Infinity, h: 1 }, dim: Infinity },
+      recording: nastyRecording
+    }
+    const shotsInput = [
+      { kind: 'recording', key: 'take1', doc: nastyDoc, name: 5 },
+      { kind: 'screenshot', key: 'img1', doc: nastyDoc, source: { name: {}, origin: 'elsewhere', detected: 'wide' } },
+      { kind: 'empty', doc: nastyDoc }
+    ]
+    const text = JSON.stringify({ ...base, shots: shotsInput })
+    const parsed = parseDraftManifest(text, new Map([['take1', track]]), new Map([['img1', imageSize]]))
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    for (const shot of parsed.shots) {
+      expect(Number.isFinite(shot.doc.size.width) && Number.isFinite(shot.doc.angle)).toBe(true)
+      expect(shot.doc.redactions.every((r) => Object.values(r.rect).every(Number.isFinite))).toBe(true)
+    }
+    const screenshot = parsed.shots[1]
+    expect(screenshot.kind === 'screenshot' && screenshot.source.detected).toBe(1)
+    const recording = parsed.shots[0].doc.recording!
+    expect(Object.values(recording.trim).every(Number.isFinite)).toBe(true)
+    expect(Number.isFinite(recording.cursorSize)).toBe(true)
+    for (const text of ['{"format":"cawmera-draft","version":1,"shots":[{"kind":"empty","doc":{"__proto__":[]}}],"__proto__":1}', '{"format":"cawmera-draft","version":1,"shots":{"length":3}}']) {
+      const outcome = failure(text)
+      expect(outcome === null || outcome === 'damaged').toBe(true)
+    }
   })
 })

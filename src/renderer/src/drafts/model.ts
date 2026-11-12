@@ -14,15 +14,17 @@ import {
 } from '../app/doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from '../app/house-style'
 import { clampSide, evenSize } from '../app/size'
+import { DRAFT_KEY } from '@shared/draft-key'
 import { getSource, type ShotRecord, type SourceEntry } from '../app/store'
 import { clamp, clipTo, type Rect, type Size } from '../render/geometry'
+import { settleSelection } from '../render/layout'
 import { settledBoxTime } from '../recording/blur-boxes'
 import { settleRecordingCrop } from '../recording/crop'
 import type { CursorLook } from '../recording/cursor-art'
 import type { ClickEffect } from '../recording/effects'
 import type { ZoomSpeed } from '../recording/camera'
 import { normalizePieces } from '../recording/pieces'
-import { DEFAULT_RECORDING, type RecordingDoc, type RecordingFps } from '../recording/settings'
+import { CURSOR_SIZE_RANGE, DEFAULT_RECORDING, type RecordingDoc, type RecordingFps } from '../recording/settings'
 import { clampTrim, type Trim } from '../recording/trim'
 import type { RecordingTrack } from '../recording/track'
 import { normalizeZoomEdits } from '../recording/zoom-edits'
@@ -58,9 +60,9 @@ const LOOKS: CursorLook[] = ['light', 'dark']
 const CLICK_EFFECTS: ClickEffect[] = ['off', 'ring', 'ripple']
 const ZOOM_SPEEDS: ZoomSpeed[] = ['calm', 'quick']
 const FPS_CHOICES: RecordingFps[] = [30, 60]
-const CURSOR_SIZE_RANGE = { min: 0.5, max: 3 }
+/** Far above what Cawmera makes itself; a manifest past them is damaged. */
+export const DRAFT_LIMITS = { shots: 500, redactions: 2000, zooms: 1000, pieces: 5000 }
 const MAX_NAME_LENGTH = 200
-const KEY = /^[A-Za-z0-9_-]{1,64}$/
 const HEX = /^#[0-9a-f]{6}$/i
 
 type Fields = Record<string, unknown>
@@ -71,6 +73,10 @@ const oneOf = <T>(choices: readonly T[], value: unknown, fallback: T): T => (cho
 const boolean = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback)
 const text = (value: unknown, fallback: string) => (typeof value === 'string' ? value.slice(0, MAX_NAME_LENGTH) : fallback)
 const numberIn = (value: unknown, min: number, max: number, fallback: number) => (isFiniteNumber(value) ? clamp(value, min, max) : fallback)
+
+function withinLimit(value: unknown, limit: number): void {
+  if (Array.isArray(value) && value.length > limit) throw new DraftError('damaged')
+}
 
 function rectOf(value: unknown): Rect | null {
   const { x, y, w, h } = fieldsOf(value)
@@ -96,6 +102,8 @@ function trimOf(value: unknown, durationMs: number): Trim {
 
 function recordingDocFrom(value: unknown, track: RecordingTrack): RecordingDoc {
   const raw = fieldsOf(value)
+  withinLimit(raw.pieces, DRAFT_LIMITS.pieces)
+  withinLimit(raw.zooms, DRAFT_LIMITS.zooms)
   const trim = trimOf(raw.trim, track.durationMs)
   const defaults = DEFAULT_RECORDING
   return {
@@ -126,6 +134,7 @@ function spotlightFrom(value: unknown, bounds: Size | null): Spotlight {
 }
 
 function redactionsFrom(value: unknown, bounds: Size | null, recording: { doc: RecordingDoc; track: RecordingTrack } | null): Redaction[] {
+  withinLimit(value, DRAFT_LIMITS.redactions)
   if (!bounds || !Array.isArray(value)) return []
   const ids = new Set<string>()
   const redactions: Redaction[] = []
@@ -148,7 +157,9 @@ function redactionsFrom(value: unknown, bounds: Size | null, recording: { doc: R
 function cropFrom(value: unknown, bounds: Size | null, isRecording: boolean): Rect | null {
   const rect = rectOf(value)
   if (!rect || !bounds) return null
-  return isRecording ? settleRecordingCrop(rect, bounds) : rectWithin(rect, bounds)
+  if (isRecording) return settleRecordingCrop(rect, bounds)
+  const clipped = rectWithin(rect, bounds)
+  return clipped && settleSelection(clipped, bounds)
 }
 
 interface Source { key: string | null; bounds: Size | null; track: RecordingTrack | null }
@@ -182,7 +193,7 @@ function docFrom(value: unknown, { key, bounds, track }: Source): Doc {
 }
 
 function keyOf(value: unknown): string {
-  if (typeof value !== 'string' || !KEY.test(value)) throw new DraftError('damaged')
+  if (typeof value !== 'string' || !DRAFT_KEY.test(value)) throw new DraftError('damaged')
   return value
 }
 
@@ -223,7 +234,7 @@ function manifestFields(manifest: string): Fields {
 export function parseDraftManifest(manifest: string, tracks: Map<string, RecordingTrack>, sizes: Map<string, Size> = new Map()): DraftContents {
   try {
     const fields = manifestFields(manifest)
-    if (!Array.isArray(fields.shots) || fields.shots.length === 0) throw new DraftError('damaged')
+    if (!Array.isArray(fields.shots) || fields.shots.length === 0 || fields.shots.length > DRAFT_LIMITS.shots) throw new DraftError('damaged')
     const kindsByKey = new Map<string, string>()
     const shots = fields.shots.map((shot) => shotFrom(shot, tracks, sizes, kindsByKey))
     const active = Number.isInteger(fields.active) && (fields.active as number) >= 0 && (fields.active as number) < shots.length ? (fields.active as number) : 0
@@ -234,22 +245,25 @@ export function parseDraftManifest(manifest: string, tracks: Map<string, Recordi
   }
 }
 
-function keyFor(keys: Map<string, string>, sourceId: string, prefix: string): string {
+type KeyKind = 'image' | 'take'
+
+function keyFor(keysByKind: Record<KeyKind, Map<string, string>>, kind: KeyKind, sourceId: string): string {
+  const keys = keysByKind[kind]
   const existing = keys.get(sourceId)
   if (existing) return existing
-  const key = `${prefix}-${[...keys.values()].filter((other) => other.startsWith(`${prefix}-`)).length + 1}`
+  const key = `${kind}${keys.size + 1}`
   keys.set(sourceId, key)
   return key
 }
 
-function shotEntry(record: ShotRecord, keys: Map<string, string>, nameOf: (record: ShotRecord) => string): object {
+function shotEntry(record: ShotRecord, keys: Record<KeyKind, Map<string, string>>, nameOf: (record: ShotRecord) => string): object {
   const { doc } = record
   if (doc.sourceId === null) return { kind: 'empty', doc }
   if (doc.recording) {
-    const key = keyFor(keys, doc.sourceId, 'take')
+    const key = keyFor(keys, 'take', doc.sourceId)
     return { kind: 'recording', key, name: nameOf(record), doc: { ...doc, sourceId: key } }
   }
-  const key = keyFor(keys, doc.sourceId, 'image')
+  const key = keyFor(keys, 'image', doc.sourceId)
   const source = getSource(doc.sourceId)
   return {
     kind: 'screenshot',
@@ -267,8 +281,9 @@ export function buildDraftManifest(
   appVersion: string,
   nameOf: (record: ShotRecord) => string
 ): { manifest: string; keys: Map<string, string> } {
-  const keys = new Map<string, string>()
-  const entries = shots.map((record) => shotEntry(record, keys, nameOf))
+  const keysByKind: Record<KeyKind, Map<string, string>> = { image: new Map(), take: new Map() }
+  const entries = shots.map((record) => shotEntry(record, keysByKind, nameOf))
+  const keys = new Map([...keysByKind.image, ...keysByKind.take])
   const manifest = JSON.stringify({
     format: DRAFT_FORMAT,
     version: DRAFT_VERSION,
