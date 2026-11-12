@@ -99,3 +99,21 @@ describe('validPieces', () => {
     expect(validPieces([piece(0, Number.NaN)], 10_000)).toEqual(wholeTake(10_000))
   })
 })
+
+describe('pieces from unordered or damaged input', () => {
+  const unordered = [piece(6000, 10_000, 2), piece(0, 6000)]
+
+  it('keeps the take length from the furthest end', () => {
+    expect(validPieces(unordered, 10_000)).toEqual([piece(0, 6000), piece(6000, 10_000, 2)])
+    expect(splitAt(unordered, 3000)).toEqual([piece(0, 3000), piece(3000, 6000), piece(6000, 10_000, 2)])
+    expect(cutRange(unordered, { start: 8000, end: 10_000 }, trim)).toEqual([piece(0, 6000), piece(6000, 8000, 2), piece(8000, 10_000, 2, true)])
+  })
+
+  it('ignores a last end that is not a number', () => {
+    expect(splitAt([piece(0, 6000), piece(6000, 10_000), piece(10_000, Number.NaN)], 3000)).toEqual([piece(0, 3000), piece(3000, 6000), piece(6000, 10_000)])
+  })
+
+  it('finds no piece in an empty list without throwing', () => {
+    expect(pieceAt([], 100)).toEqual(wholeTake(0)[0])
+  })
+})

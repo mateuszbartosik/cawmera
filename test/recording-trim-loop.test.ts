@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { timeMapOf, wholeTake, type Piece, type Rate } from '../src/renderer/src/recording/timemap'
-import { clampToTrim, playbackStart, rateAt, stepAt } from '../src/renderer/src/recording/trim-loop'
+import { clampToTrim, frameMsOf, lastKeptFrameTime, playbackStart, rateAt, stepAt } from '../src/renderer/src/recording/trim-loop'
 
 const piece = (start: number, end: number, rate: Rate = 1, cut = false): Piece => ({ start, end, rate, cut })
 const trim = { start: 0, end: 10_000 }
@@ -50,5 +50,53 @@ describe('trim loop', () => {
     expect(clampToTrim(500, { start: 1000, end: 9000 })).toBe(1000)
     expect(clampToTrim(5000, { start: 1000, end: 9000 })).toBe(5000)
     expect(clampToTrim(20_000, { start: 1000, end: 9000 })).toBe(9000)
+  })
+
+  it('plays a frame that reaches into a kept span, so landing just before a jump target does not jump again', () => {
+    const frame = frameMsOf(60)
+    expect(stepAt(6000 - 10, map, frame)).toEqual({ kind: 'play', rate: 1 })
+    expect(stepAt(2000 - 10, map, frame)).toEqual({ kind: 'play', rate: 1 })
+    expect(stepAt(6000 - frame - 1, map, frame)).toEqual({ kind: 'jump', to: 6000 })
+    expect(stepAt(6000 - frame, map, frame)).toEqual({ kind: 'jump', to: 6000 })
+  })
+
+  it('jumps from a frame wholly inside a cut, and ends from one wholly inside a trailing cut', () => {
+    const frame = frameMsOf(60)
+    expect(stepAt(4100, map, frame)).toEqual({ kind: 'jump', to: 6000 })
+    expect(stepAt(9000 + 5, map, frame)).toEqual({ kind: 'end' })
+    expect(stepAt(9000 - 10, map, frame)).toEqual({ kind: 'play', rate: 1 })
+  })
+
+  it('steps over consecutive cuts and a cut at the start, and ends when only cuts remain', () => {
+    const cuts = timeMapOf(trim, [piece(0, 1000, 1, true), piece(1000, 2000, 1, true), piece(2000, 4000, 8), piece(4000, 5000, 1, true), piece(5000, 6000, 1, true), piece(6000, 10_000)])
+    const frame = frameMsOf(30)
+    expect(stepAt(0, cuts, frame)).toEqual({ kind: 'jump', to: 2000 })
+    expect(stepAt(1500, cuts, frame)).toEqual({ kind: 'jump', to: 2000 })
+    expect(stepAt(3000, cuts, frame)).toEqual({ kind: 'play', rate: 8 })
+    expect(stepAt(4500, cuts, frame)).toEqual({ kind: 'jump', to: 6000 })
+    expect(playbackStart(0, cuts, false)).toBe(2000)
+    expect(playbackStart(5500, cuts, false)).toBe(6000)
+    expect(rateAt(500, cuts)).toBe(1)
+    expect(rateAt(3000, cuts)).toBe(8)
+    expect(rateAt(5500, cuts)).toBe(1)
+  })
+
+  it('has nothing to play without kept spans', () => {
+    const empty = timeMapOf({ start: 2000, end: 3000 }, [piece(0, 10_000, 1, true)])
+    expect(stepAt(2500, empty, frameMsOf(60))).toEqual({ kind: 'end' })
+    expect(playbackStart(5000, empty, false)).toBe(2000)
+    expect(rateAt(2500, empty)).toBe(1)
+  })
+
+  it('stops in the middle of the frame holding the last kept moment, before a trailing cut', () => {
+    const frame = frameMsOf(60)
+    const gridEnd = timeMapOf(trim, [piece(0, 9000), piece(9000, 10_000, 1, true)])
+    expect(lastKeptFrameTime(gridEnd, frame)).toBeCloseTo(539.5 * frame)
+    expect(lastKeptFrameTime(gridEnd, frame)).toBeLessThan(9000)
+    const offGridEnd = timeMapOf(trim, [piece(0, 9010), piece(9010, 10_000, 1, true)])
+    expect(lastKeptFrameTime(offGridEnd, frame)).toBeCloseTo(540.5 * frame)
+    const tinySpan = timeMapOf(trim, [piece(0, 5012, 1, true), piece(5012, 5015), piece(5015, 10_000, 1, true)])
+    expect(lastKeptFrameTime(tinySpan, frame)).toBe(5012)
+    expect(lastKeptFrameTime(timeMapOf(trim, [piece(0, 10_000, 1, true)]), frame)).toBe(0)
   })
 })

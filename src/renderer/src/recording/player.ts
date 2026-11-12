@@ -1,6 +1,6 @@
 import type { Trim } from './trim'
 import { timeMapOf, wholeTake, type TimeMap } from './timemap'
-import { clampToTrim, playbackStart, rateAt, stepAt } from './trim-loop'
+import { clampToTrim, frameMsOf, lastKeptFrameTime, playbackStart, rateAt, stepAt } from './trim-loop'
 
 type FrameListener = (sourceMs: number) => void
 type PlayingListener = (playing: boolean) => void
@@ -19,7 +19,10 @@ export class RecordingPlayer {
   private frameRequest: number | null = null
   private disposed = false
 
-  constructor(url: string) {
+  private readonly frameMs: number
+
+  constructor(url: string, fps: number) {
+    this.frameMs = frameMsOf(fps)
     const { video } = this
     video.muted = true
     video.preload = 'auto'
@@ -115,7 +118,7 @@ export class RecordingPlayer {
 
   private finish() {
     this.video.pause()
-    this.setVideoTime(this.map.spans.at(-1)?.source.end ?? this.trim.end)
+    this.setVideoTime(lastKeptFrameTime(this.map, this.frameMs))
     this.finished = true
   }
 
@@ -149,7 +152,7 @@ export class RecordingPlayer {
   }
 
   private onPresentedFrame(sourceMs: number) {
-    const step = stepAt(sourceMs, this.map)
+    const step = stepAt(sourceMs, this.map, this.frameMs)
     if (step.kind === 'end') {
       this.finish()
       return

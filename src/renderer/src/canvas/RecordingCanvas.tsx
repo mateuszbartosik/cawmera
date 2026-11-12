@@ -44,8 +44,8 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   const wide = boxSelected || selectedZoomOf(edits, timelineSelection) !== null
 
   useEffect(() => {
-    if (!entryId) return
-    const created = new RecordingPlayer(recordingUrl(entryId))
+    if (!entryId || !entry) return
+    const created = new RecordingPlayer(recordingUrl(entryId), entry.track.fps)
     const recording = store.get().doc.recording
     const start = recording?.trim.start ?? 0
     const offFrame = created.onFrame((time) => {

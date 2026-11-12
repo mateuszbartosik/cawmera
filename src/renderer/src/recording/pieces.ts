@@ -3,8 +3,6 @@ import { TRIM_RULES, type Trim } from './trim'
 
 export const MIN_PIECE_MS = 100
 
-const takeLengthOf = (pieces: Piece[]) => pieces.at(-1)?.end ?? 0
-
 const isRate = (value: unknown): value is Rate => RATES.includes(value as Rate)
 
 const isPieceLike = (value: unknown): value is { start: number; end: number; rate?: unknown; cut?: unknown } => {
@@ -12,6 +10,8 @@ const isPieceLike = (value: unknown): value is { start: number; end: number; rat
   const { start, end } = value as Record<string, unknown>
   return typeof start === 'number' && typeof end === 'number' && Number.isFinite(start) && Number.isFinite(end)
 }
+
+const takeLengthOf = (pieces: unknown[]) => Math.max(0, ...pieces.filter(isPieceLike).map((piece) => piece.end))
 
 /** Ordered pieces tiling [0, durationMs] without gaps or overlaps; one whole-take piece when nothing can be repaired. */
 export function validPieces(input: unknown, durationMs: number): Piece[] {
@@ -45,6 +45,7 @@ export function validPieces(input: unknown, durationMs: number): Piece[] {
 }
 
 export function pieceAt(pieces: Piece[], at: number): Piece {
+  if (pieces.length === 0) return wholeTake(0)[0]
   return pieces.find((piece) => at >= piece.start && at < piece.end) ?? (at < pieces[0].start ? pieces[0] : pieces[pieces.length - 1])
 }
 
