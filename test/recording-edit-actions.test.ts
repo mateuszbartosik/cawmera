@@ -115,11 +115,54 @@ describe('edit actions', () => {
   it('reports the shared rate of a range, or none when they differ', () => {
     const mixed = [piece(0, 1000, 2), piece(1000, 2000, 4)]
     expect(rateOfRange(mixed, { start: 0, end: 900 })).toBe(2)
-    expect(rateOfRange(mixed, { start: 0, end: 2000 })).toBeNull()
+    expect(rateOfRange(mixed, { start: 0, end: 2000 })).toBe('mixed')
   })
 
   it('makes Delete cut a selected range', () => {
     const base = { selection: [], shotSelection: [] }
     expect(deleteAction({ ...base, timelineSelection: { kind: 'range', start: 0, end: 1 } })).toBe('cut-range')
+  })
+
+  it('makes restore, speed and split one undo step each', () => {
+    openTake(10_000)
+    scrubTo(5000)
+    splitAtPlayhead()
+    expect(store.get().past).toHaveLength(1)
+    selectRange({ start: 0, end: 5000 })
+    setSelectionRate(2)
+    expect(store.get().past).toHaveLength(2)
+    cutSelection()
+    expect(store.get().past).toHaveLength(3)
+    restoreSelection()
+    expect(store.get().past).toHaveLength(4)
+    undo()
+    expect(pieces()).toEqual([piece(0, 5000, 2, true), piece(5000, 10_000)])
+  })
+
+  it('does not split a playhead outside the trim', () => {
+    openTake(10_000)
+    updateDoc((doc) => ({ recording: { ...doc.recording!, trim: { start: 2000, end: 8000 } } }), { history: false })
+    scrubTo(1000)
+    splitAtPlayhead()
+    scrubTo(9000)
+    splitAtPlayhead()
+    expect(pieces()).toEqual(wholeTake(10_000))
+    expect(store.get().past).toEqual([])
+  })
+
+  it('adds no undo step for an edit that changes nothing', () => {
+    openTake(10_000)
+    selectRange({ start: 4000, end: 6000 })
+    setSelectionRate(1)
+    restoreSelection()
+    expect(store.get().past).toEqual([])
+    cutSelection()
+    const afterCut = store.get().past.length
+    cutSelection()
+    setSelectionRate(1)
+    selectRange({ start: 3950, end: 4050 })
+    restoreSelection()
+    expect(store.get().past).toHaveLength(afterCut)
+    expect(pieces()).toEqual([piece(0, 4000), piece(4000, 6000, 1, true), piece(6000, 10_000)])
   })
 })

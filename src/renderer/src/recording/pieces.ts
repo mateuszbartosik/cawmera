@@ -44,6 +44,10 @@ export function validPieces(input: unknown, durationMs: number): Piece[] {
   return tiled
 }
 
+const samePiece = (a: Piece, b: Piece) => a.start === b.start && a.end === b.end && a.rate === b.rate && a.cut === b.cut
+
+export const samePieces = (a: Piece[], b: Piece[]): boolean => a === b || (a.length === b.length && a.every((piece, i) => samePiece(piece, b[i])))
+
 export function pieceAt(pieces: Piece[], at: number): Piece {
   if (pieces.length === 0) return wholeTake(0)[0]
   return pieces.find((piece) => at >= piece.start && at < piece.end) ?? (at < pieces[0].start ? pieces[0] : pieces[pieces.length - 1])

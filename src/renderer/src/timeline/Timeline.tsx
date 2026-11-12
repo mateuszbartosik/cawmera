@@ -1,19 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowCounterClockwise, CaretDown, MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus, Scissors } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus, Scissors } from '@phosphor-icons/react'
 import { store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
-import { rangeHasCut, rateOfRange, restoreSelection, setSelectionRate, splitAtPlayhead } from '../recording/edit-actions'
+import { rangeHasCut, rateOfRange, restoreSelection, splitAtPlayhead } from '../recording/edit-actions'
 import { togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording } from '../recording/registry'
 import { takeViewFor } from '../recording/take-view'
-import { RATES, snapToOutput, type Rate } from '../recording/timemap'
+import { snapToOutput } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
 import { addZoomAt } from '../recording/zoom-actions'
-import { cn, IconButton } from '../ui/controls'
+import { IconButton } from '../ui/controls'
 import { ClipRow } from './ClipRow'
+import { HeaderButton } from './HeaderButton'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
 import { Playhead } from './Playhead'
 import { Ruler } from './Ruler'
+import { SpeedMenu } from './SpeedMenu'
 import { fitView, formatClock, MIN_VIEW_MS, scrollView, VIEW_ZOOM_STEP, xToTime, zoomView, type TimelineView } from './scale'
 import { TrimHandle } from './TrimHandle'
 import { ZoomRow } from './ZoomRow'
@@ -39,69 +41,6 @@ function useWidth() {
     return () => observer.disconnect()
   }, [])
   return { ref, width }
-}
-
-function SpeedMenu({ rate, disabled }: { rate: Rate | null; disabled: boolean }) {
-  const [open, setOpen] = useState(false)
-  const menuRef = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    if (disabled) setOpen(false)
-  }, [disabled])
-  useEffect(() => {
-    if (!open) return
-    const closeOutside = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.stopPropagation()
-      setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    document.addEventListener('keydown', closeOnEscape, true)
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside)
-      document.removeEventListener('keydown', closeOnEscape, true)
-    }
-  }, [open])
-  return (
-    <span ref={menuRef} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-testid="timeline-speed"
-        className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium text-(--tc-label) transition-colors outline-none hover:bg-(--tc-control) hover:text-(--tc-fg) focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50 disabled:pointer-events-none disabled:opacity-35"
-        onClick={() => setOpen((was) => !was)}
-      >
-        Speed · {rate === null ? 'Mixed' : `${rate}×`}
-        <CaretDown size={10} />
-      </button>
-      {open && (
-        <div role="menu" className="absolute top-full right-0 z-20 mt-1 flex min-w-16 flex-col rounded-lg border border-(--tc-line) bg-(--tc-panel) p-1 shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px]">
-          {RATES.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="menuitemradio"
-              aria-checked={option === rate}
-              className={cn(
-                'rounded-md px-2 py-1 text-left text-xs tabular-nums outline-none hover:bg-(--tc-control) focus-visible:bg-(--tc-control)',
-                option === rate ? 'font-semibold text-(--tc-fg)' : 'text-(--tc-label)'
-              )}
-              onClick={() => {
-                setOpen(false)
-                setSelectionRate(option)
-              }}
-            >
-              {option}×
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  )
 }
 
 function RowLabel({ children }: { children: string }) {
@@ -179,17 +118,12 @@ function TimelinePanel() {
         <IconButton label="Split" shortcut="S" onClick={splitAtPlayhead} data-testid="timeline-split">
           <Scissors size={15} />
         </IconButton>
-        <SpeedMenu rate={range ? rateOfRange(pieces, range) : null} disabled={!range} />
+        <SpeedMenu range={range !== null} rate={range ? rateOfRange(pieces, range) : null} />
         {range && rangeHasCut(pieces, range) && (
-          <button
-            type="button"
-            data-testid="timeline-restore"
-            className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium text-(--tc-label) transition-colors outline-none hover:bg-(--tc-control) hover:text-(--tc-fg) focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50"
-            onClick={restoreSelection}
-          >
+          <HeaderButton data-testid="timeline-restore" onClick={restoreSelection}>
             <ArrowCounterClockwise size={12} />
             Restore
-          </button>
+          </HeaderButton>
         )}
         <span className="ml-auto flex items-center gap-1">
           <IconButton label="Zoom out" disabled={viewLength >= duration} onClick={() => zoomAroundPlayhead(1 / VIEW_ZOOM_STEP)} data-testid="timeline-zoom-out">

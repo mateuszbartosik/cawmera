@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { useApp } from '../app/store'
 import { rangeAt, selectRange } from '../recording/edit-actions'
 import { pieceAt } from '../recording/pieces'
-import type { Piece } from '../recording/timemap'
+import type { Piece, Span } from '../recording/timemap'
 import type { Click } from '../recording/track'
 import type { Trim } from '../recording/trim'
 import { cn } from '../ui/controls'
@@ -16,21 +16,31 @@ const CUT_HATCH = 'repeating-linear-gradient(135deg, transparent 0 4px, color-mi
 
 function PieceBlock({ piece, view, width }: { piece: Piece; view: TimelineView; width: number }) {
   const left = timeToX(piece.start, view, width)
+  const right = timeToX(piece.end, view, width)
   const label = piece.cut ? 'Cut' : piece.rate > 1 ? `${piece.rate}×` : null
+  const visibleLeft = Math.max(left, 0)
+  const visibleRight = Math.min(right, width)
   return (
     <div
       data-testid={piece.cut ? 'clip-cut' : 'clip-piece'}
-      className={cn('absolute inset-y-0 grid place-items-center border-l border-(--tc-line) text-[11px] font-semibold text-(--tc-label) tabular-nums', piece.cut ? 'bg-(--tc-canvas)/50' : piece.rate > 1 && 'bg-(--tc-accent)/10')}
-      style={{ left, width: timeToX(piece.end, view, width) - left, backgroundImage: piece.cut ? CUT_HATCH : undefined }}
+      className={cn('absolute inset-y-0 border-l border-(--tc-line)', piece.cut ? 'bg-(--tc-canvas)/50' : piece.rate > 1 && 'bg-(--tc-accent)/10')}
+      style={{ left, width: right - left, backgroundImage: piece.cut ? CUT_HATCH : undefined }}
     >
-      {label}
+      {label && visibleRight > visibleLeft && (
+        <span
+          className="absolute inset-y-0 grid place-items-center text-[11px] font-semibold text-(--tc-label) tabular-nums"
+          style={{ left: visibleLeft - left, width: visibleRight - visibleLeft }}
+        >
+          {label}
+        </span>
+      )}
     </div>
   )
 }
 
 export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
   const selection = useApp((s) => s.timelineSelection)
-  const press = useRef<{ x: number; dragged: boolean } | null>(null)
+  const press = useRef<{ x: number; dragged: boolean; range: Span | null } | null>(null)
   const startX = Math.min(Math.max(timeToX(trim.start, view, width), 0), width)
   const endX = Math.min(Math.max(timeToX(trim.end, view, width), 0), width)
   const timeAt = (event: { clientX: number; currentTarget: HTMLElement }) =>
@@ -49,7 +59,7 @@ export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.currentTarget.setPointerCapture(event.pointerId)
-        press.current = { x: pressedAt(event), dragged: false }
+        press.current = { x: pressedAt(event), dragged: false, range: null }
       }}
       onPointerMove={(event) => {
         const started = press.current
@@ -63,7 +73,10 @@ export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
         started.dragged = true
         const from = clampedToTrim(xToTime(started.x, view, width))
         const to = clampedToTrim(timeAt(event))
-        if (from !== to) selectRange({ start: Math.min(from, to), end: Math.max(from, to) })
+        const range = { start: Math.min(from, to), end: Math.max(from, to) }
+        if (range.start === range.end || (started.range?.start === range.start && started.range.end === range.end)) return
+        started.range = range
+        selectRange(range)
       }}
       onPointerUp={(event) => {
         const started = press.current
@@ -73,7 +86,6 @@ export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
         if (at < trim.start || at >= trim.end) selectRange(null)
         else selectRange(rangeAt(pieces, trim, at))
       }}
-      onPointerCancel={() => (press.current = null)}
       onLostPointerCapture={() => (press.current = null)}
     >
       {pieces.map((piece) => (

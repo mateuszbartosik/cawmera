@@ -126,7 +126,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.shiftKey && event.code === 'Digit2') return run('fit-shot')
   if (key === 'c' && s.doc.sourceId) return void (s.mode === 'crop' ? leaveCrop() : enterCrop())
   if (key === 'r') return void shuffleLook()
-  if (key === 's' && timelineShows(s)) return void (event.preventDefault(), splitAtPlayhead())
+  if (key === 's' && !event.shiftKey && timelineShows(s)) return void (event.preventDefault(), splitAtPlayhead())
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
   const escape = key === 'escape' ? escapeAction(s) : null
   if (escape === 'clear-boxes') return void store.set({ selection: [] })

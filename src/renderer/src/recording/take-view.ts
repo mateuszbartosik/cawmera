@@ -5,6 +5,7 @@ import { buildCursorPath, CURSOR_RULES, type CursorPath } from './cursor'
 import { LONGEST_CLICK_EFFECT_MS, PRESS } from './effects'
 import type { RecordingEntry } from './registry'
 import type { RecordingDoc } from './settings'
+import { samePieces } from './pieces'
 import { mapTrack, preRollToOutput, timeMapOf, type Piece, type TimeMap } from './timemap'
 import type { Click, CursorSample, RecordingTrack } from './track'
 import type { Trim } from './trim'
@@ -48,8 +49,6 @@ export const cropOf = (crop: Rect | null, video: Size): Rect => crop ?? { x: 0, 
 
 const sameTrim = (a: Trim, b: Trim) => a.start === b.start && a.end === b.end
 const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
-const samePiece = (a: Piece, b: Piece) => a.start === b.start && a.end === b.end && a.rate === b.rate && a.cut === b.cut
-const samePieces = (a: Piece[], b: Piece[]) => a === b || (a.length === b.length && a.every((piece, i) => samePiece(piece, b[i])))
 
 function sampleAt(cursor: CursorSample[], t: number): CursorSample {
   const following = firstIndexWhere(cursor.length, (i) => cursor[i].t > t)
