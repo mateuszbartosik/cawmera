@@ -334,6 +334,7 @@ export function Slider({
 export interface SegmentOption<T> {
   value: T
   label: string
+  disabled?: boolean
 }
 
 export function Segmented<T extends string | number>({
@@ -357,7 +358,10 @@ export function Segmented<T extends string | number>({
     const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
     if (!delta) return
     event.preventDefault()
-    const next = (index + delta + options.length) % options.length
+    let next = index
+    do next = (next + delta + options.length) % options.length
+    while (options[next].disabled && next !== index)
+    if (next === index) return
     onChange(options[next].value)
     refs.current[next]?.focus()
   }
@@ -382,10 +386,11 @@ export function Segmented<T extends string | number>({
               type="button"
               role="radio"
               aria-checked={selected}
+              disabled={option.disabled}
               tabIndex={selected ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
-                'rounded-md text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50',
+                'rounded-md text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50 disabled:pointer-events-none disabled:opacity-35',
                 selected ? 'bg-(--tc-chip) text-(--tc-fg) shadow-[0_1px_2px_rgb(0_0_0/0.18)]' : 'text-(--tc-label) hover:text-(--tc-fg)'
               )}
             >

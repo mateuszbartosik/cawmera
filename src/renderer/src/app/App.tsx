@@ -30,6 +30,7 @@ import {
   startCapture,
   stepShot
 } from './actions'
+import { deleteSelectedZoom } from '../recording/zoom-actions'
 import { deleteAction, escapeAction } from './selection-keys'
 import { clearPickedShots, isUnsaved, liveShots, pickAllShots, redo, selectShot, store, undo, useApp } from './store'
 
@@ -131,6 +132,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (escape === 'clear-shots') return void clearPickedShots()
   const remove = key === 'delete' || key === 'backspace' ? deleteAction(s) : null
   if (remove === 'remove-boxes') return void (event.preventDefault(), removeSelected())
+  if (remove === 'delete-zoom') return void (event.preventDefault(), deleteSelectedZoom())
   if (remove === 'delete-shots') return void (event.preventDefault(), deletePickedShots())
   if (remove === 'ignore') return
   if (key.startsWith('arrow') && s.selection.length > 0) {

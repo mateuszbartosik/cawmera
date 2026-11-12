@@ -41,7 +41,7 @@ import { BackdropField } from './BackdropField'
 import { EdgePicker } from './EdgePicker'
 import { FileDrop } from './FileDrop'
 import { LightPad } from './LightPad'
-import { CursorSection, MotionSection, RecordingSection } from './RecordingSections'
+import { CursorSection, MotionSection, RecordingSection, ZoomSection } from './RecordingSections'
 import { SizeField } from './SizeField'
 import { useSection } from './useSection'
 import { isNarrow, PANEL_GAP, PANEL_WIDTH, SHEET_SHARE } from '../canvas/view'
@@ -475,6 +475,7 @@ export function Panel() {
         {isRecording ? (
           <>
             <RecordingSection />
+            <ZoomSection />
             <CursorSection />
             <MotionSection />
           </>

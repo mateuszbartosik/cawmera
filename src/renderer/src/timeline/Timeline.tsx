@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play } from '@phosphor-icons/react'
+import { MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus } from '@phosphor-icons/react'
 import { store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
 import { togglePlayback, usePlayhead } from '../recording/playback'
@@ -7,6 +7,7 @@ import { getRecording } from '../recording/registry'
 import { takeViewFor } from '../recording/take-view'
 import { snapToOutput } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
+import { addZoomAt } from '../recording/zoom-actions'
 import { IconButton } from '../ui/controls'
 import { ClipRow } from './ClipRow'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
@@ -140,7 +141,12 @@ function TimelinePanel() {
         </div>
 
         <div className="grid" style={rowColumns}>
-          <RowLabel>Zoom</RowLabel>
+          <span className="flex items-center gap-0.5">
+            <RowLabel>Zoom</RowLabel>
+            <IconButton label="Add a zoom at the playhead" className="size-5" onClick={() => addZoomAt(time)} data-testid="timeline-add-zoom">
+              <Plus size={12} />
+            </IconButton>
+          </span>
           <ZoomRow edits={edits} view={view} width={width} />
         </div>
 
