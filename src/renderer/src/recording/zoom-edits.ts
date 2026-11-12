@@ -3,7 +3,7 @@ import { clampFocus, ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
 import type { TakeView } from './take-view'
 import { outputToSource, snapToOutput, type Span, type TimeMap } from './timemap'
 import { isShownClick, type Click } from './track'
-import { clickGroupsAtDepth, focusOn, ZOOM_RULES, type ZoomSegment } from './zooms'
+import { autoHoldLimits, autoZoomsWithClicks, clickGroupsAtDepth, focusOn, ZOOM_RULES, type ZoomSegment } from './zooms'
 
 export type ZoomAim = 'auto' | 'manual'
 /** A zoom as the shot stores it: its hold in source ms, its focus in video px. */
@@ -30,19 +30,39 @@ export function editsFromSegments(segments: ZoomSegment[], map: TimeMap, crop: R
   }))
 }
 
+/** Mapping source ms to output ms and back can leave a time a hair off. */
+const SAME_TIME_MS = 1e-6
+const sameTime = (a: number, b: number) => Math.abs(a - b) <= SAME_TIME_MS
+const takesIn = (span: Span, t: number) => span.start <= t && t <= span.end
+
 const mappedInTimeOrder = (edits: ZoomEdit[], map: TimeMap): MappedZoom[] =>
   edits.map((edit) => ({ edit, start: snapToOutput(map, edit.start), end: snapToOutput(map, edit.end) })).sort((a, b) => a.start - b.start)
 
-/** A shown click belongs to the first zoom that hasn't ended by it, when it falls in that zoom's hold or the settle time before it. */
-function clicksByZoom(zooms: MappedZoom[], view: Pick<TakeView, 'frame' | 'track'>, speed: ZoomSpeed): Click[][] {
-  const settleMs = ZOOM_TRANSITION_MS[speed]
+/** From the settle time before the zoom to its end, or on to the video's end while its end sits where the last second's clamp puts it. */
+function windowOf(zoom: MappedZoom, lastHoldEnd: number, outputMs: number, speed: ZoomSpeed): Span {
+  return { start: zoom.start - ZOOM_TRANSITION_MS[speed], end: sameTime(zoom.end, lastHoldEnd) ? outputMs : zoom.end }
+}
+
+/** A shown click belongs to the zoom that holds it, or else to the first zoom whose window takes it in. */
+function clicksByWindow(zooms: MappedZoom[], view: Pick<TakeView, 'map' | 'frame' | 'track'>, speed: ZoomSpeed): Click[][] {
+  const { outputMs } = view.map
+  const lastHoldEnd = autoHoldLimits({ start: 0, end: outputMs }, speed).end
+  const windows = zooms.map((zoom) => windowOf(zoom, lastHoldEnd, outputMs, speed))
   const owned = zooms.map((): Click[] => [])
   for (const click of view.track.clicks) {
     if (!isShownClick(click, view.frame)) continue
-    const index = zooms.findIndex((zoom) => click.t <= zoom.end)
-    if (index !== -1 && click.t >= zooms[index].start - settleMs) owned[index].push(click)
+    const holder = zooms.findIndex((zoom) => takesIn(zoom, click.t))
+    const index = holder !== -1 ? holder : windows.findIndex((window) => takesIn(window, click.t))
+    if (index !== -1) owned[index].push(click)
   }
   return owned
+}
+
+/** A zoom that keeps an automatic zoom's hold keeps the clicks that zoom was found from, so storing the automatic zooms moves none of them. */
+function clicksByZoom(zooms: MappedZoom[], view: Pick<TakeView, 'map' | 'frame' | 'track'>, speed: ZoomSpeed): Click[][] {
+  const found = autoZoomsWithClicks(view.track.clicks, view.frame, { start: 0, end: view.map.outputMs }, speed)
+  const byWindow = clicksByWindow(zooms, view, speed)
+  return zooms.map((zoom, i) => found.find((automatic) => sameTime(automatic.start, zoom.start) && sameTime(automatic.end, zoom.end))?.clicks ?? byWindow[i])
 }
 
 /** Just before the group's first click, unless the move there, which waits for the last click of the group before, arrives later. */

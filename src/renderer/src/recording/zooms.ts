@@ -1,5 +1,6 @@
 import { clamp, type Point, type Size } from '../render/geometry'
 import { clampFocus, ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
+import type { Span } from './timemap'
 import { isShownClick, type Click } from './track'
 import type { Trim } from './trim'
 
@@ -26,8 +27,7 @@ const FIT_TOLERANCE = 1e-9
 type ZoomRules = typeof ZOOM_RULES
 
 interface Box { left: number; top: number; right: number; bottom: number }
-interface Span { start: number; end: number }
-interface ClickedZoom extends ZoomSegment { clicks: Click[] }
+export interface ClickedZoom extends ZoomSegment { clicks: Click[] }
 
 function paddedBoxAround(clicks: Click[], frame: Size, rules: ZoomRules): Box {
   const marginX = rules.marginShare * frame.width
@@ -111,15 +111,23 @@ function resolveOverlaps(zooms: ClickedZoom[], frame: Size, holdLimits: Span, ru
   return resolved
 }
 
-export function autoZooms(clicks: Click[], frame: Size, trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): ZoomSegment[] {
+/** Where automatic zooms may hold: the first and last second stay wide, and so do the moves into and out of a zoom. */
+export function autoHoldLimits(trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): Span {
   const wideAndTransitionMs = rules.wideEdgeMs + ZOOM_TRANSITION_MS[speed]
-  const holdLimits = { start: trim.start + wideAndTransitionMs, end: trim.end - wideAndTransitionMs }
+  return { start: trim.start + wideAndTransitionMs, end: trim.end - wideAndTransitionMs }
+}
+
+/** The automatic zooms, each with the shown clicks it was found from. */
+export function autoZoomsWithClicks(clicks: Click[], frame: Size, trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): ClickedZoom[] {
+  const holdLimits = autoHoldLimits(trim, speed, rules)
   const shownClicks = clicks.filter((click) => isShownClick(click, frame) && click.t >= trim.start && click.t <= trim.end)
   const holdsLongEnough = (zoom: ZoomSegment) => zoom.end - zoom.start >= rules.minHoldMs
   const zooms = groupClicks(shownClicks, frame, rules)
     .map((group) => zoomAround(group, frame, holdLimits, rules))
     .filter(holdsLongEnough)
-  return resolveOverlaps(zooms, frame, holdLimits, rules)
-    .filter(holdsLongEnough)
-    .map(({ start, end, depth, focus }) => ({ start, end, depth, focus }))
+  return resolveOverlaps(zooms, frame, holdLimits, rules).filter(holdsLongEnough)
+}
+
+export function autoZooms(clicks: Click[], frame: Size, trim: Trim, speed: ZoomSpeed, rules = ZOOM_RULES): ZoomSegment[] {
+  return autoZoomsWithClicks(clicks, frame, trim, speed, rules).map(({ start, end, depth, focus }) => ({ start, end, depth, focus }))
 }
