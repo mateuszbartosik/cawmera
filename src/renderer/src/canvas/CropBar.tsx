@@ -8,6 +8,7 @@ import { isNarrow, workspaceGeometry } from './view'
 export function CropBar() {
   const cropping = useApp((s) => s.mode === 'crop' && s.doc.sourceId !== null)
   const hasCrop = useApp((s) => s.doc.crop !== null)
+  const ofRecording = useApp((s) => s.doc.recording !== null)
   const narrow = useApp((s) => isNarrow(s))
   const center = useApp((s) => {
     const g = workspaceGeometry(s)
@@ -23,7 +24,7 @@ export function CropBar() {
       style={narrow ? { left: center, top: 56 } : { left: center, bottom: 58 }}
     >
       {hasCrop && (
-        <Button icon={<CornersOut size={14} />} onClick={() => updateDoc({ crop: null })} hint="Show the whole screenshot again">
+        <Button icon={<CornersOut size={14} />} onClick={() => updateDoc({ crop: null })} hint={ofRecording ? 'Show the whole video again' : 'Show the whole screenshot again'}>
           Reset
         </Button>
       )}

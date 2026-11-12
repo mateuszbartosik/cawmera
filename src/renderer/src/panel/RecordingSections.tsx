@@ -1,6 +1,7 @@
-import { Trash } from '@phosphor-icons/react'
+import { Crop, Trash } from '@phosphor-icons/react'
 import { useMemo, type ReactNode } from 'react'
 import { snapDensity } from '../app/doc'
+import { enterCrop, leaveCrop } from '../app/actions'
 import { useApp } from '../app/store'
 import { setRecording } from '../recording/actions'
 import type { ClickEffect } from '../recording/effects'
@@ -12,7 +13,7 @@ import { takeViewFor } from '../recording/take-view'
 import { autoAimAvailable, deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
 import { clicksCovered, ZOOM_DEPTH_RANGE, type ZoomAim } from '../recording/zoom-edits'
 import { useDragSession } from '../timeline/drag-session'
-import { IconButton, percent, Section, Segmented, Slider, Switch } from '../ui/controls'
+import { ActionsRow, Button, IconButton, percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
 const CURSOR_KEYS = ['cursorSize', 'smoothing', 'look', 'clickEffect', 'hideWhenStill', 'tilt'] as const
@@ -68,6 +69,7 @@ export function RecordingSection() {
   const sourceId = useApp((s) => s.doc.sourceId)
   const recording = useApp((s) => s.doc.recording)
   const crop = useApp((s) => s.doc.crop)
+  const cropping = useApp((s) => s.mode === 'crop')
   const section = useSection('recording')
   const entry = getRecording(sourceId)
   if (!entry || !recording) return null
@@ -78,6 +80,17 @@ export function RecordingSection() {
       <Readout label="Length" value={formatLength(takeViewFor(entry, recording, crop).map.outputMs)} />
       <Readout label="Video" value={`${track.width} × ${track.height}`} />
       <Readout label="Captured at" value={`${snapDensity(track.scale)}×`} />
+      <ActionsRow>
+        <Button
+          icon={<Crop size={14} />}
+          pressed={cropping}
+          onClick={cropping ? leaveCrop : enterCrop}
+          data-testid="crop"
+          hint="Choose which part of the video shows (C)"
+        >
+          Crop
+        </Button>
+      </ActionsRow>
       {recording.zooms !== null && (
         <button
           type="button"

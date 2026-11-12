@@ -60,6 +60,12 @@ export class RecordingPlayer {
     this.video.pause()
   }
 
+  /** A copy of the frame on screen, or null before the first frame has loaded. */
+  async grabFrame(): Promise<ImageBitmap | null> {
+    if (this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null
+    return createImageBitmap(this.video)
+  }
+
   seek(sourceMs: number) {
     this.finished = false
     this.setVideoTime(clampToTrim(sourceMs, this.trim))

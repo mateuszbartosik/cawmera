@@ -63,3 +63,7 @@ export function scrubTo(sourceMs: number) {
 }
 
 export const currentPlayhead = () => playhead
+
+export async function grabPlayheadFrame(): Promise<ImageBitmap | null> {
+  return (await activePlayer?.grabFrame()) ?? null
+}

@@ -1,5 +1,7 @@
 import { EXPORT_DENSITY } from '../app/house-style'
+import { snapDensity } from '../app/doc'
 import { FIT_ALL, getSource, liveShots, store, type AppState, type Camera } from '../app/store'
+import { getRecording } from '../recording/registry'
 import type { Point, Rect, Size } from '../render/geometry'
 
 export const PANEL_WIDTH = 300
@@ -22,6 +24,17 @@ export const ZOOM_STEPS = [0.05, 0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5,
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 8
 const MAX_FIT_ZOOM = 4
+
+/** What crop mode crops: the screenshot, or the video of a recording. `density` is the units per CSS px at 100%. */
+export function cropSubject(s: Pick<AppState, 'doc'>): (Size & { density: number }) | null {
+  const { doc } = s
+  if (doc.recording) {
+    const track = getRecording(doc.sourceId)?.track
+    return track ? { width: track.width, height: track.height, density: snapDensity(track.scale) } : null
+  }
+  const source = getSource(doc.sourceId)
+  return source ? { width: source.width, height: source.height, density: doc.capturedAt } : null
+}
 
 export function isNarrow(s: Pick<AppState, 'viewport'>): boolean {
   return s.viewport.width > 0 && s.viewport.width < NARROW_WIDTH
@@ -105,10 +118,10 @@ function areaOf(s: AppState, cropping: boolean) {
 function resolveCamera(s: AppState, cropping: boolean, area: WorkspaceGeometry['area'], density: number) {
   const camera = cropping ? s.cropView : s.view
   if (!camera.fit) return { zoom: camera.zoom, cx: camera.cx, cy: camera.cy }
-  const source = getSource(s.doc.sourceId)
+  const subject = cropSubject(s)
   const target =
-    cropping && source
-      ? { x: 0, y: 0, w: source.width, h: source.height }
+    cropping && subject
+      ? { x: 0, y: 0, w: subject.width, h: subject.height }
       : camera.fit === 'active'
         ? shotRect(s, activeIndex(s))
         : shotsBounds(shotRects(shotSizes(s)))
@@ -124,10 +137,10 @@ function resolveCamera(s: AppState, cropping: boolean, area: WorkspaceGeometry['
 }
 
 export function workspaceGeometry(s: AppState): WorkspaceGeometry {
-  const source = getSource(s.doc.sourceId)
-  const cropping = s.mode === 'crop' && source !== null
+  const subject = cropSubject(s)
+  const cropping = s.mode === 'crop' && subject !== null
   const area = areaOf(s, cropping)
-  const density = cropping ? s.doc.capturedAt : EXPORT_DENSITY
+  const density = cropping ? subject.density : EXPORT_DENSITY
   const camera = resolveCamera(s, cropping, area, density)
   const k = camera.zoom / density
   return {
@@ -157,7 +170,7 @@ export function shotAt(sizes: Size[], p: Point): number {
 }
 
 function setCamera(camera: Camera) {
-  store.set((s) => (s.mode === 'crop' && getSource(s.doc.sourceId) ? { cropView: camera } : { view: camera }))
+  store.set((s) => (s.mode === 'crop' && cropSubject(s) ? { cropView: camera } : { view: camera }))
 }
 
 /** Zooms so the world point under `anchor` (workspace px) stays put. */

@@ -43,6 +43,10 @@ import { layoutFor, renderImage, type Scene } from '../render/compose'
 import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { revealActive } from '../canvas/view'
+import { setCropFrame } from '../recording/crop'
+import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
+import type { RecordingDoc } from '../recording/settings'
+import { wholeTake } from '../recording/timemap'
 import {
   bridge,
   copyPng as copyPngToClipboard,
@@ -409,9 +413,22 @@ export async function copyImage() {
 // Editing
 
 export function enterCrop() {
-  const { doc } = store.get()
-  if (!doc.sourceId || doc.recording) return
+  const { doc, activeId } = store.get()
+  if (!doc.sourceId) return
   store.set({ mode: 'crop', selection: [], shotSelection: [], cropView: FIT_ALL })
+  if (doc.recording) void showPlayheadFrameWhileCropping(activeId)
+}
+
+async function showPlayheadFrameWhileCropping(shotId: string) {
+  pausePlayback()
+  try {
+    const frame = await grabPlayheadFrame()
+    const { mode, activeId } = store.get()
+    if (mode === 'crop' && activeId === shotId) setCropFrame(frame)
+    else frame?.close()
+  } catch (error) {
+    toast.error('The frame could not be shown', { description: error instanceof Error ? error.message : String(error) })
+  }
 }
 
 export function leaveCrop() {
@@ -557,6 +574,7 @@ export function resetSpotlight() {
 /** Panel header reset: back to the freshly loaded shot, keeping the screenshot, size, background, light and name. */
 export function resetAll() {
   const { doc } = store.get()
+  if (doc.recording) return resetRecordingEdits(doc.recording)
   const source = getSource(doc.sourceId)
   updateDoc({
     ...DEFAULT_DOC,
@@ -570,6 +588,18 @@ export function resetAll() {
     fileName: doc.fileName
   })
   store.set({ selection: [], mode: 'compose' })
+}
+
+/** A recording keeps its take, trim and Cursor and Motion settings: only what was edited on it goes. */
+function resetRecordingEdits(recording: RecordingDoc) {
+  updateDoc({
+    crop: null,
+    redactions: DEFAULT_DOC.redactions,
+    redactStyle: DEFAULT_DOC.redactStyle,
+    spotlight: DEFAULT_SPOTLIGHT,
+    recording: { ...recording, pieces: wholeTake(recording.pieces.at(-1)?.end ?? 0), zooms: null }
+  })
+  store.set({ selection: [], timelineSelection: null, mode: 'compose' })
 }
 
 export function clearSource() {

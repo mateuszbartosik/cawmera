@@ -21,6 +21,7 @@ import {
   type BoxRef,
   type ShotRecord
 } from '../app/store'
+import { drawnRecordingCrop, keepsDrawnCrop, RECORDING_CROP_MIN_PX, settleRecordingCrop, useCropFrame } from '../recording/crop'
 import { drawRecordingFrame } from '../recording/frame'
 import { togglePlayback } from '../recording/playback'
 import { stepSpaceTap } from './space-tap'
@@ -61,13 +62,14 @@ import {
   type Size
 } from '../render/layout'
 import { cn } from '../ui/controls'
-import { activeIndex, panBy, shotAt, shotRects, slotAt, slotX, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
+import { activeIndex, cropSubject, panBy, shotAt, shotRects, slotAt, slotX, toScreen, toWorld, workspaceGeometry, zoomTo, type WorkspaceGeometry } from './view'
 import { RecordingCanvas, sizeCanvas } from './RecordingCanvas'
 import { useZoomArea, ZoomAreaMarks } from './ZoomAreaMarks'
 
 const HANDLE_PX = 8
 const MIN_ITEM = 6
 const MIN_CROP = 24
+const MIN_DRAW_PX = 4
 /** Pointer travel before a press on a shot name becomes a reorder, or a press on a zoom’s area moves it. */
 const DRAG_THRESHOLD = 4
 
@@ -80,7 +82,7 @@ type Drag =
   | { kind: 'redaction-draw'; id: string | null; start: Point }
   | { kind: 'sel-move'; start: Point; rect: Rect }
   | { kind: 'sel-resize'; handle: Handle; start: Point; rect: Rect }
-  | { kind: 'sel-draw'; start: Point; before: Doc }
+  | { kind: 'sel-draw'; start: Point; before: Doc; drawn: Rect | null }
   /** The zoom it aims is pinned when the drag starts; `area` is in frame px, `scale` in export px per frame px. */
   | { kind: 'zoom-area'; id: string; grab: AreaGrab; start: Point; area: Rect; take: Pick<TakeView, 'crop' | 'frame'>; scale: number; moved: boolean }
 
@@ -148,12 +150,39 @@ function capFor(doc: Doc): Size {
 
 /** The selection crop mode shows: what the frame actually shows. */
 function selectionFor(doc: Doc): Rect | null {
+  if (doc.recording) {
+    const video = cropSubject({ doc })
+    return video ? (doc.crop ?? rect(0, 0, video.width, video.height)) : null
+  }
   const source = getSource(doc.sourceId)
   if (!source) return null
   const style = store.get().style
   const scale = scaleFor(doc.capturedAt, doc.zoom, style)
   const edge = resolveEdge(doc.edge, doc.crop, source, scale, style, doc.size)
   return effectiveSelection(doc.crop, source, capacity(scale, style, edge, doc.size), edge)
+}
+
+/** A recording crop drag follows the recording rules: whole px, inside the video, at least 64 px. */
+function dragRecordingCrop(drag: EditDrag, world: Point, video: Size) {
+  const dx = world.x - drag.start.x
+  const dy = world.y - drag.start.y
+  let next: Rect
+  switch (drag.kind) {
+    case 'sel-move':
+      next = moveSelection(drag.rect, video, dx, dy)
+      break
+    case 'sel-resize':
+      next = resizeRect(drag.rect, drag.handle, dx, dy, RECORDING_CROP_MIN_PX)
+      break
+    case 'sel-draw':
+      next = drawnRecordingCrop(drag.start, world, video)
+      drag.drawn = next
+      if (next.w < MIN_DRAW_PX || next.h < MIN_DRAW_PX) return
+      break
+    default:
+      return
+  }
+  updateDoc({ crop: settleRecordingCrop(next, video) }, { history: false })
 }
 
 /** Dot grid that moves and scales with the canvas, like a design tool's. */
@@ -263,7 +292,10 @@ export function Workspace() {
   const g = workspaceGeometry(state)
   const active = activeIndex(state)
   const layout = source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size) : null
-  const cropping = g.cropping && source !== null
+  const cropFrame = useCropFrame()
+  const video = cropSubject(state)
+  const target = video && { width: video.width, height: video.height, bitmap: doc.recording ? cropFrame : (source?.bitmap ?? null) }
+  const cropping = g.cropping && target !== null
   const activeBox = toScreen(g, rects[active])
 
   const zoomArea = useZoomArea(doc, style, state.timelineSelection, state.playback.time)
@@ -386,15 +418,15 @@ export function Workspace() {
     if (event.button === 1 || spaceRef.current) {
       spaceTapRef.current = stepSpaceTap(spaceTapRef.current, { kind: 'panStarted' }).armed
       startViewPan(event)
-    } else if (cropping && source) {
+    } else if (cropping && target) {
       const p = world
-      const full = rect(0, 0, source.width, source.height)
+      const full = rect(0, 0, target.width, target.height)
       const sel = selectionFor(s.doc)!
       const handle = hitHandle(sel, p, tolerance)
-      const movable = sel.w < source.width - 0.5 || sel.h < source.height - 0.5
+      const movable = sel.w < target.width - 0.5 || sel.h < target.height - 0.5
       if (handle) dragRef.current = { kind: 'sel-resize', handle, start: p, rect: sel }
       else if (movable && contains(sel, p)) dragRef.current = { kind: 'sel-move', start: p, rect: sel }
-      else if (contains(full, p)) dragRef.current = { kind: 'sel-draw', start: p, before: s.doc }
+      else if (contains(full, p)) dragRef.current = { kind: 'sel-draw', start: p, before: s.doc, drawn: null }
       else startViewPan(event)
     } else {
       const index = shotAt(sizes, world)
@@ -503,6 +535,11 @@ export function Workspace() {
       return
     }
     const s = store.get()
+    const recordingVideo = s.doc.recording ? cropSubject(s) : null
+    if (recordingVideo) {
+      dragRecordingCrop(drag, world, recordingVideo)
+      return
+    }
     const src = getSource(s.doc.sourceId)
     if (!src) return
     const full = rect(0, 0, src.width, src.height)
@@ -583,7 +620,9 @@ export function Workspace() {
       return
     }
     const s = store.get()
-    if (drag.kind === 'sel-draw') {
+    if (drag.kind === 'sel-draw' && s.doc.recording) {
+      if (!drag.drawn || !keepsDrawnCrop(drag.drawn) || s.doc.crop === drag.before.crop) return editDrag.cancel()
+    } else if (drag.kind === 'sel-draw') {
       const sel = selectionFor(s.doc)
       // A click (or tiny drag) doesn't replace the selection.
       if (!sel || s.doc.crop === drag.before.crop || sel.w < MIN_CROP || sel.h < MIN_CROP) return editDrag.cancel()
@@ -626,13 +665,13 @@ export function Workspace() {
     if (spaceRef.current) return
     let cursor = 'default'
     let item: string | null = null
-    if (cropping && source) {
+    if (cropping && target) {
       const sel = selectionFor(store.get().doc)!
       const handle = hitHandle(sel, world, tolerance)
-      const movable = sel.w < source.width - 0.5 || sel.h < source.height - 0.5
+      const movable = sel.w < target.width - 0.5 || sel.h < target.height - 0.5
       if (handle) cursor = HANDLE_CURSOR[handle]
       else if (movable && contains(sel, world)) cursor = 'move'
-      else if (contains(rect(0, 0, source.width, source.height), world)) cursor = 'crosshair'
+      else if (contains(rect(0, 0, target.width, target.height), world)) cursor = 'crosshair'
     } else if (layout && shotAt(sizes, world) === active) {
       const p = inActive(world)
       const s = store.get()
@@ -720,21 +759,22 @@ export function Workspace() {
   }
 
   let content: ReactNode
-  if (cropping && source) {
-    const box = toScreen(g, rect(0, 0, source.width, source.height))
+  if (cropping && target) {
+    const box = toScreen(g, rect(0, 0, target.width, target.height))
     const sel = selectionFor(doc)!
     content = (
       <>
-        <CropImage bitmap={source.bitmap} box={box} />
+        {doc.recording && <KeptShot doc={doc} style={style} backdrop={backdrop} box={toScreen(workspaceGeometry({ ...state, mode: 'compose' }), rects[active])} />}
+        {target.bitmap && <CropImage bitmap={target.bitmap} box={box} label={doc.recording ? 'Frame at the playhead' : 'Whole screenshot'} />}
         <svg
           className="pointer-events-none absolute overflow-visible"
           style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
-          viewBox={`0 0 ${source.width} ${source.height}`}
+          viewBox={`0 0 ${target.width} ${target.height}`}
           preserveAspectRatio="none"
           aria-hidden
         >
           <path
-            d={`M0 0H${source.width}V${source.height}H0Z M${sel.x} ${sel.y}v${sel.h}h${sel.w}v${-sel.h}Z`}
+            d={`M0 0H${target.width}V${target.height}H0Z M${sel.x} ${sel.y}v${sel.h}h${sel.w}v${-sel.h}Z`}
             fill="rgba(0,0,0,0.6)"
             fillRule="evenodd"
           />
@@ -945,8 +985,20 @@ export function Workspace() {
   )
 }
 
-/** Crop mode: the whole screenshot, at the canvas zoom. */
-function CropImage({ bitmap, box }: { bitmap: ImageBitmap; box: { left: number; top: number; width: number; height: number } }) {
+/**
+ * Crop mode shows a still instead of the shot, but the shot's canvas stays mounted out of sight: it owns the recording's player,
+ * and the playhead, the video and the pause all go with it.
+ */
+function KeptShot({ doc, style, backdrop, box }: { doc: Doc; style: HouseStyle; backdrop: ImageBitmap | null; box: { left: number; top: number; width: number; height: number } }) {
+  return (
+    <div className="invisible" aria-hidden>
+      <ShotCanvas doc={doc} style={style} backdrop={backdrop} box={box} active outlined={false} faded={false} />
+    </div>
+  )
+}
+
+/** Crop mode: the whole screenshot, or the frame of the recording, at the canvas zoom. */
+function CropImage({ bitmap, box, label }: { bitmap: ImageBitmap; box: { left: number; top: number; width: number; height: number }; label: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
   const backingWidth = Math.max(1, Math.min(4096, Math.round(box.width * dpr)))
@@ -969,7 +1021,7 @@ function CropImage({ bitmap, box }: { bitmap: ImageBitmap; box: { left: number; 
       data-testid="crop-canvas"
       className="pointer-events-none absolute"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
-      aria-label="Whole screenshot"
+      aria-label={label}
     />
   )
 }

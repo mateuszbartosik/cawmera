@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { store } from '../src/renderer/src/app/store'
 import { TIMELINE_SPACE, timelineShows, workspaceGeometry } from '../src/renderer/src/canvas/view'
+import { registerRecording } from '../src/renderer/src/recording/registry'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
 
@@ -36,11 +37,19 @@ describe('timeline space', () => {
   })
 })
 
-describe('crop', () => {
-  it('is not available for a recording shot', async () => {
-    const { enterCrop } = await import('../src/renderer/src/app/actions')
-    show(recordingDoc, 1200)
-    enterCrop()
-    expect(store.get().mode).toBe('compose')
+describe('crop mode on a recording', () => {
+  it('fits the video at the density it was captured at, above the timeline', () => {
+    registerRecording({ id: 'rec', name: 'Take', poster: null, track: { kind: 'monitor', width: 2560, height: 1440, fps: 60, durationMs: 1000, scale: 2, cursor: [], clicks: [] } })
+    const shown = show(recordingDoc, 1200)
+    const screenshotLike = workspaceGeometry({ ...shown, mode: 'crop' })
+    expect(screenshotLike.cropping).toBe(true)
+    expect(screenshotLike.density).toBe(2)
+    expect(screenshotLike.area.height).toBe(workspaceGeometry(shown).area.height - 46)
+    expect(screenshotLike.k * 2560).toBeLessThanOrEqual(screenshotLike.area.width)
+    expect(screenshotLike.k * 1440).toBeLessThanOrEqual(screenshotLike.area.height)
+  })
+
+  it('does not crop a recording whose take is unknown', () => {
+    expect(workspaceGeometry({ ...show({ ...recordingDoc, sourceId: 'gone' }, 1200), mode: 'crop' }).cropping).toBe(false)
   })
 })
