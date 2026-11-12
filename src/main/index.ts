@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { CaptureSource, CountdownRequest, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
+import { registerDrafts } from './drafts'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
 import { connectDirectly, disableProxyResolution } from './no-network'
 import { cancelWarmTake, recordingVideoFile, registerRecording, stopLiveTake } from './recording'
@@ -528,6 +529,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     registerDisplayMedia()
     registerRecording(() => win)
+    registerDrafts(() => win)
     registerMediaProtocol(recordingVideoFile)
     createWindow()
     app.on('activate', () => {

@@ -158,6 +158,7 @@ describe('take lifecycle', () => {
     expect(finished).toEqual({ id: expect.any(String), stoppedBy: 'shortcut', track: TRACK })
     expect(t.takes.videoFile(finished.id)).toBe(join(t.recordingsRoot, finished.id, 'video.mp4'))
     expect(t.takes.videoFile(randomUUID())).toBeNull()
+    expect(t.takes.takeFolder(finished.id)).toBe(join(t.recordingsRoot, finished.id))
     expect(t.shortcuts.isRegistered()).toBe(false)
     expect(t.window.restoreListeners.size).toBe(0)
   })
@@ -453,6 +454,27 @@ describe('take lifecycle', () => {
       t.takes.cancelWarmTake()
       expect(session.calls).toEqual(['begin'])
       expect(t.takes.stopLiveTake()).toBe(true)
+    })
+  })
+
+  describe('takes opened from a draft', () => {
+    it('serves an adopted take and hands out only known takes’ folders', async () => {
+      const t = await setup()
+      const id = randomUUID()
+      t.takes.adopt(id)
+      expect(t.takes.videoFile(id)).toBe(join(t.recordingsRoot, id, 'video.mp4'))
+      expect(t.takes.takeFolder(id)).toBe(join(t.recordingsRoot, id))
+      expect(t.takes.takeFolder('3f2a3b19-e3de-4153-9d82-95ac5c46cbd1')).toBeNull()
+      expect(t.takes.takeFolder('..')).toBeNull()
+      expect(() => t.takes.adopt('../x')).toThrow()
+    })
+
+    it('hands out no folder for a take that is still recording', async () => {
+      const t = await setup()
+      await warmUp(t)
+      t.takes.begin()
+      const [id] = await takeFolders(t.recordingsRoot)
+      expect(t.takes.takeFolder(id)).toBeNull()
     })
   })
 })

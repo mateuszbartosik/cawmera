@@ -73,6 +73,17 @@ export interface RecordingFinished {
   track: string
 }
 
+/** A draft's contents by key. A recording's `id` names its take: the one to copy when saving, the new one when opening. */
+export interface DraftFiles {
+  manifest: string
+  screenshots: { key: string; bytes: Uint8Array }[]
+  recordings: { key: string; id: string; track: string }[]
+}
+
+export type DraftOpenFailure = 'not-a-draft' | 'damaged' | 'too-large' | 'unreadable'
+
+export type DraftOpenResult = { ok: true; files: DraftFiles } | { ok: false; reason: DraftOpenFailure; message: string }
+
 export interface CawmeraBridge {
   readonly platform: string
   getVersion(): Promise<string>
@@ -108,6 +119,14 @@ export interface CawmeraBridge {
   onRecordingFinished(listener: (result: RecordingFinished) => void): () => void
   onRecordingFailed(listener: (error: RecordingError) => void): () => void
   saveVideo(bytes: Uint8Array, suggestedName: string): Promise<{ path: string } | null>
+  /** Save dialog, then writes the draft, copying each recording's video from its take. Null when cancelled. */
+  saveDraft(files: DraftFiles, suggestedName: string): Promise<{ path: string } | { error: string } | null>
+  /** Opens the draft at `path`, or asks for one when it's null. Null when cancelled. */
+  openDraft(path: string | null): Promise<DraftOpenResult | null>
+  /** Share of the draft written or read so far, 0..1. */
+  onDraftProgress(listener: (share: number) => void): () => void
+  /** Where a dropped or picked file lives on disk; '' when it has no path. */
+  pathForFile(file: File): string
   setNativeTheme(theme: 'dark' | 'light'): void
   zoomFactor(): number
   onMenuCommand(listener: (command: MenuCommand) => void): () => void

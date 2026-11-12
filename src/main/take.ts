@@ -61,8 +61,8 @@ export function createTakeLifecycle(host: TakeHost) {
   let current: Take | null = null
   /** Why the last take ended before begin(); reported by that call. */
   let endedBeforeBegin: RecordingError | null = null
-  /** Only takes that finished in this run are served, and the id never becomes a path from the request. */
-  const finishedIds = new Set<string>()
+  /** Takes that finished in this run or were opened from a draft. Only these are served or copied, and an id never becomes a path from a request. */
+  const knownIds = new Set<string>()
 
   const send = (channel: string, ...payload: unknown[]) => host.window()?.webContents.send(channel, ...payload)
 
@@ -136,7 +136,7 @@ export function createTakeLifecycle(host: TakeHost) {
   async function deliver(take: Take) {
     try {
       const track = await readFile(join(take.dir, 'track.json'), 'utf8')
-      finishedIds.add(take.id)
+      knownIds.add(take.id)
       send('recording:finished', { id: take.id, stoppedBy: take.stopReason ?? 'target-gone', track } satisfies RecordingFinished)
     } catch {
       send('recording:failed', failure('internal', 'The recording finished but its cursor track could not be read'))
@@ -232,10 +232,19 @@ export function createTakeLifecycle(host: TakeHost) {
     await clearRecordings(host.recordingsRoot).catch(() => {})
   }
 
-  const videoFile = (id: string) =>
-    isRecordingId(id) && finishedIds.has(id) ? join(recordingDir(host.recordingsRoot, id), 'video.mp4') : null
+  function adopt(id: string) {
+    if (!isRecordingId(id)) throw new Error('Not a recording id')
+    knownIds.add(id)
+  }
 
-  return { start, begin, stop, stopLiveTake, cancelWarmTake, quit, videoFile }
+  const takeFolder = (id: string) => (isRecordingId(id) && knownIds.has(id) ? recordingDir(host.recordingsRoot, id) : null)
+
+  const videoFile = (id: string) => {
+    const folder = takeFolder(id)
+    return folder ? join(folder, 'video.mp4') : null
+  }
+
+  return { start, begin, stop, stopLiveTake, cancelWarmTake, quit, adopt, takeFolder, videoFile }
 }
 
 export type TakeLifecycle = ReturnType<typeof createTakeLifecycle>

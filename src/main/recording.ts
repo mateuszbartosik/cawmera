@@ -12,7 +12,7 @@ const READY_TIMEOUT_MS = 10_000
 const STOP_TIMEOUT_MS = 20_000
 const BEGIN_DEADLINE_MS = 60_000
 
-const recordingsRoot = () => join(app.getPath('temp'), 'Cawmera', 'recordings')
+export const recordingsRoot = () => join(app.getPath('temp'), 'Cawmera', 'recordings')
 
 const helperPath = () =>
   app.isPackaged
@@ -41,6 +41,10 @@ function targetArgs(request: RecordingStartRequest): string[] | null {
 let takes: TakeLifecycle | null = null
 
 export const recordingVideoFile = (id: string) => takes?.videoFile(id) ?? null
+
+export const takeFolder = (id: string) => takes?.takeFolder(id) ?? null
+
+export const adoptTake = (id: string) => takes?.adopt(id)
 
 export const stopLiveTake = () => takes?.stopLiveTake() ?? false
 

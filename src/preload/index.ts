@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils, type IpcRendererEvent } from 'electron'
 import type { CawmeraBridge, MenuCommand, RecordingError, RecordingFinished } from '../shared/types'
 
 function subscribeWith<T>(channel: string, listener: (payload: T) => void) {
@@ -41,6 +41,10 @@ const bridge: CawmeraBridge = {
   onRecordingFinished: (listener) => subscribeWith<RecordingFinished>('recording:finished', listener),
   onRecordingFailed: (listener) => subscribeWith<RecordingError>('recording:failed', listener),
   saveVideo: (bytes, suggestedName) => ipcRenderer.invoke('file:save-video', bytes, suggestedName),
+  saveDraft: (files, suggestedName) => ipcRenderer.invoke('draft:save', files, suggestedName),
+  openDraft: (path) => ipcRenderer.invoke('draft:open', path),
+  onDraftProgress: (listener) => subscribeWith<number>('draft:progress', listener),
+  pathForFile: (file) => webUtils.getPathForFile(file),
   setNativeTheme: (theme) => ipcRenderer.send('theme:set', theme),
   zoomFactor: () => webFrame.getZoomFactor(),
   onMenuCommand: (listener) => {
