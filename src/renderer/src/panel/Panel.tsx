@@ -1,5 +1,5 @@
 import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Record, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
-import { EDGE_NAMES, FORMAT_LABEL, shotFallbackName, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
+import { EDGE_NAMES, FORMAT_LABEL, REDACT_LABEL, shotFallbackName, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import {
   addRedaction,
@@ -63,11 +63,7 @@ const ZOOM_OPTIONS: { value: UiZoom; label: string }[] = [
   { value: 0.8, label: '80%' },
   { value: 0.6, label: '60%' }
 ]
-const REDACT_OPTIONS: { value: RedactStyle; label: string }[] = [
-  { value: 'blur', label: 'Blur' },
-  { value: 'pixelate', label: 'Pixelate' },
-  { value: 'solid', label: 'Solid' }
-]
+const REDACT_OPTIONS: { value: RedactStyle; label: string }[] = (['blur', 'pixelate', 'solid'] as const).map((value) => ({ value, label: REDACT_LABEL[value] }))
 const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = (['webp', 'png'] as const).map((value) => ({ value, label: FORMAT_LABEL[value] }))
 const FPS_OPTIONS: { value: RecordingFps; label: string }[] = [
   { value: 60, label: '60' },
@@ -477,7 +473,7 @@ export function Panel() {
           <ScreenshotSection />
         )}
         <BackgroundSection />
-        {hasSource && !isRecording && <RedactSection />}
+        {hasSource && <RedactSection />}
         {hasSource && !isRecording && <SpotlightSection />}
         {houseStyleOpen && <HouseStyleSection />}
         <ExportSection />

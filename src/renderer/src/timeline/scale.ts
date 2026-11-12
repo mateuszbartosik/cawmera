@@ -1,5 +1,5 @@
 import { outputFloor } from '../recording/pieces'
-import { timeMapOf, type Piece } from '../recording/timemap'
+import { timeMapOf, type Piece, type Span } from '../recording/timemap'
 import { clampTrim, TRIM_RULES, type Trim } from '../recording/trim'
 
 const TICK_STEPS_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000]
@@ -71,6 +71,21 @@ export function dragTrim(trim: Trim, edge: 'start' | 'end', t: number, duration:
     else refused = middle
   }
   return withEdge(trim, edge, kept)
+}
+
+const clampBetween = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high))
+
+/** The span with its start at `start`, keeping its length and staying inside `bounds`. */
+export function moveSpan(span: Span, start: number, bounds: Span): Span {
+  const length = span.end - span.start
+  const movedStart = clampBetween(start, bounds.start, bounds.end - length)
+  return { start: movedStart, end: movedStart + length }
+}
+
+/** The span with one edge at `at`, inside `bounds` and at least `minMs` long. */
+export function stretchSpan(span: Span, edge: 'start' | 'end', at: number, bounds: Span, minMs: number): Span {
+  if (edge === 'start') return { start: clampBetween(at, bounds.start, span.end - minMs), end: span.end }
+  return { start: span.start, end: Math.min(Math.max(at, span.start + minMs), Math.max(bounds.end, span.start)) }
 }
 
 export function formatClock(ms: number): string {

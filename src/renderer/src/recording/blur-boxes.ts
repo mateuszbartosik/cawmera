@@ -3,6 +3,7 @@ import type { HouseStyle } from '../app/house-style'
 import { drawRedaction } from '../render/compose'
 import type { Size } from '../render/geometry'
 import { recordingEditLayout } from './edit-layout'
+import { moveSpan, stretchSpan } from '../timeline/scale'
 import type { Span } from './timemap'
 import type { TakeView } from './take-view'
 import type { Trim } from './trim'
@@ -22,10 +23,25 @@ export const snapDownToFrame = (ms: number, fps: number): number => (Math.floor(
 export const snapUpToFrame = (ms: number, fps: number): number => (Math.ceil((ms * fps) / MS_PER_SECOND - GRID_TOLERANCE) * MS_PER_SECOND) / fps
 
 /** A frame is only half unblurred if a box starts or ends inside it, so both ends go out to whole source frames. */
-export function newBoxTime(playheadMs: number, trim: Trim, fps: number): Span {
-  const end = snapUpToFrame(trim.end, fps)
-  const start = Math.max(0, snapDownToFrame(Math.min(playheadMs, end - MIN_BOX_MS), fps))
+export function newBoxTime(playheadMs: number, trim: Trim, fps: number, durationMs: number): Span {
+  const { end } = boxBounds(trim, fps, durationMs)
+  const snappedStart = snapDownToFrame(Math.min(playheadMs, end - MIN_BOX_MS), fps)
+  const start = snappedStart < trim.start ? Math.min(snapUpToFrame(trim.start, fps), end) : snappedStart
   return { start, end }
+}
+
+/** Where a box may sit: the trim, its end out to a whole frame, never past the take. */
+function boxBounds(trim: Trim, fps: number, durationMs: number): Span {
+  return { start: trim.start, end: Math.min(snapUpToFrame(trim.end, fps), durationMs) }
+}
+
+export function movedBoxTime(time: Span, start: number, trim: Trim, fps: number, durationMs: number): Span {
+  return moveSpan(time, snapDownToFrame(start, fps), boxBounds(trim, fps, durationMs))
+}
+
+export function stretchedBoxTime(time: Span, edge: 'start' | 'end', at: number, trim: Trim, fps: number, durationMs: number): Span {
+  const snapped = edge === 'start' ? snapDownToFrame(at, fps) : snapUpToFrame(at, fps)
+  return stretchSpan(time, edge, snapped, boxBounds(trim, fps, durationMs), MIN_BOX_MS)
 }
 
 interface BoxScene {

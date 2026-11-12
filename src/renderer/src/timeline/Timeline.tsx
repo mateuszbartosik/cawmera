@@ -10,6 +10,7 @@ import { snapToOutput } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
 import { addZoomAt } from '../recording/zoom-actions'
 import { cn, IconButton } from '../ui/controls'
+import { BlurRow } from './BlurRow'
 import { ClipRow } from './ClipRow'
 import { HeaderButton } from './HeaderButton'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
@@ -57,6 +58,7 @@ function TimelinePanel() {
   const recording = useApp((s) => s.doc.recording)
   const recordingId = useApp((s) => s.doc.sourceId)
   const crop = useApp((s) => s.doc.crop)
+  const redactions = useApp((s) => s.doc.redactions)
   const playing = useApp((s) => s.playback.playing)
   const editable = useApp(timelineEditable)
   const selection = useApp((s) => s.timelineSelection)
@@ -149,7 +151,7 @@ function TimelinePanel() {
       <div
         ref={bodyRef}
         className="relative grid min-h-0 flex-1"
-        style={{ gridTemplateRows: `${RULER_HEIGHT}px ${CLIP_HEIGHT}px 1fr`, padding: `${BODY_PADDING}px ${SIDE_PADDING}px` }}
+        style={{ gridTemplateRows: `${RULER_HEIGHT}px ${CLIP_HEIGHT}px 1fr 1fr`, padding: `${BODY_PADDING}px ${SIDE_PADDING}px` }}
       >
         <div className="grid" style={rowColumns}>
           <span />
@@ -169,6 +171,11 @@ function TimelinePanel() {
             </IconButton>
           </span>
           <ZoomRow edits={edits} view={view} width={width} />
+        </div>
+
+        <div className="grid" style={rowColumns}>
+          <RowLabel>Blur</RowLabel>
+          <BlurRow redactions={redactions} view={view} width={width} />
         </div>
 
         <div

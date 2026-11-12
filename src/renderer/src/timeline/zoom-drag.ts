@@ -1,3 +1,4 @@
+import type { Span } from '../recording/timemap'
 import type { ZoomEdit } from '../recording/zoom-edits'
 import { timeToX, xToTime, type TimelineView } from './scale'
 
@@ -7,7 +8,7 @@ export const EDGE_GRAB_PX = 7
 export interface Grab { kind: 'move' | 'start' | 'end'; offsetMs: number }
 
 /** Where a zoom's block is drawn: never narrower than a grabbable block. */
-export function drawnBlock(zoom: ZoomEdit, view: TimelineView, width: number): { left: number; width: number } {
+export function drawnBlock(zoom: Span, view: TimelineView, width: number): { left: number; width: number } {
   const left = timeToX(zoom.start, view, width)
   return { left, width: Math.max(MIN_ZOOM_BLOCK_PX, timeToX(zoom.end, view, width) - left) }
 }
@@ -15,7 +16,7 @@ export function drawnBlock(zoom: ZoomEdit, view: TimelineView, width: number): {
 export const isBlockVisible = (block: { left: number; width: number }, rowWidth: number) => block.left + block.width > 0 && block.left < rowWidth
 
 /** What a press at `x` (row pixels) takes hold of. The offset is from the pointer to the zoom's own edge, so the first move never jumps, even on a block drawn wider than its zoom. */
-export function grabAt(zoom: ZoomEdit, x: number, view: TimelineView, width: number): Grab {
+export function grabAt(zoom: Span, x: number, view: TimelineView, width: number): Grab {
   const block = drawnBlock(zoom, view, width)
   const pressed = xToTime(x, view, width)
   const inBlock = x - block.left

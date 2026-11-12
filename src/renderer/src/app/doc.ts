@@ -13,6 +13,7 @@ export const UI_ZOOMS: UiZoom[] = [1, 0.8, 0.6]
 
 export type RedactStyle = 'blur' | 'pixelate' | 'solid'
 export type ExportFormat = 'webp' | 'png'
+export const REDACT_LABEL: Record<RedactStyle, string> = { blur: 'Blur', pixelate: 'Pixelate', solid: 'Solid' }
 export const FORMAT_LABEL: Record<ExportFormat, string> = { webp: 'WebP', png: 'PNG' }
 
 /**

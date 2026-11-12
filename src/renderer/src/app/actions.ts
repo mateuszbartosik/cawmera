@@ -44,6 +44,7 @@ import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { cropSubject, revealActive } from '../canvas/view'
 import { setCropFrame } from '../recording/crop'
+import { addTimedRedaction } from '../recording/blur-actions'
 import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
 import type { RecordingDoc } from '../recording/settings'
 import { wholeTake } from '../recording/timemap'
@@ -526,6 +527,11 @@ export function removeBackgroundImage() {
 }
 
 export function addRedaction() {
+  if (store.get().doc.recording) {
+    leaveCrop()
+    addTimedRedaction()
+    return
+  }
   const layout = layoutNow()
   if (!layout) return
   leaveCrop()

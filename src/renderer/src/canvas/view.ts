@@ -8,7 +8,7 @@ export const PANEL_WIDTH = 300
 export const PANEL_GAP = 10
 const TOOLBAR_SPACE = 64
 /** Height the recording timeline takes at the bottom of the canvas. */
-export const TIMELINE_SPACE = 176
+export const TIMELINE_SPACE = 212
 /** The crop bar sits above the toolbar while cropping. */
 const CROP_BAR_SPACE = 46
 /** Below this width the panel docks to the bottom as a sheet and the toolbar moves to the top. */
