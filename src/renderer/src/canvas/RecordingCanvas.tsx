@@ -2,13 +2,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CanvasHTMLA
 import { toast } from 'sonner'
 import type { Doc } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
-import { store } from '../app/store'
+import { store, useApp } from '../app/store'
 import { drawRecordingFrame } from '../recording/frame'
 import { attachPlayer, setPlayhead, setPlaying } from '../recording/playback'
 import { RecordingPlayer } from '../recording/player'
 import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
 import { recordingScene } from '../recording/scene'
+import { takeViewFor } from '../recording/take-view'
 import { snapToOutput } from '../recording/timemap'
+import { selectedZoomOf } from '../recording/zoom-actions'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
 
@@ -34,6 +36,10 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   const entry = useRecording(doc.sourceId)
   const entryId = entry?.id ?? null
   const trim = doc.recording?.trim
+  const boxSelected = useApp((s) => s.selection.length > 0)
+  const timelineSelection = useApp((s) => s.timelineSelection)
+  const edits = entry && doc.recording ? takeViewFor(entry, doc.recording, doc.crop).edits : []
+  const wide = boxSelected || selectedZoomOf(edits, timelineSelection) !== null
 
   useEffect(() => {
     if (!entryId) return
@@ -69,12 +75,12 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   }, [player, trim])
 
   const scene = useMemo(
-    () => (entry && player ? recordingScene(entry, doc, style, backdrop, player.video) : null),
-    [entry, player, doc, style, backdrop]
+    () => (entry && player ? recordingScene(entry, doc, style, backdrop, player.video, wide) : null),
+    [entry, player, doc, style, backdrop, wide]
   )
   const posterScene = useMemo(
-    () => (entry?.poster ? recordingScene(entry, doc, style, backdrop, entry.poster) : null),
-    [entry, doc, style, backdrop]
+    () => (entry?.poster ? recordingScene(entry, doc, style, backdrop, entry.poster, wide) : null),
+    [entry, doc, style, backdrop, wide]
   )
 
   useLayoutEffect(() => {

@@ -1,4 +1,14 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from 'react'
 import { ImageSquare, Trash, X } from '@phosphor-icons/react'
 import type { HouseStyle } from '../app/house-style'
 import type { Doc } from '../app/doc'
@@ -22,11 +32,18 @@ import {
   type BoxRef,
   type ShotRecord
 } from '../app/store'
+import { recordingEditLayout } from '../recording/edit-layout'
 import { drawRecordingFrame } from '../recording/frame'
 import { togglePlayback } from '../recording/playback'
 import { stepSpaceTap } from './space-tap'
 import { recordingScene } from '../recording/scene'
-import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
+import { getRecording, POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
+import { takeViewFor, type TakeView } from '../recording/take-view'
+import type { Click } from '../recording/track'
+import { aimZoomByHand, selectedZoomOf, zoomAreaLabel } from '../recording/zoom-actions'
+import { clicksCovered, type ZoomEdit } from '../recording/zoom-edits'
+import { aimedArea, areaGrabAt, CORNERS, draggedFraming, type AreaGrab } from '../recording/zoom-area'
+import { dragSession } from '../timeline/drag-session'
 import { drawScene } from '../render/compose'
 import {
   clipTo,
@@ -54,6 +71,7 @@ import {
   scaleFor,
   settleSelection,
   sourceRectToOutput,
+  sourceToOutput,
   type Layout,
   type Size
 } from '../render/layout'
@@ -64,8 +82,9 @@ import { RecordingCanvas, sizeCanvas } from './RecordingCanvas'
 const HANDLE_PX = 8
 const MIN_ITEM = 6
 const MIN_CROP = 24
-/** Pointer travel before a press on a shot name becomes a reorder. */
+/** Pointer travel before a press on a shot name becomes a reorder, or a press on a zoom’s area moves it. */
 const DRAG_THRESHOLD = 4
+const AREA_LABEL_GAP_PX = 4
 
 type Drag =
   | { kind: 'view-pan'; x: number; y: number; moved: boolean }
@@ -77,6 +96,36 @@ type Drag =
   | { kind: 'sel-move'; start: Point; rect: Rect; before: Doc }
   | { kind: 'sel-resize'; handle: Handle; start: Point; rect: Rect; before: Doc }
   | { kind: 'sel-draw'; start: Point; before: Doc }
+  /** The zoom it aims is pinned when the drag starts; `area` is in frame px, `scale` in export px per frame px. */
+  | { kind: 'zoom-area'; id: string; grab: AreaGrab; start: Point; area: Rect; take: Pick<TakeView, 'crop' | 'frame'>; scale: number; moved: boolean }
+
+/** The selected zoom’s area on the active recording shot. */
+interface ZoomArea {
+  zoom: ZoomEdit
+  take: TakeView
+  /** Frame px. */
+  area: Rect
+  /** Export px per frame px. */
+  scale: number
+  /** Export px, in the shot. */
+  out: Rect
+  dots: { number: number; at: Point }[]
+}
+
+function zoomAreaOf(zoom: ZoomEdit, covered: Click[], take: TakeView, video: Size, output: Size, style: HouseStyle, playhead: number): ZoomArea {
+  const { area, clicks } = aimedArea(zoom, covered, take, playhead)
+  const layout = recordingEditLayout(take, video, output, style)
+  const { crop } = take
+  const inVideo = (p: Point): Point => ({ x: p.x + crop.x, y: p.y + crop.y })
+  return {
+    zoom,
+    take,
+    area,
+    scale: layout.scale,
+    out: sourceRectToOutput(layout, { ...inVideo(area), w: area.w, h: area.h }),
+    dots: clicks.map((click) => ({ number: covered.indexOf(click) + 1, at: sourceToOutput(layout, inVideo(click)) }))
+  }
+}
 
 interface Item {
   box: BoxRef
@@ -144,6 +193,27 @@ function selectionFor(doc: Doc): Rect | null {
   const scale = scaleFor(doc.capturedAt, doc.zoom, style)
   const edge = resolveEdge(doc.edge, doc.crop, source, scale, style, doc.size)
   return effectiveSelection(doc.crop, source, capacity(scale, style, edge, doc.size), edge)
+}
+
+function handlesFor(r: Rect, unit: number, fill: string, stroke: string, handles: Handle[] = HANDLES) {
+  const size = HANDLE_PX * unit
+  return handles.map((handle) => {
+    const hp = handlePoint(r, handle)
+    return (
+      <rect
+        key={handle}
+        x={hp.x - size / 2}
+        y={hp.y - size / 2}
+        width={size}
+        height={size}
+        rx={1.5 * unit}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+    )
+  })
 }
 
 /** Dot grid that moves and scales with the canvas, like a design tool's. */
@@ -229,6 +299,67 @@ const ShotCanvas = memo(function ShotCanvas({
   )
 })
 
+/** The selected zoom’s area over the wide frame: dashed, with corner handles, its depth and aim, and its clicks numbered. */
+function ZoomAreaMarks({
+  shown,
+  box,
+  size,
+  k
+}: {
+  shown: ZoomArea
+  box: { left: number; top: number; width: number; height: number }
+  size: Size
+  k: number
+}) {
+  const { zoom, out, dots } = shown
+  const unit = 1 / k
+  return (
+    <>
+      <svg
+        className="pointer-events-none absolute overflow-visible"
+        style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+        viewBox={`0 0 ${size.width} ${size.height}`}
+        preserveAspectRatio="none"
+        aria-hidden
+        data-testid="zoom-area"
+      >
+        <rect
+          x={out.x}
+          y={out.y}
+          width={out.w}
+          height={out.h}
+          rx={3 * unit}
+          fill="var(--tc-accent)"
+          fillOpacity={0.07}
+          stroke="var(--tc-accent)"
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
+          vectorEffect="non-scaling-stroke"
+        />
+        {handlesFor(out, unit, '#fff', 'var(--tc-accent)', CORNERS)}
+      </svg>
+      <span
+        className="pointer-events-none absolute flex h-[18px] -translate-y-full items-center rounded-[5px] bg-(--tc-accent) px-[7px] text-[10.5px] font-semibold whitespace-nowrap text-white tabular-nums"
+        style={{ left: box.left + out.x * k, top: box.top + out.y * k - AREA_LABEL_GAP_PX }}
+        aria-hidden
+        data-testid="zoom-area-label"
+      >
+        {zoomAreaLabel(zoom)}
+      </span>
+      {dots.map(({ number, at }) => (
+        <span
+          key={number}
+          className="pointer-events-none absolute grid size-[13px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-(--tc-accent) text-[8px] leading-none font-bold text-white tabular-nums shadow-[0_0_0_2px_rgb(255_255_255/0.9)]"
+          style={{ left: box.left + at.x * k, top: box.top + at.y * k }}
+          aria-hidden
+        >
+          {number}
+        </span>
+      ))}
+    </>
+  )
+}
+
 // ---------------------------------------------------------------------------
 
 export function Workspace() {
@@ -241,6 +372,7 @@ export function Workspace() {
   const [reorder, setReorder] = useState<{ id: string; from: number; slot: number; active: boolean } | null>(null)
   /** The box being drawn on the empty canvas (workspace px) and the shots it would pick. */
   const [marquee, setMarquee] = useState<{ area: Rect; ids: string[] } | null>(null)
+  const [areaDrag] = useState(() => dragSession<Doc>(commitFrom))
 
   const state = useApp((s) => s)
   const shots = selectLiveShots(state)
@@ -254,6 +386,32 @@ export function Workspace() {
   const layout = source ? computeLayout(source, doc.crop, doc.capturedAt, doc.zoom, doc.edge, style, doc.size) : null
   const cropping = g.cropping && source !== null
   const activeBox = toScreen(g, rects[active])
+
+  const entry = doc.recording ? getRecording(doc.sourceId) : null
+  const take = entry && doc.recording ? takeViewFor(entry, doc.recording, doc.crop) : null
+  const selectedZoom = take ? selectedZoomOf(take.edits, state.timelineSelection) : null
+  const zoomSpeed = doc.recording?.zoomSpeed ?? null
+  const covered = useMemo(
+    () => (selectedZoom && take && zoomSpeed ? clicksCovered(selectedZoom, take, zoomSpeed) : []),
+    [selectedZoom, take, zoomSpeed]
+  )
+  const zoomArea = selectedZoom && take && entry ? zoomAreaOf(selectedZoom, covered, take, entry.track, doc.size, style, state.playback.time) : null
+  const shownZoomId = zoomArea?.zoom.id ?? null
+
+  const endAreaDrag = () => {
+    areaDrag.end()
+    if (dragRef.current?.kind !== 'zoom-area') return
+    dragRef.current = null
+    setDragging(false)
+  }
+
+  useEffect(() => () => areaDrag.end(), [areaDrag])
+
+  // The selection going away (Escape, Delete, Undo, playback) ends an area drag before another pointer move can edit.
+  useLayoutEffect(() => {
+    const drag = dragRef.current
+    if (drag?.kind === 'zoom-area' && drag.id !== shownZoomId) endAreaDrag()
+  }, [shownZoomId])
 
   // Track the viewport size.
   useLayoutEffect(() => {
@@ -352,6 +510,7 @@ export function Workspace() {
     const root = rootRef.current!
     const world = worldPoint(event)
     const s = store.get()
+    areaDrag.end()
     dragRef.current = null
 
     if (event.button === 1 || spaceRef.current) {
@@ -371,7 +530,13 @@ export function Workspace() {
       const index = shotAt(sizes, world)
       // Shift or Ctrl / Cmd adds to a selection (boxes, or shots), like a design tool.
       const multi = event.shiftKey || event.ctrlKey || event.metaKey
-      if (index === active && layout) {
+      const areaGrab = zoomArea && !multi ? areaGrabAt(zoomArea.out, inActive(world), tolerance) : null
+      if (zoomArea && areaGrab) {
+        clearPickedShots()
+        areaDrag.begin(s.doc)
+        const { zoom, area, take, scale } = zoomArea
+        dragRef.current = { kind: 'zoom-area', id: zoom.id, grab: areaGrab, start: inActive(world), area, take, scale, moved: false }
+      } else if (index === active && layout) {
         const p = inActive(world)
         const items = itemsFor(s.doc, layout)
         const chosen = items.filter((item) => hasBox(s.selection, item.box))
@@ -454,6 +619,19 @@ export function Workspace() {
       setMarquee({ area, ids: [...new Set([...base, ...drag.hits])] })
       return
     }
+    if (drag.kind === 'zoom-area') {
+      if (!areaDrag.accepts(event.buttons)) {
+        endAreaDrag()
+        return
+      }
+      const p = inActive(world)
+      const dx = p.x - drag.start.x
+      const dy = p.y - drag.start.y
+      if (!drag.moved && Math.hypot(dx, dy) * g.k < DRAG_THRESHOLD) return
+      drag.moved = true
+      drag.id = aimZoomByHand(drag.id, draggedFraming(drag.area, drag.grab, dx / drag.scale, dy / drag.scale, drag.take), false)
+      return
+    }
     const s = store.get()
     const src = getSource(s.doc.sourceId)
     if (!src) return
@@ -534,6 +712,10 @@ export function Workspace() {
     setDragging(false)
     rootRef.current?.releasePointerCapture?.(event.pointerId)
     if (!drag) return
+    if (drag.kind === 'zoom-area') {
+      areaDrag.end()
+      return
+    }
     if (drag.kind === 'view-pan') {
       setHover((h) => ({ ...h, cursor: spaceRef.current ? 'grab' : 'default' }))
       return
@@ -586,6 +768,9 @@ export function Workspace() {
         cursor = 'move'
         item = boxKey(hit.box)
       }
+    } else if (zoomArea) {
+      const grab = areaGrabAt(zoomArea.out, inActive(world), tolerance)
+      if (grab) cursor = grab === 'move' ? 'move' : HANDLE_CURSOR[grab]
     }
     if (cursor !== hover.cursor || item !== hover.item) setHover({ cursor, item })
   }
@@ -635,27 +820,6 @@ export function Workspace() {
 
   // -------------------------------------------------------------------------
   // Editor overlays (never exported)
-
-  const handlesFor = (r: Rect, unit: number, fill: string, stroke: string) => {
-    const size = HANDLE_PX * unit
-    return HANDLES.map((handle) => {
-      const hp = handlePoint(r, handle)
-      return (
-        <rect
-          key={handle}
-          x={hp.x - size / 2}
-          y={hp.y - size / 2}
-          width={size}
-          height={size}
-          rx={1.5 * unit}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={1}
-          vectorEffect="non-scaling-stroke"
-        />
-      )
-    })
-  }
 
   let content: ReactNode
   if (cropping && source) {
@@ -818,6 +982,8 @@ export function Workspace() {
           </svg>
         )}
 
+        {zoomArea && <ZoomAreaMarks shown={zoomArea} box={activeBox} size={doc.size} k={g.k} />}
+
         {deleteAt && (
           <button
             type="button"
@@ -872,6 +1038,9 @@ export function Workspace() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onLostPointerCapture={() => {
+        if (dragRef.current?.kind === 'zoom-area') endAreaDrag()
+      }}
       onDoubleClick={onDoubleClick}
       onContextMenu={(event) => event.preventDefault()}
     >

@@ -19,6 +19,8 @@ export interface RecordingScene {
   settings: RecordingDoc
   style: HouseStyle
   backdrop: ImageBitmap | null
+  /** The whole frame, with the camera left out, while the editor aims a zoom or a blur box on it. */
+  wide: boolean
 }
 
 const CLICK_EFFECT_RADIUS_PX = 28

@@ -28,6 +28,7 @@ const pathLength = (points: Point[]) => points.slice(1).reduce((length, point, i
 const layoutOf = (scene: RecordingScene): RecordingLayout => recordingLayout(scene.view.frame, scene.doc.size, scene.style)
 
 function viewAt(scene: RecordingScene, layout: RecordingLayout, outputMs: number): Matrix {
+  if (scene.wide) return [1, 0, 0, 1, 0, 0]
   return viewMatrix(cameraAt(scene.view.camera, outputMs), layout, scene.doc.size)
 }
 

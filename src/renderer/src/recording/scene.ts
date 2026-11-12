@@ -9,7 +9,8 @@ export function recordingScene(
   doc: Doc,
   style: HouseStyle,
   backdrop: ImageBitmap | null,
-  video: CanvasImageSource
+  video: CanvasImageSource,
+  wide = false
 ): RecordingScene | null {
   if (!doc.recording) return null
   return {
@@ -19,6 +20,7 @@ export function recordingScene(
     doc,
     settings: doc.recording,
     style,
-    backdrop
+    backdrop,
+    wide
   }
 }

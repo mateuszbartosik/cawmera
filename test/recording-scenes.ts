@@ -30,7 +30,8 @@ export const zoomScene: RecordingScene = {
   doc: { ...DEFAULT_DOC, size: output },
   settings,
   style: DEFAULT_HOUSE_STYLE,
-  backdrop: null
+  backdrop: null,
+  wide: false
 }
 /** At 4000 the camera holds the zoom and the cursor rests in sight. */
 export const stillScene: RecordingScene = { ...zoomScene, settings: { ...settings, hideWhenStill: false } }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import type { Click } from '../src/renderer/src/recording/track'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
+import type { Rect } from '../src/renderer/src/render/geometry'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 
@@ -10,18 +11,23 @@ const { emptyDoc, store, undo, updateDoc, commitFrom } = await import('../src/re
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
 const { wholeTake } = await import('../src/renderer/src/recording/timemap')
-const { setZoom } = await import('../src/renderer/src/recording/zoom-edits')
+const { takeViewFor } = await import('../src/renderer/src/recording/take-view')
+const { clicksCovered, setZoom, ZOOM_DEPTH_RANGE } = await import('../src/renderer/src/recording/zoom-edits')
+const { aimedArea, draggedFraming, moveArea, resizeArea } = await import('../src/renderer/src/recording/zoom-area')
 const {
   addZoomAt,
+  aimZoomByHand,
   currentZoomEdits,
   deleteSelectedZoom,
   editZooms,
   moveZoomTo,
   resetZooms,
+  selectedZoomOf,
   selectZoom,
   autoAimAvailable,
   setSelectedZoom,
   stretchZoomTo,
+  zoomAreaLabel,
   zoomHint
 } = await import('../src/renderer/src/recording/zoom-actions')
 
@@ -141,6 +147,7 @@ describe('zoom actions', () => {
   it('does not edit when a zoom is gone, or when nothing is selected for a selected edit', () => {
     moveZoomTo('gone', 100)
     stretchZoomTo('gone', 'end', 100)
+    expect(aimZoomByHand('gone', { focus: { x: 100, y: 100 } })).toBe('gone')
     deleteSelectedZoom()
     setSelectedZoom({ depth: 2 })
     expect(storedZooms()).toBeNull()
@@ -210,6 +217,59 @@ describe('zoom actions', () => {
     expect(zoomHint('auto', 1)).toBe('Auto keeps this zoom’s click in view.')
     expect(zoomHint('manual', 0)).toBe('No clicks in this zoom. Drag its area on the shot to aim it.')
     expect(zoomHint('manual', 3)).toBe('Drag the area on the shot to aim it.')
+  })
+
+  it('labels a zoom’s area with its depth and aim', () => {
+    expect(zoomAreaLabel({ depth: 2, aim: 'auto' })).toBe('2.0× · Auto')
+    expect(zoomAreaLabel({ depth: 2.4, aim: 'manual' })).toBe('2.4× · Manual')
+  })
+
+  it('counts a selected zoom only while the take shows it', () => {
+    const edits = currentZoomEdits()
+    expect(selectedZoomOf(edits, { kind: 'zoom', id: 'auto-1' })).toBe(edits[1])
+    expect(selectedZoomOf(edits, { kind: 'zoom', id: 'auto-7' })).toBeNull()
+    expect(selectedZoomOf(edits, { kind: 'range', start: 0, end: 1000 })).toBeNull()
+  })
+
+  it('aims a zoom by hand as one undo step, turning it Manual', () => {
+    selectZoom('auto-1')
+    const before = store.get().doc
+    const followed = aimZoomByHand('auto-1', { focus: { x: 1300, y: 700 } }, false)
+    expect(followed).not.toBe('auto-1')
+    const depth = currentZoomEdits()[1].depth
+    expect(aimZoomByHand(followed, { focus: { x: 1200, y: 650 }, depth: 2.6 }, false)).toBe(followed)
+    expect(store.get().past).toEqual([])
+    commitFrom(before)
+    expect(store.get().past).toEqual([before])
+    expect(currentZoomEdits()[1]).toMatchObject({ id: followed, focus: { x: 1200, y: 650 }, depth: 2.6, aim: 'manual' })
+    expect(depth).not.toBe(2.6)
+    expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: followed })
+    undo()
+    expect(storedZooms()).toBeNull()
+  })
+
+  it('shows a dragged area where it was dragged, from Auto on', () => {
+    const view = () => takeViewFor(entry, store.get().doc.recording!, null)
+    const shownArea = () => {
+      const zoom = selectedZoomOf(view().edits)!
+      return aimedArea(zoom, clicksCovered(zoom, view(), 'calm'), view(), 2600).area
+    }
+    const expectArea = (actual: Rect, expected: Rect) => {
+      for (const key of ['x', 'y', 'w', 'h'] as const) expect(actual[key]).toBeCloseTo(expected[key], 6)
+    }
+    selectZoom('auto-0')
+    const start = shownArea()
+    aimZoomByHand('auto-0', draggedFraming(start, 'move', 100, 50, view()))
+    expectArea(shownArea(), moveArea(start, 100, 50, view().frame))
+    const moved = shownArea()
+    aimZoomByHand(selectedZoomOf(view().edits)!.id, draggedFraming(moved, 'se', 120, 0, view()))
+    expectArea(shownArea(), resizeArea(moved, 'se', 120, 0, view().frame, ZOOM_DEPTH_RANGE))
+  })
+
+  it('moves a zoom’s focus without changing its depth', () => {
+    const { depth } = currentZoomEdits()[0]
+    aimZoomByHand('auto-0', { focus: { x: 700, y: 400 } })
+    expect(storedZooms()![0]).toMatchObject({ depth, focus: { x: 700, y: 400 }, aim: 'manual' })
   })
 })
 

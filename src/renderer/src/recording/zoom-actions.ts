@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { newId, store, updateDoc } from '../app/store'
+import { newId, store, updateDoc, type TimelineSelection } from '../app/store'
 import type { Point } from '../render/geometry'
 import { setRecording } from './actions'
 import { cursorPositionAt } from './cursor'
@@ -22,10 +22,9 @@ export function currentZoomEdits(): ZoomEdit[] {
   return activeTake()?.view.edits ?? []
 }
 
-export function selectedZoomOf(edits: ZoomEdit[]): ZoomEdit | null {
-  const { timelineSelection } = store.get()
-  if (timelineSelection?.kind !== 'zoom') return null
-  const { id } = timelineSelection
+export function selectedZoomOf(edits: ZoomEdit[], selection: TimelineSelection = store.get().timelineSelection): ZoomEdit | null {
+  if (selection?.kind !== 'zoom') return null
+  const { id } = selection
   return edits.find((edit) => edit.id === id) ?? null
 }
 
@@ -76,6 +75,12 @@ export function setSelectedZoom(patch: { depth?: number; aim?: ZoomAim }, histor
   editZooms((edits, id) => (id === null ? null : setZoom(edits, id, patch)), history)
 }
 
+/** Aimed by hand, a zoom is Manual. */
+export function aimZoomByHand(id: string, framing: Partial<Pick<ZoomEdit, 'focus' | 'depth'>>, history = true): string {
+  const aimed = (edits: ZoomEdit[]) => (edits.some((edit) => edit.id === id) ? setZoom(edits, id, { ...framing, aim: 'manual' }) : null)
+  return editZoomById(id, aimed, history)
+}
+
 function focusAt(sourceMs: number): Point {
   const take = activeTake()
   if (!take) return { x: 0, y: 0 }
@@ -118,3 +123,5 @@ export function zoomHint(aim: ZoomAim, clickCount: number): string {
 }
 
 export const autoAimAvailable = (clickCount: number) => clickCount > 0
+
+export const zoomAreaLabel = ({ depth, aim }: Pick<ZoomEdit, 'depth' | 'aim'>) => `${depth.toFixed(1)}× · ${aim === 'auto' ? 'Auto' : 'Manual'}`
