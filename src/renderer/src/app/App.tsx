@@ -4,7 +4,7 @@ import type { MenuCommand } from '@shared/types'
 import { CropBar } from '../canvas/CropBar'
 import { SelectionBar } from '../canvas/SelectionBar'
 import { Workspace } from '../canvas/Workspace'
-import { isNarrow, PANEL_GAP, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
+import { isNarrow, PANEL_GAP, timelineShows, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge } from '../platform/bridge'
@@ -30,6 +30,7 @@ import {
   startCapture,
   stepShot
 } from './actions'
+import { cutSelection, splitAtPlayhead } from '../recording/edit-actions'
 import { deleteSelectedZoom } from '../recording/zoom-actions'
 import { deleteAction, escapeAction } from './selection-keys'
 import { clearPickedShots, isUnsaved, liveShots, pickAllShots, redo, selectShot, store, undo, useApp } from './store'
@@ -125,6 +126,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.shiftKey && event.code === 'Digit2') return run('fit-shot')
   if (key === 'c' && s.doc.sourceId) return void (s.mode === 'crop' ? leaveCrop() : enterCrop())
   if (key === 'r') return void shuffleLook()
+  if (key === 's' && timelineShows(s)) return void (event.preventDefault(), splitAtPlayhead())
   if ((key === 'enter' || key === 'escape') && s.mode === 'crop') return void (event.preventDefault(), leaveCrop())
   const escape = key === 'escape' ? escapeAction(s) : null
   if (escape === 'clear-boxes') return void store.set({ selection: [] })
@@ -133,8 +135,8 @@ function onKeyDown(event: KeyboardEvent) {
   const remove = key === 'delete' || key === 'backspace' ? deleteAction(s) : null
   if (remove === 'remove-boxes') return void (event.preventDefault(), removeSelected())
   if (remove === 'delete-zoom') return void (event.preventDefault(), deleteSelectedZoom())
+  if (remove === 'cut-range') return void (event.preventDefault(), cutSelection())
   if (remove === 'delete-shots') return void (event.preventDefault(), deletePickedShots())
-  if (remove === 'ignore') return
   if (key.startsWith('arrow') && s.selection.length > 0) {
     const step = event.shiftKey ? 10 : 1
     const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0

@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, CaretDown, MagnifyingGlassMinus, MagnifyingGlassPlus, Pause, Play, Plus, Scissors } from '@phosphor-icons/react'
 import { store, useApp } from '../app/store'
 import { PANEL_GAP, PANEL_WIDTH, TIMELINE_SPACE, timelineShows } from '../canvas/view'
+import { rangeHasCut, rateOfRange, restoreSelection, setSelectionRate, splitAtPlayhead } from '../recording/edit-actions'
 import { togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording } from '../recording/registry'
 import { takeViewFor } from '../recording/take-view'
-import { snapToOutput } from '../recording/timemap'
+import { RATES, snapToOutput, type Rate } from '../recording/timemap'
 import { isShownClick } from '../recording/track'
 import { addZoomAt } from '../recording/zoom-actions'
-import { IconButton } from '../ui/controls'
+import { cn, IconButton } from '../ui/controls'
 import { ClipRow } from './ClipRow'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
 import { Playhead } from './Playhead'
@@ -40,6 +41,69 @@ function useWidth() {
   return { ref, width }
 }
 
+function SpeedMenu({ rate, disabled }: { rate: Rate | null; disabled: boolean }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
+  useEffect(() => {
+    if (!open) return
+    const closeOutside = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.stopPropagation()
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape, true)
+    }
+  }, [open])
+  return (
+    <span ref={menuRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-testid="timeline-speed"
+        className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium text-(--tc-label) transition-colors outline-none hover:bg-(--tc-control) hover:text-(--tc-fg) focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50 disabled:pointer-events-none disabled:opacity-35"
+        onClick={() => setOpen((was) => !was)}
+      >
+        Speed · {rate === null ? 'Mixed' : `${rate}×`}
+        <CaretDown size={10} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute top-full right-0 z-20 mt-1 flex min-w-16 flex-col rounded-lg border border-(--tc-line) bg-(--tc-panel) p-1 shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px]">
+          {RATES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option === rate}
+              className={cn(
+                'rounded-md px-2 py-1 text-left text-xs tabular-nums outline-none hover:bg-(--tc-control) focus-visible:bg-(--tc-control)',
+                option === rate ? 'font-semibold text-(--tc-fg)' : 'text-(--tc-label)'
+              )}
+              onClick={() => {
+                setOpen(false)
+                setSelectionRate(option)
+              }}
+            >
+              {option}×
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 function RowLabel({ children }: { children: string }) {
   return <span className="self-center text-[11px] font-medium text-(--tc-label)">{children}</span>
 }
@@ -55,6 +119,7 @@ function TimelinePanel() {
   const recordingId = useApp((s) => s.doc.sourceId)
   const crop = useApp((s) => s.doc.crop)
   const playing = useApp((s) => s.playback.playing)
+  const selection = useApp((s) => s.timelineSelection)
   const storedView = useApp((s) => s.timelineView)
   const time = usePlayhead()
   const entry = getRecording(recordingId)
@@ -85,7 +150,8 @@ function TimelinePanel() {
   if (!recording || !entry) return null
 
   const { track } = entry
-  const { trim } = recording
+  const { trim, pieces } = recording
+  const range = selection?.kind === 'range' ? selection : null
   const { map, edits } = takeViewFor(entry, recording, crop)
   const view = fitView(storedView, duration)
   const viewLength = view.end - view.start
@@ -110,6 +176,21 @@ function TimelinePanel() {
         <span className="text-xs font-semibold tabular-nums" data-testid="timeline-time">
           {formatClock(snapToOutput(map, time))} <span className="font-normal text-(--tc-value)">/ {formatClock(map.outputMs)}</span>
         </span>
+        <IconButton label="Split" shortcut="S" onClick={splitAtPlayhead} data-testid="timeline-split">
+          <Scissors size={15} />
+        </IconButton>
+        <SpeedMenu rate={range ? rateOfRange(pieces, range) : null} disabled={!range} />
+        {range && rangeHasCut(pieces, range) && (
+          <button
+            type="button"
+            data-testid="timeline-restore"
+            className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium text-(--tc-label) transition-colors outline-none hover:bg-(--tc-control) hover:text-(--tc-fg) focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50"
+            onClick={restoreSelection}
+          >
+            <ArrowCounterClockwise size={12} />
+            Restore
+          </button>
+        )}
         <span className="ml-auto flex items-center gap-1">
           <IconButton label="Zoom out" disabled={viewLength >= duration} onClick={() => zoomAroundPlayhead(1 / VIEW_ZOOM_STEP)} data-testid="timeline-zoom-out">
             <MagnifyingGlassMinus size={15} />
@@ -137,7 +218,7 @@ function TimelinePanel() {
 
         <div className="grid" style={rowColumns}>
           <RowLabel>Clip</RowLabel>
-          <ClipRow clicks={shownClicks} trim={trim} view={view} width={width} />
+          <ClipRow clicks={shownClicks} pieces={pieces} trim={trim} view={view} width={width} />
         </div>
 
         <div className="grid" style={rowColumns}>

@@ -152,10 +152,10 @@ describe('selection details', () => {
     expect(escapeAction({ ...base, selection: [box] })).toBe('clear-boxes')
   })
 
-  it('does nothing on Delete while only a timeline selection is set', () => {
+  it('picks what Delete acts on from the selections', () => {
     const base = { selection: [], timelineSelection: null, shotSelection: [] }
     expect(deleteAction({ ...base, timelineSelection: { kind: 'zoom', id: 'z' }, shotSelection: ['a'] })).toBe('delete-zoom')
-    expect(deleteAction({ ...base, timelineSelection: { kind: 'range', start: 0, end: 1 }, shotSelection: ['a'] })).toBe('ignore')
+    expect(deleteAction({ ...base, timelineSelection: { kind: 'range', start: 0, end: 1 }, shotSelection: ['a'] })).toBe('cut-range')
     expect(deleteAction({ ...base, selection: [box] })).toBe('remove-boxes')
     expect(deleteAction({ ...base, shotSelection: ['a'] })).toBe('delete-shots')
   })

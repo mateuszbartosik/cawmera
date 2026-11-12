@@ -61,3 +61,5 @@ export function scrubTo(sourceMs: number) {
   if (activePlayer) activePlayer.seek(sourceMs)
   else setPlayhead(sourceMs)
 }
+
+export const currentPlayhead = () => playhead
