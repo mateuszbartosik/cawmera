@@ -31,13 +31,15 @@ export function newBoxTime(playheadMs: number, trim: Trim, fps: number, duration
 
 /** Where a box may sit: the frames that hold the trim's start and end, never past the take. Clamping to these keeps every box edge on the grid. */
 function boxBounds(trim: Trim, fps: number, durationMs: number): Span {
-  return { start: snapDownToFrame(trim.start, fps), end: Math.min(snapUpToFrame(trim.end, fps), durationMs) }
+  const start = snapDownToFrame(trim.start, fps)
+  return { start, end: Math.min(Math.max(snapUpToFrame(trim.end, fps), start + MS_PER_SECOND / fps), durationMs) }
 }
 
 export function movedBoxTime(time: Span, start: number, trim: Trim, fps: number, durationMs: number): Span {
-  const moved = moveSpan(time, snapDownToFrame(start, fps), boxBounds(trim, fps, durationMs))
+  const bounds = boxBounds(trim, fps, durationMs)
+  const moved = moveSpan(time, snapDownToFrame(start, fps), bounds)
   const movedStart = snapDownToFrame(moved.start, fps)
-  return { start: movedStart, end: movedStart + (time.end - time.start) }
+  return { start: movedStart, end: Math.min(snapUpToFrame(movedStart + (time.end - time.start), fps), bounds.end) }
 }
 
 export function stretchedBoxTime(time: Span, edge: 'start' | 'end', at: number, trim: Trim, fps: number, durationMs: number): Span {

@@ -159,6 +159,29 @@ describe('moved and stretched boxes', () => {
     }
   })
 
+  it('moves a box capped at an off-grid take duration with its end on the grid and its last frame covered', () => {
+    const fps = 30
+    const frame = 1000 / fps
+    const wholeTake = { start: 0, end: 9999 }
+    const capped = newBoxTime(4000, wholeTake, fps, 9999)
+    expect(capped.end).toBe(9999)
+    const moved = movedBoxTime(capped, 3000, wholeTake, fps, 9999)
+    const length = capped.end - capped.start
+    expect(moved.start).toBeCloseTo(3000, 6)
+    expect(Math.abs(moved.end / frame - Math.round(moved.end / frame))).toBeLessThan(1e-6)
+    expect(moved.end - moved.start).toBeGreaterThanOrEqual(length - 1e-6)
+    expect(moved.end - moved.start).toBeLessThan(length + frame)
+    const lastHeldFrame = moved.start + length - 1
+    expect([lastHeldFrame, moved.end - 1, moved.end + REDACTION_PAD_MS - 1].every((ms) => isShownAt({ ...box(0, 0), time: moved }, ms))).toBe(true)
+  })
+
+  it('keeps a box at least one frame long when the trim is empty on a frame boundary', () => {
+    const { start, end } = newBoxTime(1000, { start: 1000, end: 1000 }, FPS, 10_000)
+    expect(end - start).toBeGreaterThanOrEqual(FRAME_MS - 1e-6)
+    const moved = movedBoxTime({ start, end }, 1000, { start: 1000, end: 1000 }, FPS, 10_000)
+    expect(moved.end).toBeGreaterThan(moved.start)
+  })
+
   it('keeps both ends on the grid at a minimum-length edge', () => {
     for (const fps of [30, 60]) {
       const frame = 1000 / fps
