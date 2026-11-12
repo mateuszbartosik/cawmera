@@ -273,17 +273,19 @@ function shotEntry(record: ShotRecord, keys: Record<KeyKind, Map<string, string>
   }
 }
 
-/** The keys name each source or take once, whichever shots show it. They become the file names of Task 22's archive. */
+/**
+ * The keys name each source or take once, whichever shots show it. They become the file names of Task 22's archive. They're
+ * kept per kind, source id → key for screenshots and take id → key for recordings, since a source and a take could share an id.
+ */
 export function buildDraftManifest(
   shots: ShotRecord[],
   activeId: string,
   style: HouseStyle,
   appVersion: string,
   nameOf: (record: ShotRecord) => string
-): { manifest: string; keys: Map<string, string> } {
-  const keysByKind: Record<KeyKind, Map<string, string>> = { image: new Map(), take: new Map() }
-  const entries = shots.map((record) => shotEntry(record, keysByKind, nameOf))
-  const keys = new Map([...keysByKind.image, ...keysByKind.take])
+): { manifest: string; keys: Record<KeyKind, Map<string, string>> } {
+  const keys: Record<KeyKind, Map<string, string>> = { image: new Map(), take: new Map() }
+  const entries = shots.map((record) => shotEntry(record, keys, nameOf))
   const manifest = JSON.stringify({
     format: DRAFT_FORMAT,
     version: DRAFT_VERSION,

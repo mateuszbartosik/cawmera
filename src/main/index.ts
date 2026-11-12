@@ -16,7 +16,7 @@ import {
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import type { CaptureSource, CountdownRequest, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
+import type { CaptureSource, CountdownRequest, DiscardAnswer, DiscardPurpose, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
 import { registerDrafts } from './drafts'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
 import { connectDirectly, disableProxyResolution } from './no-network'
@@ -27,7 +27,7 @@ registerMediaScheme()
 disableProxyResolution(app.commandLine)
 
 let win: BrowserWindow | null = null
-/** Set once the renderer agreed to close (no unsaved shots, or the user chose to discard them). */
+/** Set once the renderer agreed to close (no unsaved shots, or the user saved them in a draft or chose to discard them). */
 let closeApproved = false
 /** Closes anyway if the renderer never answers (crashed, reloading). */
 let closeFallback: NodeJS.Timeout | null = null
@@ -87,6 +87,8 @@ function buildMenu() {
         item('New shot', 'CmdOrCtrl+N', 'new-shot'),
         item('Open image…', 'CmdOrCtrl+O', 'open'),
         item('Capture…', 'CmdOrCtrl+Shift+2', 'capture'),
+        { type: 'separator' },
+        item('Save draft…', 'CmdOrCtrl+Shift+D', 'save-draft'),
         { type: 'separator' },
         item('Copy image', 'CmdOrCtrl+Shift+C', 'copy'),
         item('Export…', 'CmdOrCtrl+S', 'export'),
@@ -401,19 +403,26 @@ function registerIpc() {
     return { folder: target, paths }
   })
 
-  ipcMain.handle('window:confirm-discard', async (_event, count: unknown) => {
+  const DISCARD_DIALOGS: Record<DiscardPurpose, { buttons: string[]; detail: string }> = {
+    close: { buttons: ['Save draft…', 'Discard and close', 'Keep working'], detail: 'Cawmera doesn’t keep screenshots or recordings after it closes.' },
+    open: { buttons: ['Save draft…', 'Discard and open', 'Cancel'], detail: 'Opening a draft replaces the canvas.' }
+  }
+  const DISCARD_ANSWERS: DiscardAnswer[] = ['save', 'discard', 'keep']
+
+  ipcMain.handle('window:confirm-discard', async (_event, count: unknown, purpose: unknown): Promise<DiscardAnswer> => {
     clearCloseFallback()
-    if (!win) return true
+    if (!win) return 'discard'
     const n = typeof count === 'number' ? count : 1
+    const { buttons, detail } = DISCARD_DIALOGS[purpose === 'open' ? 'open' : 'close']
     const { response } = await dialog.showMessageBox(win, {
       type: 'warning',
-      buttons: ['Discard and close', 'Keep working'],
-      defaultId: 1,
-      cancelId: 1,
+      buttons,
+      defaultId: 0,
+      cancelId: 2,
       message: n === 1 ? 'One shot hasn’t been exported.' : `${n} shots haven’t been exported.`,
-      detail: 'Cawmera doesn’t keep screenshots or recordings after it closes.'
+      detail
     })
-    return response === 0
+    return DISCARD_ANSWERS[response] ?? 'keep'
   })
 
   ipcMain.on('window:close', () => {

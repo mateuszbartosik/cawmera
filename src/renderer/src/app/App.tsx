@@ -5,9 +5,10 @@ import { CropBar } from '../canvas/CropBar'
 import { SelectionBar } from '../canvas/SelectionBar'
 import { Workspace } from '../canvas/Workspace'
 import { isNarrow, PANEL_GAP, timelineEditable, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
+import { saveDraft, saveOrDiscardUnsaved } from '../drafts/actions'
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
-import { bridge } from '../platform/bridge'
+import { bridge, isDesktop } from '../platform/bridge'
 import { exportRecording, finishRecording, recordingFailed } from '../recording/actions'
 import { Timeline } from '../timeline/Timeline'
 import { Toolbar } from '../toolbar/Toolbar'
@@ -33,7 +34,7 @@ import {
 import { cutSelection, splitAtPlayhead } from '../recording/edit-actions'
 import { deleteSelectedZoom } from '../recording/zoom-actions'
 import { deleteAction, escapeAction } from './selection-keys'
-import { clearPickedShots, isUnsaved, liveShots, pickAllShots, redo, selectShot, store, undo, useApp } from './store'
+import { clearPickedShots, liveShots, pickAllShots, redo, selectShot, store, undo, unsavedCount, useApp } from './store'
 
 function runCommand(command: MenuCommand) {
   switch (command) {
@@ -47,6 +48,8 @@ function runCommand(command: MenuCommand) {
       return stepShot(1)
     case 'previous-shot':
       return stepShot(-1)
+    case 'save-draft':
+      return void saveDraft()
     case 'export':
       return void (store.get().doc.recording ? exportRecording() : exportImage())
     case 'export-all':
@@ -100,6 +103,7 @@ function onKeyDown(event: KeyboardEvent) {
   }
   if (mod && event.shiftKey && key === 's') return run('export-all')
   if (mod && key === 's') return run('export')
+  if (isDesktop && mod && event.shiftKey && key === 'd') return run('save-draft')
   if (mod && key === 'o') return run('open')
   if (mod && key === 'n') return run('new-shot')
   if (mod && key === 'pagedown') return run('next-shot')
@@ -207,7 +211,6 @@ export function App() {
       }
       void loadFiles(files, 'drop')
     }
-    const unsavedCount = () => liveShots().filter(isUnsaved).length
     // Browser build: the browser's own "leave site?" prompt.
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!bridge && unsavedCount() > 0) event.preventDefault()
@@ -224,10 +227,9 @@ export function App() {
     const offCancel = bridge?.onCaptureCancel(cancelCapture)
     const offFinished = bridge?.onRecordingFinished((result) => void finishRecording(result))
     const offFailed = bridge?.onRecordingFailed((error) => void recordingFailed(error))
-    // Desktop: closing with shots that were never exported asks first.
+    // Desktop: closing with unsaved shots asks first, and Save draft closes only once the draft is saved.
     const offClose = bridge?.onCloseRequest(async () => {
-      const count = unsavedCount()
-      if (count === 0 || (await bridge!.confirmDiscard(count))) bridge!.closeWindow()
+      if (await saveOrDiscardUnsaved('close')) bridge!.closeWindow()
     })
     return () => {
       window.removeEventListener('paste', onPaste)

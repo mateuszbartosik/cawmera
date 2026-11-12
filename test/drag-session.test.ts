@@ -27,8 +27,8 @@ beforeEach(() => {
   const other: Doc = { ...DEFAULT_DOC, angle: 90 }
   store.set({
     shots: [
-      { id: 'a', doc, past: [], future: [], savedDoc: null },
-      { id: 'b', doc: other, past: [], future: [], savedDoc: null }
+      { id: 'a', doc, past: [], future: [], savedDoc: null, draftDoc: null },
+      { id: 'b', doc: other, past: [], future: [], savedDoc: null, draftDoc: null }
     ],
     activeId: 'a',
     doc,
@@ -125,8 +125,8 @@ describe('a drag session', () => {
     const other = shot('b').doc
     store.set({
       shots: [
-        { id: 'a', doc: dragged, past: [], future: [], savedDoc: null },
-        { id: 'b', doc: other, past: [], future: [], savedDoc: null }
+        { id: 'a', doc: dragged, past: [], future: [], savedDoc: null, draftDoc: null },
+        { id: 'b', doc: other, past: [], future: [], savedDoc: null, draftDoc: null }
       ],
       activeId: 'b',
       doc: other,

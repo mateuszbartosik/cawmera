@@ -55,7 +55,7 @@ const bridge: CawmeraBridge = {
     }
   },
   onCloseRequest: (listener) => subscribe('close-request', listener),
-  confirmDiscard: (unsavedCount) => ipcRenderer.invoke('window:confirm-discard', unsavedCount),
+  confirmDiscard: (unsavedCount, purpose) => ipcRenderer.invoke('window:confirm-discard', unsavedCount, purpose),
   closeWindow: () => ipcRenderer.send('window:close')
 }
 

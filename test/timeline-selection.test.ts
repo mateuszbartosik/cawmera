@@ -19,7 +19,7 @@ const box = { kind: 'redaction', id: 'box' } as const
 
 beforeEach(() => {
   const doc = recordingDoc(10_000)
-  const record = { id: 'take', doc, past: [], future: [], savedDoc: null }
+  const record = { id: 'take', doc, past: [], future: [], savedDoc: null, draftDoc: null }
   store.set({
     shots: [record],
     activeId: 'take',

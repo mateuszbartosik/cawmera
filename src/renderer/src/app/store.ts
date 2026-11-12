@@ -57,8 +57,10 @@ export interface ShotRecord {
   doc: Doc
   past: Doc[]
   future: Doc[]
-  /** The document as it was last written to a file; anything else is unsaved work. */
+  /** The document as it was last exported. */
   savedDoc: Doc | null
+  /** The document as it was last saved in a draft. Any document other than these two is unsaved work. */
+  draftDoc: Doc | null
 }
 
 export interface AppState {
@@ -68,6 +70,7 @@ export interface AppState {
   past: Doc[]
   future: Doc[]
   savedDoc: Doc | null
+  draftDoc: Doc | null
   shots: ShotRecord[]
   mode: Mode
   selection: Selection
@@ -89,6 +92,8 @@ export interface AppState {
   playback: Playback
   /** Share of the video export done (0..1); null when no export runs. */
   exportProgress: number | null
+  /** A draft is being saved. The main process runs one draft operation at a time. */
+  draftBusy: boolean
   houseStyleOpen: boolean
   style: HouseStyle
   /** The house background image, decoded; null when the style has none, or while it decodes. */
@@ -181,7 +186,7 @@ export function emptyDoc(previous?: Doc): Doc {
 }
 
 const prefs = loadPrefs()
-const firstShot: ShotRecord = { id: newId(), doc: emptyDoc(), past: [], future: [], savedDoc: null }
+const firstShot: ShotRecord = { id: newId(), doc: emptyDoc(), past: [], future: [], savedDoc: null, draftDoc: null }
 
 let state: AppState = {
   activeId: firstShot.id,
@@ -189,6 +194,7 @@ let state: AppState = {
   past: [],
   future: [],
   savedDoc: null,
+  draftDoc: null,
   shots: [firstShot],
   mode: 'compose',
   selection: [],
@@ -203,6 +209,7 @@ let state: AppState = {
   captureMode: 'screenshot',
   playback: { playing: false, time: 0 },
   exportProgress: null,
+  draftBusy: false,
   houseStyleOpen: false,
   style: loadStoredStyle(),
   backdrop: null,
@@ -287,22 +294,24 @@ export function useApp<T>(selector: (s: AppState) => T): T {
 /** All shots with the active one's live document. */
 export function liveShots(s: AppState = state): ShotRecord[] {
   return s.shots.map((record) =>
-    record.id === s.activeId ? { ...record, doc: s.doc, past: s.past, future: s.future, savedDoc: s.savedDoc } : record
+    record.id === s.activeId ? { ...record, doc: s.doc, past: s.past, future: s.future, savedDoc: s.savedDoc, draftDoc: s.draftDoc } : record
   )
 }
 
 /** Memoized for React: the same array until a shot or the active document changes. */
-let liveCache: { shots: ShotRecord[]; doc: Doc; savedDoc: Doc | null; result: ShotRecord[] } | null = null
+let liveCache: { shots: ShotRecord[]; doc: Doc; savedDoc: Doc | null; draftDoc: Doc | null; result: ShotRecord[] } | null = null
 export function selectLiveShots(s: AppState): ShotRecord[] {
-  if (liveCache && liveCache.shots === s.shots && liveCache.doc === s.doc && liveCache.savedDoc === s.savedDoc) {
+  if (liveCache && liveCache.shots === s.shots && liveCache.doc === s.doc && liveCache.savedDoc === s.savedDoc && liveCache.draftDoc === s.draftDoc) {
     return liveCache.result
   }
   const result = liveShots(s)
-  liveCache = { shots: s.shots, doc: s.doc, savedDoc: s.savedDoc, result }
+  liveCache = { shots: s.shots, doc: s.doc, savedDoc: s.savedDoc, draftDoc: s.draftDoc, result }
   return result
 }
 
-export const isUnsaved = (record: ShotRecord) => record.doc.sourceId !== null && record.doc !== record.savedDoc
+export const isUnsaved = (record: ShotRecord) => record.doc.sourceId !== null && record.doc !== record.savedDoc && record.doc !== record.draftDoc
+
+export const unsavedCount = () => liveShots().filter(isUnsaved).length
 
 function activate(shots: ShotRecord[], id: string): Partial<AppState> {
   const target = shots.find((record) => record.id === id) ?? shots[0]
@@ -313,6 +322,7 @@ function activate(shots: ShotRecord[], id: string): Partial<AppState> {
     past: target.past,
     future: target.future,
     savedDoc: target.savedDoc,
+    draftDoc: target.draftDoc,
     mode: 'compose',
     selection: [],
     timelineView: null,
@@ -388,7 +398,7 @@ export function addShot(doc?: Doc): string {
   store.set((s) => {
     const shots = liveShots(s)
     const last = shots.at(-1)?.doc
-    const record: ShotRecord = { id, doc: doc ?? emptyDoc(last), past: [], future: [], savedDoc: null }
+    const record: ShotRecord = { id, doc: doc ?? emptyDoc(last), past: [], future: [], savedDoc: null, draftDoc: null }
     return activate([...shots, record], id)
   })
   return id
@@ -411,7 +421,7 @@ export function removeShots(ids: string[]): RemovedShots | null {
   let placeholder: string | null = null
   if (rest.length === 0) {
     placeholder = newId()
-    rest = [{ id: placeholder, doc: emptyDoc(removed.at(-1)!.record.doc), past: [], future: [], savedDoc: null }]
+    rest = [{ id: placeholder, doc: emptyDoc(removed.at(-1)!.record.doc), past: [], future: [], savedDoc: null, draftDoc: null }]
   }
   const nextActive = ids.includes(state.activeId) ? rest[Math.min(removed[0].index, rest.length - 1)].id : state.activeId
   store.set(() => activate(rest, nextActive))
@@ -456,6 +466,18 @@ export function markSnapshotSaved(id: string, doc: Doc) {
   store.set((s) => ({
     savedDoc: id === s.activeId ? doc : s.savedDoc,
     shots: s.shots.map((record) => (record.id === id && record.id !== s.activeId ? { ...record, savedDoc: doc } : record))
+  }))
+}
+
+/** Marks the shots as they were written to a draft as saved in it: edits made since still count as unsaved. */
+export function markDraftSaved(written: ShotRecord[]) {
+  const docs = new Map(written.map((record) => [record.id, record.doc]))
+  store.set((s) => ({
+    draftDoc: docs.get(s.activeId) ?? s.draftDoc,
+    shots: s.shots.map((record) => {
+      const doc = docs.get(record.id)
+      return doc && record.id !== s.activeId ? { ...record, draftDoc: doc } : record
+    })
   }))
 }
 

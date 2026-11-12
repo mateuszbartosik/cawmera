@@ -35,6 +35,7 @@ export type MenuCommand =
   | 'new-shot'
   | 'next-shot'
   | 'previous-shot'
+  | 'save-draft'
   | 'export'
   | 'export-all'
   | 'copy'
@@ -84,6 +85,11 @@ export type DraftOpenFailure = 'not-a-draft' | 'damaged' | 'too-large' | 'unread
 
 export type DraftOpenResult = { ok: true; files: DraftFiles } | { ok: false; reason: DraftOpenFailure; message: string }
 
+/** What is about to drop the unsaved work: closing the window, or opening a draft over it. */
+export type DiscardPurpose = 'close' | 'open'
+
+export type DiscardAnswer = 'save' | 'discard' | 'keep'
+
 export interface CawmeraBridge {
   readonly platform: string
   getVersion(): Promise<string>
@@ -132,7 +138,7 @@ export interface CawmeraBridge {
   onMenuCommand(listener: (command: MenuCommand) => void): () => void
   /** The window wants to close; answer with closeWindow() or keep it open. */
   onCloseRequest(listener: () => void): () => void
-  /** Native "discard unsaved shots?" dialog. */
-  confirmDiscard(unsavedCount: number): Promise<boolean>
+  /** Native "unsaved shots" dialog: save a draft first, discard the work, or keep working. */
+  confirmDiscard(unsavedCount: number, purpose: DiscardPurpose): Promise<DiscardAnswer>
   closeWindow(): void
 }

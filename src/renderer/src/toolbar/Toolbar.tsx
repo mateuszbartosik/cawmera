@@ -1,15 +1,18 @@
-import { ArrowUUpLeft, ArrowUUpRight, CornersIn, MagnifyingGlassMinus, MagnifyingGlassPlus, Moon, Plus, Sun } from '@phosphor-icons/react'
+import { ArrowUUpLeft, ArrowUUpRight, CornersIn, FloppyDisk, MagnifyingGlassMinus, MagnifyingGlassPlus, Moon, Plus, Sun } from '@phosphor-icons/react'
 import { newShot } from '../app/actions'
 import { redo, store, undo, useApp } from '../app/store'
 import { isNarrow, TIMELINE_SPACE, timelineShows, workspaceGeometry, zoomFit, zoomStep, zoomTo } from '../canvas/view'
+import { saveDraft } from '../drafts/actions'
+import { isDesktop } from '../platform/bridge'
 import { IconButton } from '../ui/controls'
 
 const Divider = () => <span className="mx-1 h-4 w-px bg-(--tc-line)" aria-hidden />
 
-/** Floating bottom toolbar: new shot, history, view zoom, theme. */
+/** Floating bottom toolbar: new shot, save draft (desktop), history, view zoom, theme. */
 export function Toolbar() {
   const canUndo = useApp((s) => s.past.length > 0)
   const canRedo = useApp((s) => s.future.length > 0)
+  const draftBusy = useApp((s) => s.draftBusy)
   const theme = useApp((s) => s.theme)
   const zoom = useApp((s) => workspaceGeometry(s).zoom)
   const narrow = useApp((s) => isNarrow(s))
@@ -33,6 +36,11 @@ export function Toolbar() {
           <IconButton label="New shot" shortcut="Ctrl+N" onClick={newShot} data-testid="new-shot">
             <Plus size={15} />
           </IconButton>
+          {isDesktop && (
+            <IconButton label="Save draft" shortcut="Ctrl+Shift+D" onClick={() => void saveDraft()} disabled={draftBusy}>
+              <FloppyDisk size={15} />
+            </IconButton>
+          )}
           <Divider />
         </>
       )}

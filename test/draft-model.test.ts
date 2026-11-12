@@ -45,7 +45,7 @@ const editedRecording: RecordingDoc = {
 const blurBox: Redaction = { id: 'r1', rect: { x: 10, y: 20, w: 300, h: 100 }, time: { start: 600, end: 2000 } }
 const shotBox: Redaction = { id: 'r2', rect: { x: 5, y: 5, w: 50, h: 50 }, time: null }
 
-const record = (id: string, doc: Doc): ShotRecord => ({ id, doc, past: [], future: [], savedDoc: null })
+const record = (id: string, doc: Doc): ShotRecord => ({ id, doc, past: [], future: [], savedDoc: null, draftDoc: null })
 const shots: ShotRecord[] = [
   record('s0', { ...DEFAULT_DOC, angle: 100 }),
   record('s1', { ...DEFAULT_DOC, sourceId: 'img1', capturedAt: 2, angle: 200, redactions: [shotBox], crop: { x: 0, y: 0, w: 400, h: 300 }, fileName: 'billing' }),
@@ -71,7 +71,7 @@ function manifestWith(doc: Record<string, unknown>): string {
 }
 
 const parsedRecording = (doc: Record<string, unknown>) => {
-  const key = recordingOnly().keys.get('take1')!
+  const key = recordingOnly().keys.take.get('take1')!
   return parseDraftManifest(manifestWith(doc), new Map([[key, track]])).shots[0].doc
 }
 
@@ -125,11 +125,11 @@ describe('normalizeZoomEdits', () => {
 describe('draft manifest', () => {
   it('round-trips a canvas with an empty shot, a screenshot and an edited recording', () => {
     const { manifest, keys } = buildDraftManifest(shots, shots[2].id, style, '0.8.0', (r) => r.id)
-    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take1')!, track]]), new Map([[keys.get('img1')!, imageSize]]))
+    const parsed = parseDraftManifest(manifest, new Map([[keys.take.get('take1')!, track]]), new Map([[keys.image.get('img1')!, imageSize]]))
     expect(parsed.shots.map((s) => s.kind)).toEqual(['empty', 'screenshot', 'recording'])
     expect(parsed.shots[0].doc).toEqual(shots[0].doc)
-    expect(parsed.shots[1].doc).toEqual({ ...shots[1].doc, sourceId: keys.get('img1') })
-    expect(parsed.shots[2].doc).toEqual({ ...shots[2].doc, sourceId: keys.get('take1') })
+    expect(parsed.shots[1].doc).toEqual({ ...shots[1].doc, sourceId: keys.image.get('img1') })
+    expect(parsed.shots[2].doc).toEqual({ ...shots[2].doc, sourceId: keys.take.get('take1') })
     expect(parsed.style).toEqual(style)
     expect(parsed.active).toBe(2)
   })
@@ -137,15 +137,15 @@ describe('draft manifest', () => {
   it('writes the format, version, app version and a key per source', () => {
     const { manifest, keys } = buildDraftManifest(shots, 's1', style, '0.8.0', (r) => `name ${r.id}`)
     expect(JSON.parse(manifest)).toMatchObject({ format: DRAFT_FORMAT, version: DRAFT_VERSION, savedBy: '0.8.0', active: 1 })
-    expect([...keys.keys()].sort()).toEqual(['img1', 'take1'])
+    expect([[...keys.image.keys()], [...keys.take.keys()]]).toEqual([['img1'], ['take1']])
     expect(JSON.parse(manifest).shots[2]).toMatchObject({ kind: 'recording', name: 'name s2' })
   })
 
   it('shares a key between shots that show the same take', () => {
     const copy = record('s3', shots[2].doc)
     const { keys, manifest } = buildDraftManifest([shots[2], copy], 's3', style, '0.8.0', (r) => r.id)
-    expect(keys.size).toBe(1)
-    const parsed = parseDraftManifest(manifest, new Map([[keys.get('take1')!, track]]))
+    expect(keys.take.size).toBe(1)
+    const parsed = parseDraftManifest(manifest, new Map([[keys.take.get('take1')!, track]]))
     expect(parsed.shots.map((s) => s.kind)).toEqual(['recording', 'recording'])
     expect(parsed.active).toBe(1)
   })
@@ -186,8 +186,8 @@ describe('draft manifest', () => {
 
   it('keeps the active shot inside the canvas', () => {
     const { manifest, keys } = buildDraftManifest(shots, 's2', style, '0.8.0', (r) => r.id)
-    const tracks = new Map([[keys.get('take1')!, track]])
-    const sizes = new Map([[keys.get('img1')!, imageSize]])
+    const tracks = new Map([[keys.take.get('take1')!, track]])
+    const sizes = new Map([[keys.image.get('img1')!, imageSize]])
     const load = (active: unknown) => parseDraftManifest(JSON.stringify({ ...JSON.parse(manifest), active }), tracks, sizes).active
     expect([load(99), load(-3), load('x'), load(1.5)]).toEqual([0, 0, 0, 0])
   })
@@ -270,7 +270,7 @@ describe('draft manifest', () => {
     tampered.shots[0].doc.redactions = [{ id: 'r', rect: { x: 700, y: 500, w: 900, h: 900 }, time: { start: 1, end: 2 } }]
     tampered.shots[0].doc.crop = { x: -5, y: -5, w: 5000, h: 5000 }
     tampered.shots[0].doc.spotlight = { on: true, rect: { x: 100, y: 100, w: 9999, h: 50 }, dim: 0.3, outline: false }
-    const doc = parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.get('img1')!, imageSize]])).shots[0].doc
+    const doc = parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.image.get('img1')!, imageSize]])).shots[0].doc
     expect(doc.redactions).toEqual([{ id: 'r', rect: { x: 700, y: 500, w: 100, h: 100 }, time: null }])
     expect(doc.crop).toBeNull()
     expect(doc.spotlight).toEqual({ on: true, rect: { x: 100, y: 100, w: 700, h: 50 }, dim: 0.3, outline: false })
@@ -279,10 +279,12 @@ describe('draft manifest', () => {
 
   it('builds keys that fit the archive and stay apart when a screenshot and a take share an id', () => {
     const same = [record('a', { ...DEFAULT_DOC, sourceId: 'same', capturedAt: 1 }), record('b', { ...DEFAULT_DOC, sourceId: 'same', recording: editedRecording })]
-    const { manifest } = buildDraftManifest([...shots, ...same], 's0', style, '0.8.0', (r) => r.id)
-    const all = [...new Set<string>(JSON.parse(manifest).shots.flatMap((shot: { key?: string }) => (shot.key ? [shot.key] : [])))]
+    const { manifest, keys } = buildDraftManifest([...shots, ...same], 's0', style, '0.8.0', (r) => r.id)
+    const entries: { key?: string }[] = JSON.parse(manifest).shots
+    const all = [...new Set<string>(entries.flatMap((shot) => (shot.key ? [shot.key] : [])))]
     expect(all.length).toBe(4)
     for (const key of all) expect(key).toMatch(DRAFT_KEY)
+    expect([keys.image.get('same'), keys.take.get('same')]).toEqual([entries[3].key, entries[4].key])
   })
 
   it('refuses keys the archive would not accept', () => {
@@ -299,7 +301,7 @@ describe('draft manifest', () => {
     const crop = (rect: unknown) => {
       const tampered = JSON.parse(manifest)
       tampered.shots[0].doc.crop = rect
-      return parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.get('img1')!, imageSize]])).shots[0].doc.crop
+      return parseDraftManifest(JSON.stringify(tampered), new Map(), new Map([[keys.image.get('img1')!, imageSize]])).shots[0].doc.crop
     }
     expect(crop({ x: 10.4, y: 20.6, w: 100.2, h: 50.5 })).toEqual({ x: 10, y: 21, w: 101, h: 50 })
     expect(crop({ x: -3, y: 0, w: 900, h: 700 })).toBeNull()
@@ -307,7 +309,7 @@ describe('draft manifest', () => {
 
   it('refuses a manifest with more shots, boxes, zooms or pieces than Cawmera could make', () => {
     const many = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `x${i}`, rect: { x: 0, y: 0, w: 5, h: 5 }, time: { start: 600, end: 700 } }))
-    const key = recordingOnly().keys.get('take1')!
+    const key = recordingOnly().keys.take.get('take1')!
     const read = (text: string) => { try { parseDraftManifest(text, new Map([[key, track]])); return null } catch (e) { return (e as DraftError).reason } }
     expect(read(manifestWith({ redactions: many(DRAFT_LIMITS.redactions) }))).toBeNull()
     expect(read(manifestWith({ redactions: many(DRAFT_LIMITS.redactions + 1) }))).toBe('damaged')
