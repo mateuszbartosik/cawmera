@@ -6,7 +6,7 @@ import { cursorPositionAt } from './cursor'
 import { getRecording } from './registry'
 import { takeViewFor } from './take-view'
 import { snapToOutput, type Span } from './timemap'
-import { addZoom, materialize, moveZoom, removeZoom, stretchZoom, type ZoomAim, type ZoomEdit } from './zoom-edits'
+import { addZoom, materialize, moveZoom, removeZoom, setZoom, stretchZoom, type ZoomAim, type ZoomEdit } from './zoom-edits'
 
 const NO_ROOM_MESSAGE = 'No room for a zoom here'
 
@@ -30,20 +30,25 @@ export function selectedZoomOf(edits: ZoomEdit[]): ZoomEdit | null {
 }
 
 export function selectZoom(id: string | null) {
+  const { timelineSelection } = store.get()
+  const alreadySelected = id === null ? timelineSelection === null : timelineSelection?.kind === 'zoom' && timelineSelection.id === id
+  if (alreadySelected) return
   store.set({ timelineSelection: id === null ? null : { kind: 'zoom', id } })
 }
 
-export function editZooms(change: (edits: ZoomEdit[], selectedId: string | null) => ZoomEdit[] | null, history = true) {
+/** Returns the ids the first edit gave the automatic zooms it stored; empty when nothing changed. */
+export function editZooms(change: (edits: ZoomEdit[], selectedId: string | null) => ZoomEdit[] | null, history = true): Map<string, string> {
   const take = activeTake()
-  if (!take) return
+  if (!take) return new Map()
   const { edits } = take.view
   const selectedId = selectedZoomOf(edits)?.id ?? null
   const changed = change(edits, selectedId)
-  if (!changed || changed === edits) return
+  if (!changed || changed === edits) return new Map()
   const { edits: stored, ids } = materialize(changed, newId)
   updateDoc((doc) => (doc.recording ? { recording: { ...doc.recording, zooms: stored } } : {}), { history })
   const followed = selectedId === null ? null : (ids.get(selectedId) ?? selectedId)
   if (followed !== null && stored.some((edit) => edit.id === followed)) selectZoom(followed)
+  return ids
 }
 
 const keptSpan = (): Span | null => {
@@ -51,18 +56,24 @@ const keptSpan = (): Span | null => {
   return take && { start: take.recording.trim.start, end: take.recording.trim.end }
 }
 
-export function moveSelectedZoom(start: number, history = true) {
-  const bounds = keptSpan()
-  if (bounds) editZooms((edits, id) => (id === null ? null : moveZoom(edits, id, start, bounds)), history)
+/** Edits one zoom whatever is selected, and returns the id it has afterwards. */
+function editZoomById(id: string, change: (edits: ZoomEdit[]) => ZoomEdit[] | null, history: boolean): string {
+  const ids = editZooms(change, history)
+  return ids.get(id) ?? id
 }
 
-export function stretchSelectedZoom(edge: 'start' | 'end', at: number, history = true) {
+export function moveZoomTo(id: string, start: number, history = true): string {
   const bounds = keptSpan()
-  if (bounds) editZooms((edits, id) => (id === null ? null : stretchZoom(edits, id, edge, at, bounds)), history)
+  return bounds ? editZoomById(id, (edits) => moveZoom(edits, id, start, bounds), history) : id
+}
+
+export function stretchZoomTo(id: string, edge: 'start' | 'end', at: number, history = true): string {
+  const bounds = keptSpan()
+  return bounds ? editZoomById(id, (edits) => stretchZoom(edits, id, edge, at, bounds), history) : id
 }
 
 export function setSelectedZoom(patch: { depth?: number; aim?: ZoomAim }, history = true) {
-  editZooms((edits, id) => (id === null ? null : edits.map((edit) => (edit.id === id ? { ...edit, ...patch } : edit))), history)
+  editZooms((edits, id) => (id === null ? null : setZoom(edits, id, patch)), history)
 }
 
 function focusAt(sourceMs: number): Point {
@@ -79,12 +90,14 @@ export function addZoomAt(sourceMs: number) {
   const bounds = keptSpan()
   if (!bounds) return
   const id = newId()
-  const focus = focusAt(sourceMs)
   let added = false
   editZooms((edits) => {
-    const next = addZoom(edits, sourceMs, focus, bounds, id)
-    added = next !== null
-    return next
+    const placed = addZoom(edits, sourceMs, { x: 0, y: 0 }, bounds, id)
+    const zoom = placed?.find((edit) => edit.id === id)
+    added = zoom !== undefined
+    if (!placed || !zoom) return null
+    const focus = focusAt(zoom.start)
+    return placed.map((edit) => (edit.id === id ? { ...edit, focus } : edit))
   })
   if (added) selectZoom(id)
   else toast(NO_ROOM_MESSAGE)
@@ -103,3 +116,5 @@ export function zoomHint(aim: ZoomAim, clickCount: number): string {
   if (aim === 'manual') return 'Drag the area on the shot to aim it.'
   return clickCount === 1 ? 'Auto keeps this zoom’s click in view.' : `Auto keeps this zoom’s ${clickCount} clicks in view.`
 }
+
+export const autoAimAvailable = (clickCount: number) => clickCount > 0

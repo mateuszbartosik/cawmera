@@ -354,6 +354,7 @@ export function Segmented<T extends string | number>({
 }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([])
   const index = Math.max(0, options.findIndex((option) => option.value === value))
+  const tabStop = options[index].disabled ? Math.max(0, options.findIndex((option) => !option.disabled)) : index
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
     if (!delta) return
@@ -387,7 +388,7 @@ export function Segmented<T extends string | number>({
               role="radio"
               aria-checked={selected}
               disabled={option.disabled}
-              tabIndex={selected ? 0 : -1}
+              tabIndex={i === tabStop ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
                 'rounded-md text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-(--tc-accent)/50 disabled:pointer-events-none disabled:opacity-35',

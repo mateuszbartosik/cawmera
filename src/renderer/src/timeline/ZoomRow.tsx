@@ -1,76 +1,33 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
 import type { Doc } from '../app/doc'
 import { commitFrom, store, useApp } from '../app/store'
-import { addZoomAt, moveSelectedZoom, selectZoom, stretchSelectedZoom } from '../recording/zoom-actions'
+import { addZoomAt, moveZoomTo, selectZoom, stretchZoomTo } from '../recording/zoom-actions'
 import type { ZoomEdit } from '../recording/zoom-edits'
 import { cn } from '../ui/controls'
 import { dragSession } from './drag-session'
-import { timeToX, xToTime, type TimelineView } from './scale'
-
-const MIN_ZOOM_BLOCK_PX = 28
-const EDGE_GRAB_PX = 7
-
-type Grab = { kind: 'move' | 'start' | 'end'; offsetMs: number }
+import { xToTime, type TimelineView } from './scale'
+import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, type Grab } from './zoom-drag'
 
 interface ZoomRowProps { edits: ZoomEdit[]; view: TimelineView; width: number }
-interface ZoomBlockProps { zoom: ZoomEdit; selected: boolean; view: TimelineView; width: number }
+interface DraggedZoom { id: string; grab: Grab }
 
-function ZoomBlock({ zoom, selected, view, width }: ZoomBlockProps) {
-  const drag = useRef(dragSession<Doc>(commitFrom))
-  const grab = useRef<Grab>({ kind: 'move', offsetMs: 0 })
-  const left = timeToX(zoom.start, view, width)
-  const right = timeToX(zoom.end, view, width)
-  const blockWidth = Math.max(MIN_ZOOM_BLOCK_PX, right - left)
-  const visible = left + blockWidth > 0 && left < width
+const ZOOM_ID_ATTRIBUTE = 'data-zoom-id'
 
-  useEffect(() => () => drag.current.end(), [])
-
-  useEffect(() => {
-    if (!visible) drag.current.end()
-  }, [visible])
-
-  if (!visible) return null
-
-  const timeAt = (event: MouseEvent<HTMLElement>) => {
-    const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
-    return xToTime(event.clientX - bounds.left, view, bounds.width)
-  }
-  const grabAt = (event: MouseEvent<HTMLElement>): Grab => {
-    const x = event.clientX - event.currentTarget.getBoundingClientRect().left
-    const t = timeAt(event)
-    if (x < EDGE_GRAB_PX) return { kind: 'start', offsetMs: t - zoom.start }
-    if (x > blockWidth - EDGE_GRAB_PX) return { kind: 'end', offsetMs: t - zoom.end }
-    return { kind: 'move', offsetMs: t - zoom.start }
-  }
-
+function ZoomBlock({ zoom, selected, view, width }: { zoom: ZoomEdit; selected: boolean; view: TimelineView; width: number }) {
+  const block = drawnBlock(zoom, view, width)
+  if (!isBlockVisible(block, width)) return null
   return (
     <div
       role="button"
       aria-pressed={selected}
       aria-label={`Zoom ${zoom.depth.toFixed(1)}×`}
       data-testid="zoom-block"
+      {...{ [ZOOM_ID_ATTRIBUTE]: zoom.id }}
       className={cn(
-        'absolute top-1/2 grid h-6 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-md border text-[11px] font-semibold text-(--tc-fg) tabular-nums select-none',
+        'absolute top-1/2 grid h-6 -translate-y-1/2 cursor-grab place-items-center rounded-md border text-[11px] font-semibold text-(--tc-fg) tabular-nums select-none',
         selected ? 'border-(--tc-accent) bg-(--tc-accent)/35' : 'border-(--tc-accent)/60 bg-(--tc-accent)/15 hover:bg-(--tc-accent)/25'
       )}
-      style={{ left, width: blockWidth }}
-      onPointerDown={(event) => {
-        if (event.button !== 0) return
-        event.currentTarget.setPointerCapture(event.pointerId)
-        grab.current = grabAt(event)
-        selectZoom(zoom.id)
-        drag.current.begin(store.get().doc)
-      }}
-      onPointerMove={(event) => {
-        const { kind, offsetMs } = grab.current
-        if (!drag.current.accepts(event.buttons)) return
-        const t = timeAt(event) - offsetMs
-        if (kind === 'move') moveSelectedZoom(t, false)
-        else stretchSelectedZoom(kind, t, false)
-      }}
-      onPointerUp={() => drag.current.end()}
-      onPointerCancel={() => drag.current.end()}
-      onLostPointerCapture={() => drag.current.end()}
+      style={{ left: block.left, width: block.width }}
     >
       <span aria-hidden className="absolute inset-y-0 left-0 cursor-ew-resize" style={{ width: EDGE_GRAB_PX }} />
       <span aria-hidden className="absolute inset-y-0 right-0 cursor-ew-resize" style={{ width: EDGE_GRAB_PX }} />
@@ -82,26 +39,56 @@ function ZoomBlock({ zoom, selected, view, width }: ZoomBlockProps) {
 export function ZoomRow({ edits, view, width }: ZoomRowProps) {
   const selection = useApp((s) => s.timelineSelection)
   const selectedId = selection?.kind === 'zoom' ? selection.id : null
+  const session = useRef(dragSession<Doc>(commitFrom))
+  const dragged = useRef<DraggedZoom | null>(null)
 
-  const timeAt = (event: MouseEvent<HTMLElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    return xToTime(event.clientX - bounds.left, view, bounds.width)
+  const endDrag = () => {
+    session.current.end()
+    dragged.current = null
   }
+  const pointerX = (event: MouseEvent<HTMLElement>) => event.clientX - event.currentTarget.getBoundingClientRect().left
+
+  useEffect(() => endDrag, [])
+
+  useEffect(() => {
+    if (!dragged.current) return
+    const { id } = dragged.current
+    const zoom = edits.find((edit) => edit.id === id)
+    if (!zoom || !isBlockVisible(drawnBlock(zoom, view, width), width)) endDrag()
+  }, [edits, view, width])
 
   return (
     <div
-      className="relative overflow-hidden"
+      className="relative touch-none overflow-hidden"
       data-testid="zoom-row"
       onPointerDown={(event) => {
-        if (event.button === 0 && event.target === event.currentTarget && selectedId !== null) selectZoom(null)
+        if (event.button !== 0) return
+        const element = (event.target as HTMLElement).closest<HTMLElement>(`[${ZOOM_ID_ATTRIBUTE}]`)
+        const zoom = edits.find((edit) => edit.id === element?.getAttribute(ZOOM_ID_ATTRIBUTE))
+        if (!zoom) {
+          if (selectedId !== null) selectZoom(null)
+          return
+        }
+        event.currentTarget.setPointerCapture(event.pointerId)
+        dragged.current = { id: zoom.id, grab: grabAt(zoom, pointerX(event), view, width) }
+        selectZoom(zoom.id)
+        session.current.begin(store.get().doc)
       }}
+      onPointerMove={(event) => {
+        if (!session.current.accepts(event.buttons) || !dragged.current) return
+        const { id, grab } = dragged.current
+        const target = dragTarget(grab, pointerX(event), view, width)
+        dragged.current.id = grab.kind === 'move' ? moveZoomTo(id, target, false) : stretchZoomTo(id, grab.kind, target, false)
+      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
       onDoubleClick={(event) => {
-        if (event.target === event.currentTarget) addZoomAt(timeAt(event))
+        if (event.target === event.currentTarget) addZoomAt(xToTime(pointerX(event), view, width))
       }}
     >
-      {edits.map((zoom, index) => (
-        // Index keys: the first edit renames automatic zooms, and a block being dragged has to stay mounted through it.
-        <ZoomBlock key={index} zoom={zoom} selected={zoom.id === selectedId} view={view} width={width} />
+      {edits.map((zoom) => (
+        <ZoomBlock key={zoom.id} zoom={zoom} selected={zoom.id === selectedId} view={view} width={width} />
       ))}
     </div>
   )

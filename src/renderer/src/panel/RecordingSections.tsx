@@ -9,7 +9,7 @@ import type { ZoomSpeed } from '../recording/camera'
 import { getRecording } from '../recording/registry'
 import { defaultsFor, differsFromDefault, type RecordingDoc } from '../recording/settings'
 import { takeViewFor } from '../recording/take-view'
-import { deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
+import { autoAimAvailable, deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
 import { clicksCovered, ZOOM_DEPTH_RANGE, type ZoomAim } from '../recording/zoom-edits'
 import { IconButton, percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
@@ -111,7 +111,7 @@ export function ZoomSection() {
   const clickCount = useMemo(() => (zoom && view && recording ? clicksCovered(zoom, view, recording.zoomSpeed).length : 0), [zoom, view, recording?.zoomSpeed])
   if (!zoom) return null
 
-  const aimOptions = AIM_OPTIONS.map((option) => (option.value === 'auto' ? { ...option, disabled: clickCount === 0 } : option))
+  const aimOptions = AIM_OPTIONS.map((option) => (option.value === 'auto' ? { ...option, disabled: !autoAimAvailable(clickCount) } : option))
   return (
     <Section
       title="Zoom"

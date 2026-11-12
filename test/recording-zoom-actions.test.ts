@@ -16,11 +16,12 @@ const {
   currentZoomEdits,
   deleteSelectedZoom,
   editZooms,
-  moveSelectedZoom,
+  moveZoomTo,
   resetZooms,
   selectZoom,
+  autoAimAvailable,
   setSelectedZoom,
-  stretchSelectedZoom,
+  stretchZoomTo,
   zoomHint
 } = await import('../src/renderer/src/recording/zoom-actions')
 
@@ -107,9 +108,11 @@ describe('zoom actions', () => {
     selectZoom('auto-1')
     const before = store.get().doc
     const startedAt = currentZoomEdits()[1].start
-    moveSelectedZoom(startedAt + 100, false)
-    moveSelectedZoom(startedAt + 200, false)
-    moveSelectedZoom(startedAt + 300, false)
+    const followed = moveZoomTo('auto-1', startedAt + 100, false)
+    expect(followed).toBe(currentZoomEdits()[1].id)
+    expect(followed).not.toBe('auto-1')
+    moveZoomTo(followed, startedAt + 200, false)
+    moveZoomTo(followed, startedAt + 300, false)
     expect(store.get().past).toEqual([])
     commitFrom(before)
     expect(store.get().past).toEqual([before])
@@ -119,18 +122,36 @@ describe('zoom actions', () => {
     expect(storedZooms()).toBeNull()
   })
 
-  it('stretches the selected zoom’s edge', () => {
-    selectZoom('auto-1')
+  it('stretches the zoom it is given, selected or not', () => {
+    selectZoom('auto-0')
     const { end } = currentZoomEdits()[1]
-    stretchSelectedZoom('end', end + 500)
+    stretchZoomTo('auto-1', 'end', end + 500)
     expect(currentZoomEdits()[1].end).toBe(end + 500)
   })
 
-  it('does not edit with no zoom selected', () => {
-    moveSelectedZoom(100)
-    stretchSelectedZoom('end', 100)
+  it('keeps editing the dragged zoom after the selection moves elsewhere', () => {
+    selectZoom('auto-1')
+    const followed = moveZoomTo('auto-1', 5000, false)
+    selectZoom(null)
+    const moved = moveZoomTo(followed, 5200, false)
+    expect(moved).toBe(followed)
+    expect(currentZoomEdits().find((edit) => edit.id === followed)!.start).toBe(5200)
+  })
+
+  it('does not edit when a zoom is gone, or when nothing is selected for a selected edit', () => {
+    moveZoomTo('gone', 100)
+    stretchZoomTo('gone', 'end', 100)
     deleteSelectedZoom()
+    setSelectedZoom({ depth: 2 })
     expect(storedZooms()).toBeNull()
+  })
+
+  it('does not replace the selection when it stays the same', () => {
+    selectZoom('auto-1')
+    const followed = moveZoomTo('auto-1', 5000, false)
+    const selection = store.get().timelineSelection
+    moveZoomTo(followed, 5100, false)
+    expect(store.get().timelineSelection).toBe(selection)
   })
 
   it('adds a zoom aimed at the cursor, which sits on the clicks, and selects it', () => {
@@ -142,6 +163,17 @@ describe('zoom actions', () => {
     expect(added.focus.y).toBeCloseTo(581.25)
     expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: added.id })
     expect(edits).toHaveLength(3)
+  })
+
+  it('aims a zoom added inside another at the cursor where it starts', () => {
+    const [first] = currentZoomEdits()
+    addZoomAt(first.end)
+    const aimedAtItsStart = currentZoomEdits().find((edit) => edit.aim === 'manual')!
+    undo()
+    addZoomAt(first.start + 100)
+    const added = currentZoomEdits().find((edit) => edit.aim === 'manual')!
+    expect(added.start).toBe(first.end)
+    expect(added.focus).toEqual(aimedAtItsStart.focus)
   })
 
   it('aims a new zoom at the frame centre when the take has no cursor', () => {
@@ -165,7 +197,12 @@ describe('zoom actions', () => {
   it('sets depth and aim on the selected zoom', () => {
     selectZoom('auto-0')
     setSelectedZoom({ depth: 5, aim: 'manual' })
-    expect(storedZooms()![0]).toMatchObject({ depth: 5, aim: 'manual' })
+    expect(storedZooms()![0]).toMatchObject({ depth: 3, aim: 'manual' })
+  })
+
+  it('offers Auto aim only for a zoom that covers clicks', () => {
+    expect(autoAimAvailable(0)).toBe(false)
+    expect(autoAimAvailable(1)).toBe(true)
   })
 
   it('words the aim hint for the clicks a zoom covers', () => {
