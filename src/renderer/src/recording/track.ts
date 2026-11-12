@@ -79,6 +79,22 @@ export function parseTrack(json: unknown): RecordingTrack {
   return { kind: raw.kind, width: raw.width, height: raw.height, fps: raw.fps, durationMs: raw.durationMs, scale: raw.scale, cursor, clicks }
 }
 
+export function serializeTrack(track: RecordingTrack): string {
+  const shapes = [...new Set(track.cursor.flatMap((sample) => (sample.shape === null ? [] : [sample.shape])))]
+  return JSON.stringify({
+    version: 1,
+    kind: track.kind,
+    width: track.width,
+    height: track.height,
+    fps: track.fps,
+    durationMs: track.durationMs,
+    scale: track.scale,
+    shapes,
+    cursor: track.cursor.map((sample) => [sample.t, sample.x, sample.y, sample.shape === null ? HIDDEN_SHAPE_INDEX : shapes.indexOf(sample.shape)]),
+    clicks: track.clicks.map((click) => [click.t, click.x, click.y, click.button === 'left' ? 0 : 1, click.up ?? NO_RELEASE])
+  })
+}
+
 export function isInFrame(click: Click, frame: Size): boolean {
   return click.x >= 0 && click.x <= frame.width && click.y >= 0 && click.y <= frame.height
 }

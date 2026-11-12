@@ -44,6 +44,8 @@ export function validPieces(input: unknown, durationMs: number): Piece[] {
   return tiled
 }
 
+export const normalizePieces = validPieces
+
 const samePiece = (a: Piece, b: Piece) => a.start === b.start && a.end === b.end && a.rate === b.rate && a.cut === b.cut
 
 export const samePieces = (a: Piece[], b: Piece[]): boolean => a === b || (a.length === b.length && a.every((piece, i) => samePiece(piece, b[i])))

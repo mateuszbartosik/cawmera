@@ -59,6 +59,13 @@ function boxBounds(trim: Trim, fps: number, durationMs: number): Span {
   return { start, end: Math.min(Math.max(snapUpToFrame(trim.end, fps), start + MS_PER_SECOND / fps), durationMs) }
 }
 
+/** A loaded box covers whole frames: its start snaps down and its end up, inside the frames that hold the trim's ends, and it lasts a frame at least. */
+export function settledBoxTime(time: Span, trim: Trim, fps: number, durationMs: number): Span {
+  const bounds = boxBounds(trim, fps, durationMs)
+  const start = Math.min(Math.max(snapDownToFrame(time.start, fps), bounds.start), bounds.end - MS_PER_SECOND / fps)
+  return { start, end: Math.min(Math.max(snapUpToFrame(time.end, fps), snapUpToFrame(start + MS_PER_SECOND / fps, fps)), bounds.end) }
+}
+
 export function movedBoxTime(time: Span, start: number, trim: Trim, fps: number, durationMs: number): Span {
   const bounds = boxBounds(trim, fps, durationMs)
   const moved = moveSpan(time, snapDownToFrame(start, fps), bounds)
