@@ -6,23 +6,13 @@ import type { Span } from '../recording/timemap'
 import { cn } from '../ui/controls'
 import { useDragSession } from './drag-session'
 import type { TimelineView } from './scale'
-import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, type Grab } from './zoom-drag'
+import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, redactionAtX, type Grab } from './zoom-drag'
 
 interface BlurRowProps { redactions: Redaction[]; view: TimelineView; width: number }
 interface DraggedBox { id: string; grab: Grab }
 type TimedRedaction = Redaction & { time: Span }
 
 const isTimed = (redaction: Redaction): redaction is TimedRedaction => redaction.time !== null
-
-/** The box whose drawn block covers `x` (row pixels), if any; the topmost when drawn blocks overlap. */
-function boxAtX(boxes: TimedRedaction[], x: number, view: TimelineView, width: number): TimedRedaction | null {
-  return (
-    boxes.findLast((box) => {
-      const block = drawnBlock(box.time, view, width)
-      return x >= block.left && x <= block.left + block.width
-    }) ?? null
-  )
-}
 
 function BlurBlock({ box, label, selected, view, width }: { box: TimedRedaction; label: string; selected: boolean; view: TimelineView; width: number }) {
   const block = drawnBlock(box.time, view, width)
@@ -75,13 +65,13 @@ export function BlurRow({ redactions, view, width }: BlurRowProps) {
       onPointerDown={(event) => {
         if (event.button !== 0) return
         const x = pointerX(event)
-        const box = boxAtX(boxes, x, view, width)
+        const box = redactionAtX(boxes, x, view, width)
         if (!box) {
           if (store.get().selection.length > 0) store.set({ selection: [] })
           return
         }
         event.currentTarget.setPointerCapture(event.pointerId)
-        dragged.current = { id: box.id, grab: grabAt(box.time, x, view, width) }
+        dragged.current = { id: box.id, grab: grabAt(box.time!, x, view, width) }
         selectRedaction(box.id)
         session.begin()
       }}

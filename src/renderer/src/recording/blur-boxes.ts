@@ -24,24 +24,26 @@ export const snapUpToFrame = (ms: number, fps: number): number => (Math.ceil((ms
 
 /** A frame is only half unblurred if a box starts or ends inside it, so both ends go out to whole source frames. */
 export function newBoxTime(playheadMs: number, trim: Trim, fps: number, durationMs: number): Span {
-  const { end } = boxBounds(trim, fps, durationMs)
-  const snappedStart = snapDownToFrame(Math.min(playheadMs, end - MIN_BOX_MS), fps)
-  const start = snappedStart < trim.start ? Math.min(snapUpToFrame(trim.start, fps), end) : snappedStart
-  return { start, end }
+  const bounds = boxBounds(trim, fps, durationMs)
+  const start = Math.max(bounds.start, snapDownToFrame(Math.min(playheadMs, bounds.end - MIN_BOX_MS), fps))
+  return { start, end: bounds.end }
 }
 
-/** Where a box may sit: the trim, its end out to a whole frame, never past the take. */
+/** Where a box may sit: the frames that hold the trim's start and end, never past the take. Clamping to these keeps every box edge on the grid. */
 function boxBounds(trim: Trim, fps: number, durationMs: number): Span {
-  return { start: trim.start, end: Math.min(snapUpToFrame(trim.end, fps), durationMs) }
+  return { start: snapDownToFrame(trim.start, fps), end: Math.min(snapUpToFrame(trim.end, fps), durationMs) }
 }
 
 export function movedBoxTime(time: Span, start: number, trim: Trim, fps: number, durationMs: number): Span {
-  return moveSpan(time, snapDownToFrame(start, fps), boxBounds(trim, fps, durationMs))
+  const moved = moveSpan(time, snapDownToFrame(start, fps), boxBounds(trim, fps, durationMs))
+  const movedStart = snapDownToFrame(moved.start, fps)
+  return { start: movedStart, end: movedStart + (time.end - time.start) }
 }
 
 export function stretchedBoxTime(time: Span, edge: 'start' | 'end', at: number, trim: Trim, fps: number, durationMs: number): Span {
-  const snapped = edge === 'start' ? snapDownToFrame(at, fps) : snapUpToFrame(at, fps)
-  return stretchSpan(time, edge, snapped, boxBounds(trim, fps, durationMs), MIN_BOX_MS)
+  const bounds = boxBounds(trim, fps, durationMs)
+  const stretched = stretchSpan(time, edge, at, bounds, MIN_BOX_MS)
+  return { start: snapDownToFrame(stretched.start, fps), end: Math.min(snapUpToFrame(stretched.end, fps), bounds.end) }
 }
 
 interface BoxScene {

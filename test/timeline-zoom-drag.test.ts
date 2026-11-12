@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dragTarget, drawnBlock, EDGE_GRAB_PX, grabAt, isBlockVisible, MIN_ZOOM_BLOCK_PX, zoomAtX } from '../src/renderer/src/timeline/zoom-drag'
+import { dragTarget, drawnBlock, EDGE_GRAB_PX, grabAt, isBlockVisible, MIN_ZOOM_BLOCK_PX, redactionAtX, zoomAtX } from '../src/renderer/src/timeline/zoom-drag'
 import type { ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 
 const view = { start: 0, end: 10_000 }
@@ -48,5 +48,25 @@ describe('zoom block drag', () => {
     expect(zoomAtX(edits, 700 + MIN_ZOOM_BLOCK_PX - 2, view, width)).toBe(narrow)
     expect(zoomAtX(edits, 700 + MIN_ZOOM_BLOCK_PX + 2, view, width)).toBeNull()
     expect(zoomAtX(edits, 100, view, width)).toBeNull()
+  })
+})
+
+describe('redactionAtX', () => {
+  const view = { start: 0, end: 10_000 }
+  const width = 1000
+  const at = (id: string, start: number, end: number | null) => ({ id, rect: { x: 0, y: 0, w: 1, h: 1 }, time: end === null ? null : { start, end } })
+
+  it('finds the topmost timed box whose drawn block covers x, ignoring untimed ones', () => {
+    const under = at('under', 1000, 3000)
+    const over = at('over', 2000, 4000)
+    const boxes = [under, over, at('untimed', 0, null)]
+    expect(redactionAtX(boxes, 150, view, width)).toBe(under)
+    expect(redactionAtX(boxes, 250 + 100, view, width)).toBe(over)
+    expect(redactionAtX(boxes, 800, view, width)).toBeNull()
+  })
+
+  it('finds a short box through its minimum drawn width', () => {
+    const short = at('short', 5000, 5010)
+    expect(redactionAtX([short], 500 + MIN_ZOOM_BLOCK_PX - 2, view, width)).toBe(short)
   })
 })

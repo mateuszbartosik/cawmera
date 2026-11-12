@@ -1,3 +1,4 @@
+import type { Redaction } from '../app/doc'
 import type { Span } from '../recording/timemap'
 import type { ZoomEdit } from '../recording/zoom-edits'
 import { timeToX, xToTime, type TimelineView } from './scale'
@@ -33,6 +34,17 @@ export function zoomAtX(edits: ZoomEdit[], x: number, view: TimelineView, width:
   return (
     edits.findLast((zoom) => {
       const block = drawnBlock(zoom, view, width)
+      return x >= block.left && x <= block.left + block.width
+    }) ?? null
+  )
+}
+
+/** The timed box whose drawn block covers `x` (row pixels), if any; the topmost when drawn blocks overlap. */
+export function redactionAtX(redactions: Redaction[], x: number, view: TimelineView, width: number): Redaction | null {
+  return (
+    redactions.findLast(({ time }) => {
+      if (!time) return false
+      const block = drawnBlock(time, view, width)
       return x >= block.left && x <= block.left + block.width
     }) ?? null
   )

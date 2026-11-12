@@ -77,16 +77,35 @@ describe('newBoxTime', () => {
 })
 
 describe('newBoxTime inside the trim and the take', () => {
-  it('starts at the trim when the playhead is before it', () => {
+  it('starts on the frame that holds the trim start when the playhead is before it', () => {
     const { start, end } = newBoxTime(500, { start: 2000, end: 9000 }, FPS, 10_000)
-    expect(start).toBeGreaterThanOrEqual(2000)
-    expect(start).toBeLessThan(2000 + FRAME_MS)
+    expect(start).toBeLessThanOrEqual(2000)
+    expect(start).toBeGreaterThan(2000 - FRAME_MS)
     expect(end).toBe(9000)
   })
 
-  it('never starts before the trim when the trim is shorter than the minimum', () => {
+  it('starts on the frame that holds a trim start off the grid', () => {
+    for (const fps of [30, 60]) {
+      const frameMs = 1000 / fps
+      const { start } = newBoxTime(1001, { start: 1001, end: 9000 }, fps, 10_000)
+      expect(start).toBeLessThanOrEqual(1001)
+      expect(start).toBeGreaterThan(1001 - frameMs)
+    }
+  })
+
+  it('covers the first output frame when the playhead sits at the trim start', () => {
+    for (const fps of [30, 60]) {
+      const trim = { start: 1001, end: 9000 }
+      const pieces = [piece(0, 10_000)]
+      const map = timeMapOf(trim, pieces)
+      const time = newBoxTime(1001, trim, fps, 10_000)
+      expect(isShownAt({ ...box(0, 0), time }, outputToSource(map, 0))).toBe(true)
+    }
+  })
+
+  it('stays on the frame grid when the trim is shorter than the minimum', () => {
     const { start, end } = newBoxTime(2000, { start: 2000, end: 2100 }, FPS, 10_000)
-    expect(start).toBeGreaterThanOrEqual(2000)
+    expect(start).toBeLessThanOrEqual(2000)
     expect(end).toBeGreaterThanOrEqual(2100)
     expect(start).toBeLessThan(end)
   })
@@ -94,7 +113,7 @@ describe('newBoxTime inside the trim and the take', () => {
   it('keeps the minimum where the trim allows it', () => {
     const { start, end } = newBoxTime(5000, { start: 2000, end: 5100 }, FPS, 10_000)
     expect(end - start).toBeGreaterThanOrEqual(MIN_BOX_MS)
-    expect(start).toBeGreaterThanOrEqual(2000)
+    expect(start).toBeGreaterThan(2000 - FRAME_MS)
   })
 
   it('does not run past the take when the end snaps up', () => {
@@ -125,6 +144,32 @@ describe('moved and stretched boxes', () => {
     expect(onGrid(start.start) && start.start <= 2005 && start.start > 2005 - FRAME_MS).toBe(true)
     const end = stretchedBoxTime({ start: 3000, end: 4000 }, 'end', 5005, trim, FPS, 10_000)
     expect(onGrid(end.end) && end.end >= 5005 && end.end < 5005 + FRAME_MS).toBe(true)
+  })
+
+  it('covers the first output frame of a trim off the grid after a move to the trim start', () => {
+    for (const fps of [30, 60]) {
+      const offGrid = { start: 1001, end: 9000 }
+      const map = timeMapOf(offGrid, [piece(0, 10_000)])
+      const moved = movedBoxTime({ start: 3000, end: 4000 }, 0, offGrid, fps, 10_000)
+      expect(isShownAt({ ...box(0, 0), time: moved }, outputToSource(map, 0))).toBe(true)
+      const frame = 1000 / fps
+      expect(Math.abs(moved.start / frame - Math.round(moved.start / frame))).toBeLessThan(1e-6)
+      const stretched = stretchedBoxTime({ start: 3000, end: 4000 }, 'start', 0, offGrid, fps, 10_000)
+      expect(isShownAt({ ...box(0, 0), time: stretched }, outputToSource(map, 0))).toBe(true)
+    }
+  })
+
+  it('keeps both ends on the grid at a minimum-length edge', () => {
+    for (const fps of [30, 60]) {
+      const frame = 1000 / fps
+      const grid = (ms: number) => Math.abs(ms / frame - Math.round(ms / frame)) < 1e-6
+      const shortEnd = stretchedBoxTime({ start: 3000, end: 4000 }, 'end', 3010, trim, fps, 10_000)
+      const shortStart = stretchedBoxTime({ start: 3000, end: 4000 }, 'start', 3990, trim, fps, 10_000)
+      for (const { start, end } of [shortEnd, shortStart]) {
+        expect(grid(start) && grid(end)).toBe(true)
+        expect(end - start).toBeGreaterThanOrEqual(MIN_BOX_MS - 1e-6)
+      }
+    }
   })
 
   it('keeps a stretched box at least the minimum long', () => {

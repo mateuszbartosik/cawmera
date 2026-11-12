@@ -19,7 +19,7 @@ interface Current {
   layers: FakeLayer[]
 }
 
-/** Canvases that outlive a test, like compose's scratch cache, record into whichever fake is current. */
+/** Canvases that outlive a test, like compose's scratch cache, record into whichever fake is current: a fake's calls and layers are valid only until the next fakeContext(). */
 let current: Current = { calls: [], layers: [] }
 let currentEpoch = 0
 
