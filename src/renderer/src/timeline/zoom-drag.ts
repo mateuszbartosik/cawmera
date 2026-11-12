@@ -26,3 +26,13 @@ export function grabAt(zoom: ZoomEdit, x: number, view: TimelineView, width: num
 
 /** The time, in source ms, the grabbed start or end of the zoom goes to when the pointer is at `x`. */
 export const dragTarget = (grab: Grab, x: number, view: TimelineView, width: number) => xToTime(x, view, width) - grab.offsetMs
+
+/** The zoom whose drawn block covers `x` (row pixels), if any; the topmost when drawn blocks overlap. */
+export function zoomAtX(edits: ZoomEdit[], x: number, view: TimelineView, width: number): ZoomEdit | null {
+  return (
+    edits.findLast((zoom) => {
+      const block = drawnBlock(zoom, view, width)
+      return x >= block.left && x <= block.left + block.width
+    }) ?? null
+  )
+}

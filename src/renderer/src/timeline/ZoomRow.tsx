@@ -6,7 +6,7 @@ import type { ZoomEdit } from '../recording/zoom-edits'
 import { cn } from '../ui/controls'
 import { dragSession } from './drag-session'
 import { xToTime, type TimelineView } from './scale'
-import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, type Grab } from './zoom-drag'
+import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, zoomAtX, type Grab } from './zoom-drag'
 
 interface ZoomRowProps { edits: ZoomEdit[]; view: TimelineView; width: number }
 interface DraggedZoom { id: string; grab: Grab }
@@ -84,7 +84,8 @@ export function ZoomRow({ edits, view, width }: ZoomRowProps) {
       onPointerCancel={endDrag}
       onLostPointerCapture={endDrag}
       onDoubleClick={(event) => {
-        if (event.target === event.currentTarget) addZoomAt(xToTime(pointerX(event), view, width))
+        const x = pointerX(event)
+        if (!zoomAtX(edits, x, view, width)) addZoomAt(xToTime(x, view, width))
       }}
     >
       {edits.map((zoom) => (

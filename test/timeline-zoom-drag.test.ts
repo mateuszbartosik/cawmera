@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dragTarget, drawnBlock, EDGE_GRAB_PX, grabAt, isBlockVisible, MIN_ZOOM_BLOCK_PX } from '../src/renderer/src/timeline/zoom-drag'
+import { dragTarget, drawnBlock, EDGE_GRAB_PX, grabAt, isBlockVisible, MIN_ZOOM_BLOCK_PX, zoomAtX } from '../src/renderer/src/timeline/zoom-drag'
 import type { ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 
 const view = { start: 0, end: 10_000 }
@@ -39,5 +39,14 @@ describe('zoom block drag', () => {
     expect(grab.kind).toBe('end')
     expect(dragTarget(grab, x, view, width)).toBe(narrow.end)
     expect(dragTarget(grab, x + 10, view, width)).toBe(narrow.end + 100)
+  })
+
+  it('finds the zoom under a point, counting the drawn width of a narrow block', () => {
+    const narrow = { ...zoomOf(7000, 7100), id: 'narrow' }
+    const edits = [wide, narrow]
+    expect(zoomAtX(edits, 400, view, width)).toBe(wide)
+    expect(zoomAtX(edits, 700 + MIN_ZOOM_BLOCK_PX - 2, view, width)).toBe(narrow)
+    expect(zoomAtX(edits, 700 + MIN_ZOOM_BLOCK_PX + 2, view, width)).toBeNull()
+    expect(zoomAtX(edits, 100, view, width)).toBeNull()
   })
 })
