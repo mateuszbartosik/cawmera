@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Record, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
 import { EDGE_NAMES, FORMAT_LABEL, shotFallbackName, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
@@ -30,12 +29,13 @@ import {
   shuffleLook,
   startCapture
 } from '../app/actions'
-import { commitFrom, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
+import { getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
 import { exportPercent, exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
 import type { RecordingFps } from '../recording/settings'
 import { unavailableReason, useRecordingSupport } from '../recording/support'
 import { computeLayout } from '../render/layout'
+import { useDragSession, type DragSession } from '../timeline/drag-session'
 import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, percent, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
 import { BackdropField } from './BackdropField'
 import { EdgePicker } from './EdgePicker'
@@ -200,16 +200,9 @@ function BackgroundSection() {
   const hasImage = useApp((s) => s.style.backgroundImage !== null)
   const backdrop = useApp((s) => s.backdrop?.bitmap ?? null)
   const section = useSection('background')
-  const before = useRef<Doc | null>(null)
+  const lightDrag = useDragSession()
   const color = lightColor ?? houseColor
   const customized = fill !== 'gradient' || lightColor !== null || intensity !== 1
-  const startDrag = () => {
-    before.current ??= store.get().doc
-  }
-  const endDrag = () => {
-    if (before.current) commitFrom(before.current)
-    before.current = null
-  }
   return (
     <Section
       title="Background"
@@ -229,7 +222,7 @@ function BackgroundSection() {
       {fill === 'image' ? (
         <BackdropField hasImage={hasImage} bitmap={backdrop} />
       ) : (
-        <LightFields angle={angle} color={color} houseColor={houseColor} intensity={intensity} onDragStart={startDrag} onDragEnd={endDrag} />
+        <LightFields angle={angle} color={color} houseColor={houseColor} intensity={intensity} drag={lightDrag} />
       )}
     </Section>
   )
@@ -240,15 +233,13 @@ function LightFields({
   color,
   houseColor,
   intensity,
-  onDragStart,
-  onDragEnd
+  drag
 }: {
   angle: number
   color: string
   houseColor: string
   intensity: number
-  onDragStart: () => void
-  onDragEnd: () => void
+  drag: DragSession
 }) {
   return (
     <>
@@ -257,7 +248,13 @@ function LightFields({
         help="Where the light comes from: drag it round the shot (Shift snaps to 15°). New shots get a random direction, so neighbouring images never match."
         value={<NumberField label="Light angle" value={angle} suffix="°" min={0} max={359} wrap compact onChange={(value) => setAngle(value)} testId="light-angle" />}
       >
-        <LightPad angle={angle} glow={color} onChange={setAngle} onDragStart={onDragStart} onDragEnd={onDragEnd} />
+        <LightPad
+          angle={angle}
+          glow={color}
+          onChange={(value, history) => (history ? setAngle(value) : drag.edit(() => setAngle(value, false)))}
+          onDragStart={drag.begin}
+          onDragEnd={drag.end}
+        />
       </Field>
       <ColorField label="Colour" value={color} onChange={(value) => setLightColor(value === houseColor ? null : value)} />
       <Slider
@@ -268,11 +265,8 @@ function LightFields({
         max={1}
         step={0.05}
         format={percent}
-        onChange={(value) => {
-          onDragStart()
-          setLightIntensity(value, false)
-        }}
-        onCommit={onDragEnd}
+        onChange={(value) => drag.edit(() => setLightIntensity(value, false))}
+        onCommit={drag.end}
       />
     </>
   )

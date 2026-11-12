@@ -1,10 +1,9 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
-import type { Doc } from '../app/doc'
-import { commitFrom, store } from '../app/store'
+import { store } from '../app/store'
 import { setRecording } from '../recording/actions'
 import { applyTrim, scrubTo } from '../recording/playback'
 import type { Trim } from '../recording/trim'
-import { dragSession } from './drag-session'
+import { useDragSession } from './drag-session'
 import { CLIP_HEIGHT, CLIP_INSET, RULER_HEIGHT } from './layout'
 import { dragTrim, formatClock, timeToX, xToTime, type TimelineView } from './scale'
 
@@ -17,16 +16,12 @@ type Edge = 'start' | 'end'
 interface TrimHandleProps { edge: Edge; trim: Trim; duration: number; view: TimelineView; width: number }
 
 export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProps) {
-  const drag = useRef(dragSession<Doc>(commitFrom))
+  const drag = useDragSession()
+  const keySteps = useDragSession()
   const grabOffset = useRef(0)
-  const docBeforeKeys = useRef<Doc | null>(null)
   const x = timeToX(trim[edge], view, width)
   const visible = x >= 0 && x <= width
 
-  const finish = (before: { current: Doc | null }) => {
-    if (before.current) commitFrom(before.current)
-    before.current = null
-  }
   const moveEdgeTo = (t: number) => {
     const current = store.get().doc.recording?.trim
     if (!current) return
@@ -39,22 +34,17 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
     const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
     if (direction === 0) return
     event.preventDefault()
-    docBeforeKeys.current ??= store.get().doc
-    const current = store.get().doc.recording?.trim ?? trim
-    moveEdgeTo(current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS))
+    keySteps.edit(() => {
+      const current = store.get().doc.recording?.trim ?? trim
+      moveEdgeTo(current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS))
+    })
   }
 
-  useEffect(
-    () => () => {
-      drag.current.end()
-      finish(docBeforeKeys)
-    },
-    []
-  )
-
   useEffect(() => {
-    if (!visible) drag.current.end()
-  }, [visible])
+    if (visible) return
+    drag.end()
+    keySteps.end()
+  }, [drag, keySteps, visible])
 
   if (!visible) return null
 
@@ -76,24 +66,24 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
         translate: edge === 'end' ? '-100%' : undefined
       }}
       onKeyDown={onKeyDown}
-      onKeyUp={() => finish(docBeforeKeys)}
-      onBlur={() => finish(docBeforeKeys)}
+      onKeyUp={() => keySteps.end()}
+      onBlur={() => keySteps.end()}
       onPointerDown={(event) => {
         if (event.button !== 0) return
         event.stopPropagation()
         event.currentTarget.setPointerCapture(event.pointerId)
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
         grabOffset.current = event.clientX - bounds.left - x
-        drag.current.begin(store.get().doc)
+        drag.begin()
       }}
       onPointerMove={(event) => {
-        if (!drag.current.accepts(event.buttons)) return
+        if (!drag.accepts(event.buttons)) return
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
         moveEdgeTo(xToTime(event.clientX - bounds.left - grabOffset.current, view, bounds.width))
       }}
-      onPointerUp={() => drag.current.end()}
-      onPointerCancel={() => drag.current.end()}
-      onLostPointerCapture={() => drag.current.end()}
+      onPointerUp={() => drag.end()}
+      onPointerCancel={() => drag.end()}
+      onLostPointerCapture={() => drag.end()}
     />
   )
 }

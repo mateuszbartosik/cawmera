@@ -1,10 +1,9 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
-import type { Doc } from '../app/doc'
-import { commitFrom, store, useApp } from '../app/store'
+import { useApp } from '../app/store'
 import { addZoomAt, moveZoomTo, selectZoom, stretchZoomTo } from '../recording/zoom-actions'
 import type { ZoomEdit } from '../recording/zoom-edits'
 import { cn } from '../ui/controls'
-import { dragSession } from './drag-session'
+import { useDragSession } from './drag-session'
 import { xToTime, type TimelineView } from './scale'
 import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, zoomAtX, type Grab } from './zoom-drag'
 
@@ -39,16 +38,14 @@ function ZoomBlock({ zoom, selected, view, width }: { zoom: ZoomEdit; selected: 
 export function ZoomRow({ edits, view, width }: ZoomRowProps) {
   const selection = useApp((s) => s.timelineSelection)
   const selectedId = selection?.kind === 'zoom' ? selection.id : null
-  const session = useRef(dragSession<Doc>(commitFrom))
+  const session = useDragSession()
   const dragged = useRef<DraggedZoom | null>(null)
 
   const endDrag = () => {
-    session.current.end()
+    session.end()
     dragged.current = null
   }
   const pointerX = (event: MouseEvent<HTMLElement>) => event.clientX - event.currentTarget.getBoundingClientRect().left
-
-  useEffect(() => endDrag, [])
 
   useEffect(() => {
     if (!dragged.current) return
@@ -72,10 +69,10 @@ export function ZoomRow({ edits, view, width }: ZoomRowProps) {
         event.currentTarget.setPointerCapture(event.pointerId)
         dragged.current = { id: zoom.id, grab: grabAt(zoom, pointerX(event), view, width) }
         selectZoom(zoom.id)
-        session.current.begin(store.get().doc)
+        session.begin()
       }}
       onPointerMove={(event) => {
-        if (!session.current.accepts(event.buttons) || !dragged.current) return
+        if (!session.accepts(event.buttons) || !dragged.current) return
         const { id, grab } = dragged.current
         const target = dragTarget(grab, pointerX(event), view, width)
         dragged.current.id = grab.kind === 'move' ? moveZoomTo(id, target, false) : stretchZoomTo(id, grab.kind, target, false)

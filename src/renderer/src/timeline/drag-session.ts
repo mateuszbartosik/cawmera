@@ -1,32 +1,52 @@
-export interface DragSession<T> {
+import { useEffect, useState } from 'react'
+import { beginGesture, cancelGesture, endGesture, isGestureOpen, type Gesture } from '../app/store'
+
+export interface DragSession {
+  /** False once it has ended, or once the store committed it early: switching shots, Undo, Redo or an edit with history. */
   readonly isOpen: boolean
-  begin(before: T): void
+  begin(): void
   /** Whether a pointer move belongs to the drag; a move with no button pressed ends it. */
   accepts(buttons: number): boolean
+  /** A slider’s or a key’s change: the first one begins the session, and once the store has committed it, none edits until it ends. */
+  edit(change: () => void): void
+  /** Ends it with no undo step, putting the shot back as it was. */
+  cancel(): void
   end(): void
 }
 
-/** One drag, committed once as one undo step however it ends. */
-export function dragSession<T>(commit: (before: T) => void): DragSession<T> {
-  let before: { value: T } | null = null
-  const session: DragSession<T> = {
+/** One drag, or one run of slider or key changes, as one undo step in the shot it began on, however it ends. */
+export function dragSession(): DragSession {
+  let gesture: Gesture | null = null
+  const session: DragSession = {
     get isOpen() {
-      return before !== null
+      return gesture !== null && isGestureOpen(gesture)
     },
-    begin(value) {
-      before = { value }
+    begin() {
+      gesture = beginGesture()
     },
     accepts(buttons) {
-      if (!before) return false
       if (buttons === 0) session.end()
-      return before !== null
+      return session.isOpen
+    },
+    edit(change) {
+      if (gesture === null) session.begin()
+      if (session.isOpen) change()
+    },
+    cancel() {
+      if (gesture) cancelGesture(gesture)
+      gesture = null
     },
     end() {
-      if (!before) return
-      const { value } = before
-      before = null
-      commit(value)
+      if (gesture) endGesture(gesture)
+      gesture = null
     }
   }
+  return session
+}
+
+/** A component’s session, ended if the component goes mid-drag. */
+export function useDragSession(): DragSession {
+  const [session] = useState(dragSession)
+  useEffect(() => () => session.end(), [session])
   return session
 }

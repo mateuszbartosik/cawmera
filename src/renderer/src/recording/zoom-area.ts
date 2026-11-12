@@ -29,26 +29,32 @@ export function moveArea(start: Rect, dx: number, dy: number, frame: Size): Rect
   return confineMove({ ...start, x: start.x + dx, y: start.y + dy }, rect(0, 0, frame.width, frame.height))
 }
 
-/** Keeps the frame’s shape and the opposite corner. The axis the pointer travelled further along, for the area’s size on it, sets the size. */
+/**
+ * Keeps the frame’s shape and the opposite corner. The axis that moves the corner more sets the size, unless one axis pulls
+ * the corner out while the other pushes it in: then their moves add up, so the size never jumps.
+ */
 export function resizeArea(start: Rect, corner: Corner, dx: number, dy: number, frame: Size, range: { min: number; max: number }): Rect {
   const outward = OUTWARD[corner]
   const fixed = { x: outward.x > 0 ? start.x : start.x + start.w, y: outward.y > 0 ? start.y : start.y + start.h }
   const widthFor = (height: number) => (height * frame.width) / frame.height
-  const pulled = Math.abs(dx) / start.w >= Math.abs(dy) / start.h ? start.w + dx * outward.x : widthFor(start.h + dy * outward.y)
+  const growX = dx * outward.x
+  const growY = widthFor(dy * outward.y)
+  const grow = growX * growY < 0 ? growX + growY : Math.abs(growX) >= Math.abs(growY) ? growX : growY
   const roomX = outward.x > 0 ? frame.width - fixed.x : fixed.x
   const roomY = outward.y > 0 ? frame.height - fixed.y : fixed.y
-  const w = clamp(pulled, frame.width / range.max, Math.min(frame.width / range.min, roomX, widthFor(roomY)))
+  const w = clamp(start.w + grow, frame.width / range.max, Math.min(frame.width / range.min, roomX, widthFor(roomY)))
   const h = (w * frame.height) / frame.width
   return { x: outward.x > 0 ? fixed.x : fixed.x - w, y: outward.y > 0 ? fixed.y : fixed.y - h, w, h }
 }
 
-/** A corner near the point wins over the inside. */
+/** The nearest corner within `tolerance` of the point wins over the inside. */
 export function areaGrabAt(area: Rect, p: Point, tolerance: number): AreaGrab | null {
-  const near = (corner: Corner) => {
+  const offsets = CORNERS.map((corner) => {
     const at = handlePoint(area, corner)
-    return Math.abs(at.x - p.x) <= tolerance && Math.abs(at.y - p.y) <= tolerance
-  }
-  return CORNERS.find(near) ?? (contains(area, p) ? 'move' : null)
+    return { corner, x: Math.abs(at.x - p.x), y: Math.abs(at.y - p.y) }
+  })
+  const nearest = offsets.filter(({ x, y }) => x <= tolerance && y <= tolerance).sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y))[0]
+  return nearest?.corner ?? (contains(area, p) ? 'move' : null)
 }
 
 /** How a zoom frames the shot once its area is dragged by (dx, dy) frame px: a focus in video px, and a depth when a corner was dragged. */

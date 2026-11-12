@@ -3,6 +3,7 @@ import { newId, store, updateDoc, type TimelineSelection } from '../app/store'
 import type { Point } from '../render/geometry'
 import { setRecording } from './actions'
 import { cursorPositionAt } from './cursor'
+import { pausePlayback } from './playback'
 import { getRecording } from './registry'
 import { takeViewFor } from './take-view'
 import { snapToOutput, type Span } from './timemap'
@@ -28,10 +29,12 @@ export function selectedZoomOf(edits: ZoomEdit[], selection: TimelineSelection =
   return edits.find((edit) => edit.id === id) ?? null
 }
 
+/** A selected zoom shows the wide frame, which playback never does, so selecting one pauses it. */
 export function selectZoom(id: string | null) {
   const { timelineSelection } = store.get()
   const alreadySelected = id === null ? timelineSelection === null : timelineSelection?.kind === 'zoom' && timelineSelection.id === id
   if (alreadySelected) return
+  if (id !== null) pausePlayback()
   store.set({ timelineSelection: id === null ? null : { kind: 'zoom', id } })
 }
 

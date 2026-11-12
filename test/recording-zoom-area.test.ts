@@ -56,6 +56,22 @@ describe('a zoom’s area', () => {
     expect(resizeArea(from, 'se', 100, 90, frame, ZOOM_DEPTH_RANGE).h).toBe(630)
     expect(resizeArea(from, 'se', 200, 90, frame, ZOOM_DEPTH_RANGE).w).toBe(1160)
   })
+  it('adds up the pointer’s travels when one pulls the corner out and the other pushes it in', () => {
+    const from = { x: 0, y: 0, w: 960, h: 540 }
+    expect(resizeArea(from, 'se', 100, -56, frame, ZOOM_DEPTH_RANGE).w).toBeCloseTo(960 * (1 + 100 / 960 - 56 / 540))
+    expect(resizeArea(from, 'se', 100, -57, frame, ZOOM_DEPTH_RANGE).w).toBeCloseTo(960 * (1 + 100 / 960 - 57 / 540))
+  })
+  it('never jumps in size as the pointer sweeps past the corner', () => {
+    const middle = { x: 480, y: 270, w: 960, h: 540 }
+    for (const dx of [-100, -30, 0, 30, 100]) {
+      let previous = resizeArea(middle, 'se', dx, -150, frame, ZOOM_DEPTH_RANGE).w
+      for (let dy = -149; dy <= 150; dy++) {
+        const { w } = resizeArea(middle, 'se', dx, dy, frame, ZOOM_DEPTH_RANGE)
+        expect(Math.abs(w - previous)).toBeLessThan(2)
+        previous = w
+      }
+    }
+  })
   it('grows only as far as the frame lets the fixed corner', () => {
     const nearTheRight = { x: 1000, y: 100, w: 800, h: 450 }
     const grown = resizeArea(nearTheRight, 'se', 600, 0, frame, ZOOM_DEPTH_RANGE)
@@ -70,6 +86,13 @@ describe('a zoom’s area', () => {
     expect(areaGrabAt(area, { x: 500, y: 325 }, 8)).toBe('se')
     expect(areaGrabAt(area, { x: 300, y: 200 }, 8)).toBe('move')
     expect(areaGrabAt(area, { x: 90, y: 200 }, 8)).toBeNull()
+  })
+  it('is grabbed by the nearest corner when the area is small enough for several to be near', () => {
+    const small = { x: 100, y: 100, w: 12, h: 6.75 }
+    expect(areaGrabAt(small, { x: 112, y: 106.75 }, 8)).toBe('se')
+    expect(areaGrabAt(small, { x: 100.5, y: 106 }, 8)).toBe('sw')
+    expect(areaGrabAt(small, { x: 111, y: 101 }, 8)).toBe('ne')
+    expect(areaGrabAt(small, { x: 101, y: 100 }, 8)).toBe('nw')
   })
 
   it('frames a zoom where its area was dragged, in video px, with a depth only for a corner', () => {
@@ -121,6 +144,16 @@ describe('the area a selected zoom shows', () => {
     const shown = aimedArea(manual, clicksCovered(manual, cropped, 'calm'), cropped, 6000)
     expect(shown.area).toEqual({ x: 400, y: 225, w: 800, h: 450 })
     expect(shown.clicks.map((c) => c.t)).toEqual([2500, 5000])
+  })
+  it('finds the group at the playhead through a sped-up stretch before the zoom', () => {
+    const fastStart = { ...recordingWith(deep), pieces: [{ start: 0, end: 4000, rate: 2 as const, cut: false }, { start: 4000, end: 10_000, rate: 1 as const, cut: false }] }
+    const fastView = takeViewFor(entry, fastStart, null)
+    const fastCovered = clicksCovered(deep, fastView, 'calm')
+    expect(fastCovered.map((c) => c.t)).toEqual([1250, 3000])
+    expect(aimedArea(deep, fastCovered, fastView, 4800).clicks.map((c) => c.t)).toEqual([1250])
+    expect(aimedArea(deep, fastCovered, fastView, 5500).clicks.map((c) => c.t)).toEqual([3000])
+    expect(aimedArea(deep, fastCovered, fastView, 7000).clicks.map((c) => c.t)).toEqual([3000])
+    expect(aimedArea(deep, fastCovered, fastView, 8500).clicks.map((c) => c.t)).toEqual([1250])
   })
   it('is the focus of an Auto zoom that covers no clicks', () => {
     const empty: ZoomEdit = { ...deep, start: 6000, end: 8000, depth: 2 }

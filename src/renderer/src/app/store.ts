@@ -327,6 +327,7 @@ export function selectShot(id: string) {
     if (state.shotSelection.length > 0) store.set({ shotSelection: [] })
     return
   }
+  flushGesture()
   store.set((s) => activate(liveShots(s), id))
 }
 
@@ -340,6 +341,7 @@ function pickShots(selected: string[]) {
     return
   }
   const activeId = ids.includes(s.activeId) ? s.activeId : ids[0]
+  if (activeId !== s.activeId) flushGesture()
   store.set((current) => ({
     ...(activeId === current.activeId ? { selection: [] } : activate(liveShots(current), activeId)),
     shotSelection: ids
@@ -360,6 +362,7 @@ export function toggleShotPicked(id: string) {
     return
   }
   const next = [...base, id]
+  flushGesture()
   store.set((current) => ({ ...activate(liveShots(current), id), shotSelection: next }))
 }
 
@@ -381,6 +384,7 @@ export function clearPickedShots() {
 /** Adds a shot at the end of the row and makes it active. */
 export function addShot(doc?: Doc): string {
   const id = newId()
+  flushGesture()
   store.set((s) => {
     const shots = liveShots(s)
     const last = shots.at(-1)?.doc
@@ -399,6 +403,7 @@ export interface RemovedShots {
 
 /** Removes shots; returns what's needed to put them back. When none is left, an empty one takes over. */
 export function removeShots(ids: string[]): RemovedShots | null {
+  flushGesture()
   const shots = liveShots()
   const removed = shots.flatMap((record, index) => (ids.includes(record.id) ? [{ record, index }] : []))
   if (removed.length === 0) return null
@@ -415,6 +420,7 @@ export function removeShots(ids: string[]): RemovedShots | null {
 
 /** Undo for `removeShots`: every shot back in its place, picked again when there were several. */
 export function restoreShots({ removed, placeholder }: RemovedShots) {
+  flushGesture()
   store.set((s) => {
     const back = new Set(removed.map(({ record }) => record.id))
     let shots = liveShots(s).filter((candidate) => !back.has(candidate.id))
@@ -512,11 +518,12 @@ export function validTimelineSelection(doc: Doc, selection: TimelineSelection): 
   return start === selection.start && end === selection.end ? selection : { kind: 'range', start, end }
 }
 
-/** Changes the active document. `history: false` is for continuous drags; call `commitFrom` when they end. */
+/** Changes the active document. `history: false` is for a gesture’s edits, which make one undo step when it ends. */
 export function updateDoc(patch: Partial<Doc> | ((doc: Doc) => Partial<Doc>), options: { history?: boolean } = {}) {
+  const history = options.history ?? true
+  if (history) flushGesture()
   const current = state.doc
   const next = { ...current, ...(typeof patch === 'function' ? patch(current) : patch) }
-  const history = options.history ?? true
   store.set((s) => ({
     doc: next,
     past: history ? [...s.past, current].slice(-HISTORY_LIMIT) : s.past,
@@ -526,13 +533,62 @@ export function updateDoc(patch: Partial<Doc> | ((doc: Doc) => Partial<Doc>), op
   }))
 }
 
-/** Records one undo step for a drag that started at `before`. */
-export function commitFrom(before: Doc) {
-  if (before === state.doc) return
-  store.set((s) => ({ past: [...s.past, before].slice(-HISTORY_LIMIT), future: [] }))
+// ---------------------------------------------------------------------------
+// Gestures: a drag, or a run of slider or key changes, edits with `history: false` and makes one undo step.
+
+export interface Gesture {
+  readonly shotId: string
+  readonly before: Doc
+}
+
+let openGesture: Gesture | null = null
+
+/** Commits the open gesture into its own shot’s history. Switching shots, Undo, Redo and every edit with history do this first. */
+function flushGesture() {
+  const gesture = openGesture
+  if (!gesture) return
+  openGesture = null
+  const { shotId, before } = gesture
+  if (shotId === state.activeId) {
+    if (before !== state.doc) store.set((s) => ({ past: [...s.past, before].slice(-HISTORY_LIMIT), future: [] }))
+    return
+  }
+  store.set((s) => ({
+    shots: s.shots.map((record) =>
+      record.id === shotId && record.doc !== before ? { ...record, past: [...record.past, before].slice(-HISTORY_LIMIT), future: [] } : record
+    )
+  }))
+}
+
+/** Opens a gesture on the active shot; one still open commits first. */
+export function beginGesture(): Gesture {
+  flushGesture()
+  openGesture = { shotId: state.activeId, before: state.doc }
+  return openGesture
+}
+
+/** False once it has ended, or once something committed it early. */
+export const isGestureOpen = (gesture: Gesture) => openGesture === gesture
+
+export function endGesture(gesture: Gesture) {
+  if (openGesture === gesture) flushGesture()
+}
+
+/** Closes it with no undo step, putting its shot back as it was. */
+export function cancelGesture(gesture: Gesture) {
+  if (openGesture !== gesture) return
+  openGesture = null
+  const { shotId, before } = gesture
+  if (shotId !== state.activeId || before === state.doc) return
+  store.set((s) => ({
+    doc: before,
+    selection: validSelection(before, s.selection),
+    timelineSelection: validTimelineSelection(before, s.timelineSelection)
+  }))
 }
 
 export function undo() {
+  flushGesture()
   const { past, doc, future } = state
   const previous = past.at(-1)
   if (!previous) return
@@ -547,6 +603,7 @@ export function undo() {
 }
 
 export function redo() {
+  flushGesture()
   const { past, doc, future } = state
   const next = future[0]
   if (!next) return

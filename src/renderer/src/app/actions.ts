@@ -24,7 +24,6 @@ import { shuffledLook } from './shuffle'
 import {
   addShot,
   backdropReady,
-  commitFrom,
   FIT_ALL,
   getSource,
   liveShots,
@@ -444,7 +443,7 @@ export function setLightColor(color: string | null) {
   if (store.get().doc.lightColor !== color) updateDoc({ lightColor: color }, { history: !continuing })
 }
 
-/** `history: false` while dragging the slider; commit the drag with commitFrom. */
+/** `history: false` while dragging the slider, inside its drag session. */
 export function setLightIntensity(intensity: number, history = true) {
   const next = Math.max(0, Math.min(1, Math.round(intensity * 100) / 100))
   if (store.get().doc.lightIntensity !== next) updateDoc({ lightIntensity: next }, { history })
@@ -592,20 +591,15 @@ export function setFileName(value: string, commit = false) {
 
 /** Arrow keys: moves every selected box. */
 export function nudgeSelected(dx: number, dy: number) {
-  const { selection, doc } = store.get()
+  const { selection } = store.get()
   if (selection.length === 0) return
-  const before: Doc = doc
   const blurs = new Set(selection.flatMap((box) => (box.kind === 'redaction' ? [box.id] : [])))
   const spotlight = selection.some((box) => box.kind === 'spotlight')
   const shift = <T extends { x: number; y: number }>(r: T): T => ({ ...r, x: r.x + dx, y: r.y + dy })
-  updateDoc(
-    (d) => ({
-      redactions: d.redactions.map((r) => (blurs.has(r.id) ? { ...r, rect: shift(r.rect) } : r)),
-      spotlight: spotlight && d.spotlight.rect ? { ...d.spotlight, rect: shift(d.spotlight.rect) } : d.spotlight
-    }),
-    { history: false }
-  )
-  commitFrom(before)
+  updateDoc((d) => ({
+    redactions: d.redactions.map((r) => (blurs.has(r.id) ? { ...r, rect: shift(r.rect) } : r)),
+    spotlight: spotlight && d.spotlight.rect ? { ...d.spotlight, rect: shift(d.spotlight.rect) } : d.spotlight
+  }))
 }
 
 // ---------------------------------------------------------------------------

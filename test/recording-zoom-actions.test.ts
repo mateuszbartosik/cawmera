@@ -7,7 +7,8 @@ import type { Rect } from '../src/renderer/src/render/geometry'
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 
 const { deleteAction } = await import('../src/renderer/src/app/selection-keys')
-const { emptyDoc, store, undo, updateDoc, commitFrom } = await import('../src/renderer/src/app/store')
+const { beginGesture, emptyDoc, endGesture, store, undo, updateDoc } = await import('../src/renderer/src/app/store')
+const { dragSession } = await import('../src/renderer/src/timeline/drag-session')
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
 const { wholeTake } = await import('../src/renderer/src/recording/timemap')
@@ -61,13 +62,15 @@ function openTakeWithTwoAutoZooms() {
     },
     { history: false }
   )
-  store.set({ past: [], future: [], selection: [], timelineSelection: null })
+  store.set({ past: [], future: [], selection: [], timelineSelection: null, playback: { playing: false, time: 0 } })
 }
 
 const storedZooms = () => store.get().doc.recording!.zooms
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // A test that failed may have left its gesture open.
+  endGesture(beginGesture())
   openTakeWithTwoAutoZooms()
 })
 
@@ -114,13 +117,15 @@ describe('zoom actions', () => {
     selectZoom('auto-1')
     const before = store.get().doc
     const startedAt = currentZoomEdits()[1].start
+    const drag = dragSession()
+    drag.begin()
     const followed = moveZoomTo('auto-1', startedAt + 100, false)
     expect(followed).toBe(currentZoomEdits()[1].id)
     expect(followed).not.toBe('auto-1')
     moveZoomTo(followed, startedAt + 200, false)
     moveZoomTo(followed, startedAt + 300, false)
     expect(store.get().past).toEqual([])
-    commitFrom(before)
+    drag.end()
     expect(store.get().past).toEqual([before])
     expect(currentZoomEdits()[1].start).toBe(startedAt + 300)
     expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: currentZoomEdits()[1].id })
@@ -234,12 +239,14 @@ describe('zoom actions', () => {
   it('aims a zoom by hand as one undo step, turning it Manual', () => {
     selectZoom('auto-1')
     const before = store.get().doc
+    const drag = dragSession()
+    drag.begin()
     const followed = aimZoomByHand('auto-1', { focus: { x: 1300, y: 700 } }, false)
     expect(followed).not.toBe('auto-1')
     const depth = currentZoomEdits()[1].depth
     expect(aimZoomByHand(followed, { focus: { x: 1200, y: 650 }, depth: 2.6 }, false)).toBe(followed)
     expect(store.get().past).toEqual([])
-    commitFrom(before)
+    drag.end()
     expect(store.get().past).toEqual([before])
     expect(currentZoomEdits()[1]).toMatchObject({ id: followed, focus: { x: 1200, y: 650 }, depth: 2.6, aim: 'manual' })
     expect(depth).not.toBe(2.6)
@@ -270,6 +277,40 @@ describe('zoom actions', () => {
     const { depth } = currentZoomEdits()[0]
     aimZoomByHand('auto-0', { focus: { x: 700, y: 400 } })
     expect(storedZooms()![0]).toMatchObject({ depth, focus: { x: 700, y: 400 }, aim: 'manual' })
+  })
+
+  it('commits an area drag before Delete, as a step of its own', () => {
+    selectZoom('auto-1')
+    const before = store.get().doc
+    const drag = dragSession()
+    drag.begin()
+    aimZoomByHand('auto-1', { focus: { x: 1300, y: 700 } }, false)
+    const dragged = store.get().doc
+    deleteSelectedZoom()
+    expect(store.get().past).toEqual([before, dragged])
+    expect(drag.accepts(1)).toBe(false)
+    undo()
+    expect(store.get().doc).toBe(dragged)
+    undo()
+    expect(storedZooms()).toBeNull()
+  })
+
+  it('pauses playback when a zoom is selected, so playback never shows the wide frame', () => {
+    store.set({ playback: { playing: true, time: 2000 } })
+    selectZoom('auto-1')
+    expect(store.get().playback.playing).toBe(false)
+    expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: 'auto-1' })
+    store.set({ playback: { playing: true, time: 2000 } })
+    addZoomAt(4500)
+    expect(store.get().playback.playing).toBe(false)
+  })
+
+  it('keeps playing when a zoom selection is cleared', () => {
+    selectZoom('auto-1')
+    store.set({ playback: { playing: true, time: 2000 } })
+    selectZoom(null)
+    expect(store.get().playback.playing).toBe(true)
+    expect(store.get().timelineSelection).toBeNull()
   })
 })
 

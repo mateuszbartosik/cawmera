@@ -45,6 +45,13 @@ export function togglePlayback() {
   else activePlayer.play()
 }
 
+/** Paused at once in the store, before the video reports it, so nothing drawn next counts as playing. */
+export function pausePlayback() {
+  if (!store.get().playback.playing) return
+  activePlayer?.pause()
+  setPlaying(false)
+}
+
 export function applyTrim(trim: Trim) {
   activePlayer?.setTrim(trim)
 }

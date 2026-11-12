@@ -1,7 +1,7 @@
 import { Trash } from '@phosphor-icons/react'
-import { useMemo, useRef, type ReactNode } from 'react'
-import { snapDensity, type Doc } from '../app/doc'
-import { commitFrom, store, useApp } from '../app/store'
+import { useMemo, type ReactNode } from 'react'
+import { snapDensity } from '../app/doc'
+import { useApp } from '../app/store'
 import { setRecording } from '../recording/actions'
 import type { ClickEffect } from '../recording/effects'
 import type { CursorLook } from '../recording/cursor-art'
@@ -11,6 +11,7 @@ import { defaultsFor, differsFromDefault, type RecordingDoc } from '../recording
 import { takeViewFor } from '../recording/take-view'
 import { autoAimAvailable, deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
 import { clicksCovered, ZOOM_DEPTH_RANGE, type ZoomAim } from '../recording/zoom-edits'
+import { useDragSession } from '../timeline/drag-session'
 import { IconButton, percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
@@ -47,16 +48,10 @@ function formatLength(ms: number) {
 
 /** One undo step per slider drag, like the light controls. */
 function useSliderDrag() {
-  const before = useRef<Doc | null>(null)
+  const drag = useDragSession()
   return {
-    change: (patch: Partial<RecordingDoc>) => {
-      before.current ??= store.get().doc
-      setRecording(patch, false)
-    },
-    commit: () => {
-      if (before.current) commitFrom(before.current)
-      before.current = null
-    }
+    change: (patch: Partial<RecordingDoc>) => drag.edit(() => setRecording(patch, false)),
+    commit: drag.end
   }
 }
 
@@ -103,7 +98,7 @@ export function ZoomSection() {
   const crop = useApp((s) => s.doc.crop)
   const selection = useApp((s) => s.timelineSelection)
   const section = useSection('zoom')
-  const before = useRef<Doc | null>(null)
+  const depthDrag = useDragSession()
   const entry = getRecording(sourceId)
   const view = entry && recording ? takeViewFor(entry, recording, crop) : null
   const selectedId = selection?.kind === 'zoom' ? selection.id : null
@@ -130,14 +125,8 @@ export function ZoomSection() {
         max={ZOOM_DEPTH_RANGE.max}
         step={0.1}
         format={times}
-        onChange={(depth) => {
-          before.current ??= store.get().doc
-          setSelectedZoom({ depth }, false)
-        }}
-        onCommit={() => {
-          if (before.current) commitFrom(before.current)
-          before.current = null
-        }}
+        onChange={(depth) => depthDrag.edit(() => setSelectedZoom({ depth }, false))}
+        onCommit={depthDrag.end}
       />
       <Segmented label="Aim" value={zoom.aim} options={aimOptions} onChange={(aim) => setSelectedZoom({ aim })} testId="zoom-aim" />
       <p className="text-xs leading-4 text-(--tc-value)" data-testid="zoom-hint">
