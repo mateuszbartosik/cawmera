@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { cutRange } from '../src/renderer/src/recording/pieces'
+import { wholeTake } from '../src/renderer/src/recording/timemap'
 import {
   dragTrim,
   fitView,
@@ -71,14 +73,23 @@ describe('timeline scale', () => {
   })
 
   it('drags trim handles within limits', () => {
-    expect(dragTrim({ start: 0, end: 9000 }, 'start', 8800, 10_000)).toEqual({ start: 8500, end: 9000 })
-    expect(dragTrim({ start: 0, end: 9000 }, 'end', 12_000, 10_000)).toEqual({ start: 0, end: 10_000 })
+    expect(dragTrim({ start: 0, end: 9000 }, 'start', 8800, 10_000, wholeTake(10_000))).toEqual({ start: 8500, end: 9000 })
+    expect(dragTrim({ start: 0, end: 9000 }, 'end', 12_000, 10_000, wholeTake(10_000))).toEqual({ start: 0, end: 10_000 })
   })
 
   it('keeps the other handle where it is', () => {
-    expect(dragTrim({ start: 1000, end: 9000 }, 'start', 3000, 10_000)).toEqual({ start: 3000, end: 9000 })
-    expect(dragTrim({ start: 1000, end: 9000 }, 'end', 1200, 10_000)).toEqual({ start: 1000, end: 1500 })
-    expect(dragTrim({ start: 1000, end: 9000 }, 'start', -400, 10_000)).toEqual({ start: 0, end: 9000 })
+    expect(dragTrim({ start: 1000, end: 9000 }, 'start', 3000, 10_000, wholeTake(10_000))).toEqual({ start: 3000, end: 9000 })
+    expect(dragTrim({ start: 1000, end: 9000 }, 'end', 1200, 10_000, wholeTake(10_000))).toEqual({ start: 1000, end: 1500 })
+    expect(dragTrim({ start: 1000, end: 9000 }, 'start', -400, 10_000, wholeTake(10_000))).toEqual({ start: 0, end: 9000 })
+  })
+
+  it('stops a handle where the output would play under half a second, counting cuts', () => {
+    const trim = { start: 0, end: 10_000 }
+    const tailCut = cutRange(wholeTake(10_000), { start: 9000, end: 9900 }, trim)!
+    expect(dragTrim(trim, 'start', 9500, 10_000, tailCut)).toEqual({ start: 8600, end: 10_000 })
+    const headCut = cutRange(wholeTake(10_000), { start: 100, end: 1000 }, trim)!
+    expect(dragTrim(trim, 'end', 500, 10_000, headCut)).toEqual({ start: 0, end: 1400 })
+    expect(dragTrim(trim, 'end', 5000, 10_000, headCut)).toEqual({ start: 0, end: 5000 })
   })
 
   it('has no width to map into without a duration', () => {

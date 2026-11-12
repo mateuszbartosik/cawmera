@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { store } from '../app/store'
 import type { RecordingPlayer } from './player'
+import type { TimeMap } from './timemap'
 import type { Trim } from './trim'
 
 let activePlayer: RecordingPlayer | null = null
@@ -52,8 +53,8 @@ export function pausePlayback() {
   setPlaying(false)
 }
 
-export function applyTrim(trim: Trim) {
-  activePlayer?.setTrim(trim)
+export function applyTimeMap(map: TimeMap, trim: Trim) {
+  activePlayer?.setTimeMap(map, trim)
 }
 
 export function scrubTo(sourceMs: number) {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { store } from '../app/store'
 import { setRecording } from '../recording/actions'
-import { applyTrim, scrubTo } from '../recording/playback'
+import { applyTimeMap, scrubTo } from '../recording/playback'
+import { timeMapOf } from '../recording/timemap'
 import type { Trim } from '../recording/trim'
 import { useDragSession } from './drag-session'
 import { CLIP_HEIGHT, CLIP_INSET, RULER_HEIGHT } from './layout'
@@ -23,11 +24,11 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
   const visible = x >= 0 && x <= width
 
   const moveEdgeTo = (t: number) => {
-    const current = store.get().doc.recording?.trim
-    if (!current) return
-    const next = dragTrim(current, edge, t, duration)
+    const recording = store.get().doc.recording
+    if (!recording) return
+    const next = dragTrim(recording.trim, edge, t, duration, recording.pieces)
     setRecording({ trim: next }, false)
-    applyTrim(next)
+    applyTimeMap(timeMapOf(next, recording.pieces), next)
     scrubTo(next[edge])
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

@@ -1,3 +1,5 @@
+import { outputFloor } from '../recording/pieces'
+import { timeMapOf, type Piece } from '../recording/timemap'
 import { clampTrim, TRIM_RULES, type Trim } from '../recording/trim'
 
 const TICK_STEPS_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000]
@@ -50,10 +52,25 @@ export function fitView(view: TimelineView | null, durationMs: number): Timeline
   return view ? viewAt(view.start, Math.min(lengthOf(view), durationMs), durationMs) : wholeView(durationMs)
 }
 
-export function dragTrim(trim: Trim, edge: 'start' | 'end', t: number, duration: number): Trim {
+function withEdge(trim: Trim, edge: 'start' | 'end', t: number): Trim {
+  return edge === 'start' ? { start: t, end: trim.end } : { start: trim.start, end: t }
+}
+
+export function dragTrim(trim: Trim, edge: 'start' | 'end', t: number, duration: number, pieces: Piece[]): Trim {
   const minLength = Math.min(TRIM_RULES.minLengthMs, duration)
-  if (edge === 'start') return clampTrim({ start: Math.min(t, trim.end - minLength), end: trim.end }, duration)
-  return clampTrim({ start: trim.start, end: Math.max(t, trim.start + minLength) }, duration)
+  const wanted = edge === 'start' ? Math.min(t, trim.end - minLength) : Math.max(t, trim.start + minLength)
+  const dragged = clampTrim(withEdge(trim, edge, wanted), duration)
+  const floor = outputFloor(trim, pieces)
+  const playsLongEnough = (edgeAt: number) => timeMapOf(withEdge(trim, edge, edgeAt), pieces).outputMs >= floor
+  if (playsLongEnough(dragged[edge])) return dragged
+  let kept = Math.round(trim[edge])
+  let refused = Math.round(dragged[edge])
+  while (Math.abs(refused - kept) > 1) {
+    const middle = Math.trunc((kept + refused) / 2)
+    if (playsLongEnough(middle)) kept = middle
+    else refused = middle
+  }
+  return withEdge(trim, edge, kept)
 }
 
 export function formatClock(ms: number): string {

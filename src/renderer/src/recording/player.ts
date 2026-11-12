@@ -1,5 +1,6 @@
 import type { Trim } from './trim'
-import { clampToTrim, hasReachedEnd, playbackStart } from './trim-loop'
+import { timeMapOf, wholeTake, type TimeMap } from './timemap'
+import { clampToTrim, playbackStart, rateAt, stepAt } from './trim-loop'
 
 type FrameListener = (sourceMs: number) => void
 type PlayingListener = (playing: boolean) => void
@@ -10,6 +11,7 @@ const MS_PER_SECOND = 1000
 export class RecordingPlayer {
   readonly video = document.createElement('video')
   private trim: Trim = { start: 0, end: Number.POSITIVE_INFINITY }
+  private map: TimeMap = timeMapOf(this.trim, wholeTake(Number.POSITIVE_INFINITY))
   private readonly frameListeners = new Set<FrameListener>()
   private readonly playingListeners = new Set<PlayingListener>()
   private readonly errorListeners = new Set<ErrorListener>()
@@ -36,13 +38,16 @@ export class RecordingPlayer {
     return this.video.currentTime * MS_PER_SECOND
   }
 
-  setTrim(trim: Trim) {
+  setTimeMap(map: TimeMap, trim: Trim) {
+    this.map = map
     this.trim = trim
+    this.video.playbackRate = rateAt(this.time, map)
   }
 
   play() {
-    const from = playbackStart(this.time, this.trim, this.finished)
+    const from = playbackStart(this.time, this.map, this.finished)
     if (from !== this.time) this.seek(from)
+    this.video.playbackRate = rateAt(from, this.map)
     void this.video.play().catch((error: unknown) => {
       if (!(error instanceof DOMException && error.name === 'AbortError')) this.emitError()
     })
@@ -110,7 +115,7 @@ export class RecordingPlayer {
 
   private finish() {
     this.video.pause()
-    this.setVideoTime(this.trim.end)
+    this.setVideoTime(this.map.spans.at(-1)?.source.end ?? this.trim.end)
     this.finished = true
   }
 
@@ -144,11 +149,18 @@ export class RecordingPlayer {
   }
 
   private onPresentedFrame(sourceMs: number) {
-    if (hasReachedEnd(sourceMs, this.trim)) {
+    const step = stepAt(sourceMs, this.map)
+    if (step.kind === 'end') {
       this.finish()
       return
     }
-    this.emitFrame(sourceMs)
+    if (step.kind === 'jump') {
+      this.video.playbackRate = rateAt(step.to, this.map)
+      this.setVideoTime(step.to)
+    } else {
+      this.video.playbackRate = step.rate
+      this.emitFrame(sourceMs)
+    }
     if (!this.video.paused) this.requestFrame()
   }
 }

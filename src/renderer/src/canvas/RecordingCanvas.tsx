@@ -9,7 +9,7 @@ import { RecordingPlayer } from '../recording/player'
 import { POSTER_OUTPUT_MS, useRecording } from '../recording/registry'
 import { recordingScene } from '../recording/scene'
 import { takeViewFor } from '../recording/take-view'
-import { snapToOutput } from '../recording/timemap'
+import { snapToOutput, timeMapOf } from '../recording/timemap'
 import { selectedZoomOf } from '../recording/zoom-actions'
 import type { Size } from '../render/geometry'
 import { recordingUrl } from '@shared/media'
@@ -38,13 +38,16 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   const trim = doc.recording?.trim
   const boxSelected = useApp((s) => s.selection.length > 0)
   const timelineSelection = useApp((s) => s.timelineSelection)
-  const edits = entry && doc.recording ? takeViewFor(entry, doc.recording, doc.crop).edits : []
+  const takeView = entry && doc.recording ? takeViewFor(entry, doc.recording, doc.crop) : null
+  const edits = takeView?.edits ?? []
+  const map = takeView?.map
   const wide = boxSelected || selectedZoomOf(edits, timelineSelection) !== null
 
   useEffect(() => {
     if (!entryId) return
     const created = new RecordingPlayer(recordingUrl(entryId))
-    const { start = 0, end = Number.POSITIVE_INFINITY } = store.get().doc.recording?.trim ?? {}
+    const recording = store.get().doc.recording
+    const start = recording?.trim.start ?? 0
     const offFrame = created.onFrame((time) => {
       drawRef.current(time)
       setPlayhead(time)
@@ -53,7 +56,7 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
     const offError = created.onError(() =>
       toast.error('The recording could not be played', { id: `recording-error-${entryId}`, description: 'Its file may be missing or damaged.' })
     )
-    created.setTrim({ start, end })
+    if (recording) created.setTimeMap(timeMapOf(recording.trim, recording.pieces), recording.trim)
     created.seek(start)
     setPlayhead(start)
     store.set({ playback: { playing: false, time: start } })
@@ -71,8 +74,8 @@ export function RecordingCanvas({ doc, style, backdrop, backingWidth, canvasProp
   }, [entryId])
 
   useEffect(() => {
-    if (trim) player?.setTrim(trim)
-  }, [player, trim])
+    if (trim && map) player?.setTimeMap(map, trim)
+  }, [player, map, trim])
 
   const scene = useMemo(
     () => (entry && player ? recordingScene(entry, doc, style, backdrop, player.video, wide) : null),
