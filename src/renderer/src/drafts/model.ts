@@ -32,11 +32,15 @@ import { normalizeZoomEdits } from '../recording/zoom-edits'
 export const DRAFT_FORMAT = 'cawmera-draft'
 export const DRAFT_VERSION = 1
 
-/** `too-large` comes from opening, not parsing: the screenshots would decode past what one canvas may hold. */
+/** `too-large` comes from opening: the screenshots would decode, or the tracks shots show would parse, past what one canvas may hold. */
 export type DraftFailure = 'not-a-draft' | 'newer-version' | 'damaged' | 'too-large'
 
+/** `description` says why, where the reason alone doesn't. */
 export class DraftError extends Error {
-  constructor(readonly reason: DraftFailure) {
+  constructor(
+    readonly reason: DraftFailure,
+    readonly description?: string
+  ) {
     super(`Draft ${reason}`)
     this.name = 'DraftError'
   }
@@ -55,7 +59,11 @@ export interface DraftContents {
 }
 
 /** The takes' tracks by key: a map, or a reader that reads a track only once a shot asks for it. */
-export type DraftTracks = Pick<ReadonlyMap<string, RecordingTrack>, 'get'>
+export interface DraftTracks {
+  get(key: string): RecordingTrack | undefined
+  /** Given the keys of the takes recording shots show, once, before any track is read; it refuses them by throwing. */
+  checkShown?(keys: ReadonlySet<string>): void
+}
 
 const ORIGINS: SourceEntry['origin'][] = ['paste', 'drop', 'file', 'capture']
 const REDACT_STYLES: RedactStyle[] = ['blur', 'pixelate', 'solid']
@@ -68,6 +76,32 @@ const FPS_CHOICES: RecordingFps[] = [30, 60]
 export const DRAFT_LIMITS = { shots: 500, redactions: 2000, zooms: 1000, pieces: 5000 }
 /** Far above any take Cawmera records; a track past one is damaged. */
 export const DRAFT_TRACK_BOUNDS = { durationMs: 4 * 60 * 60 * 1000, side: 16_384, fps: 240 }
+/** The most the tracks recording shots show may hold together: about a dozen hour-long takes, far below what one canvas's memory could parse. */
+export const DRAFT_SHOWN_TRACKS_BYTES = 64_000_000
+
+/** A take past DRAFT_TRACK_BOUNDS makes the draft damaged, so it's never written either. */
+export const fitsDraftTrackBounds = ({ durationMs, width, height, fps }: Pick<RecordingTrack, 'durationMs' | 'width' | 'height' | 'fps'>): boolean =>
+  durationMs <= DRAFT_TRACK_BOUNDS.durationMs && width <= DRAFT_TRACK_BOUNDS.side && height <= DRAFT_TRACK_BOUNDS.side && fps <= DRAFT_TRACK_BOUNDS.fps
+
+/** A string's length in UTF-8, as main writes and reads a track, counted without encoding it. */
+export function utf8Bytes(text: string): number {
+  let bytes = text.length
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code >= 0x80) bytes += code < 0x800 || (code >= 0xd800 && code <= 0xdfff) ? 1 : 2
+  }
+  return bytes
+}
+
+/** Whether tracks stay within DRAFT_SHOWN_TRACKS_BYTES together; it stops counting once they don't. */
+export function fitsShownTracksBudget(tracksJson: Iterable<string>): boolean {
+  let bytes = 0
+  for (const json of tracksJson) {
+    bytes += utf8Bytes(json)
+    if (bytes > DRAFT_SHOWN_TRACKS_BYTES) return false
+  }
+  return true
+}
 
 const docFitsDraftLimits = ({ redactions, recording }: Doc) =>
   redactions.length <= DRAFT_LIMITS.redactions &&
@@ -234,9 +268,18 @@ export function parseDraftTrack(json: string): RecordingTrack {
   } catch {
     throw new DraftError('damaged')
   }
-  const { durationMs, side, fps } = DRAFT_TRACK_BOUNDS
-  if (track.durationMs > durationMs || track.width > side || track.height > side || track.fps > fps) throw new DraftError('damaged')
+  if (!fitsDraftTrackBounds(track)) throw new DraftError('damaged')
   return track
+}
+
+/** The keys recording shots name, valid or not: a key with no track behind it counts for nothing. */
+function shownTakeKeys(shots: unknown[]): Set<string> {
+  return new Set(
+    shots.flatMap((shot) => {
+      const { kind, key } = fieldsOf(shot)
+      return kind === 'recording' && typeof key === 'string' ? [key] : []
+    })
+  )
 }
 
 function manifestFields(manifest: string): Fields {
@@ -260,6 +303,7 @@ export function parseDraftManifest(manifest: string, tracks: DraftTracks, sizes:
   try {
     const fields = manifestFields(manifest)
     if (!Array.isArray(fields.shots) || fields.shots.length === 0 || fields.shots.length > DRAFT_LIMITS.shots) throw new DraftError('damaged')
+    tracks.checkShown?.(shownTakeKeys(fields.shots))
     const kindsByKey = new Map<string, string>()
     const shots = fields.shots.map((shot) => shotFrom(shot, tracks, sizes, kindsByKey))
     const active = Number.isInteger(fields.active) && (fields.active as number) >= 0 && (fields.active as number) < shots.length ? (fields.active as number) : 0

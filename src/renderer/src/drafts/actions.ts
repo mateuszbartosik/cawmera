@@ -25,6 +25,8 @@ import {
   buildDraftManifest,
   DraftError,
   fitsDraftLimits,
+  fitsDraftTrackBounds,
+  fitsShownTracksBudget,
   parseDraftManifest,
   parseDraftTrack,
   type DraftContents,
@@ -44,9 +46,12 @@ const OPEN_FAILURES: Record<DraftFailure | DraftOpenFailure, string> = {
   unreadable: OPEN_FAILED
 }
 const TOO_MANY_PIXELS = `Its screenshots add up to more than ${MAX_DRAFT_PIXELS / 1_000_000} megapixels.`
+const TOO_MUCH_RECORDING = 'Its recordings add up to more than a draft can hold.'
 const TOO_BIG_FOR_A_DRAFT = 'This canvas is too big for a draft'
 const TOO_MANY_PIXELS_TO_SAVE = `${TOO_MANY_PIXELS} Remove some shots and try again.`
-const TOO_MANY_PARTS_TO_SAVE = 'It has more shots, blur boxes, zooms or clips than a draft can hold. Remove some and try again.'
+const RECORDING_TOO_BIG_TO_SAVE = 'A recording is too long or too large for a draft.'
+const TOO_MUCH_RECORDING_TO_SAVE = `${TOO_MUCH_RECORDING} Remove some shots and try again.`
+const TOO_MANY_PARTS_TO_SAVE = 'It has more shots, blur boxes, zooms or splits than a draft can hold. Remove some and try again.'
 const ONLY_THE_DRAFT = 'Only the draft was opened, not the other files'
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 const PNG_IHDR = 0x49484452
@@ -118,11 +123,12 @@ function takeTrack(takeId: string): string {
 
 type BuiltManifest = ReturnType<typeof buildDraftManifest>
 
-async function draftFiles({ manifest, keys }: BuiltManifest): Promise<DraftFiles> {
-  const recordings = [...keys.take].map(([id, key]) => ({ key, id, track: takeTrack(id) }))
+const draftRecordings = ({ keys }: BuiltManifest): DraftFiles['recordings'] => [...keys.take].map(([id, key]) => ({ key, id, track: takeTrack(id) }))
+
+async function draftScreenshots({ keys }: BuiltManifest): Promise<DraftFiles['screenshots']> {
   const screenshots: DraftFiles['screenshots'] = []
   for (const [sourceId, key] of keys.image) screenshots.push({ key, bytes: await screenshotPng(sourceId) })
-  return { manifest, screenshots, recordings }
+  return screenshots
 }
 
 /** The screenshots' pixels as opening the draft would decode them: each source once, however many shots show it. */
@@ -135,9 +141,16 @@ function screenshotPixels(sourceIds: Iterable<string>): number {
   return pixels
 }
 
-/** Why the draft couldn't be opened again, so it's never written; checked before any PNG is encoded. Null when it could. */
+/** A take that's gone fits here; saving it fails on its own. */
+function takeFitsDraftBounds(takeId: string): boolean {
+  const track = getRecording(takeId)?.track
+  return !track || fitsDraftTrackBounds(track)
+}
+
+/** Why the draft couldn't be opened again, so it's never written; checked before anything is encoded. Null when it could. */
 function tooBigForADraft(shots: ShotRecord[], { keys }: BuiltManifest): string | null {
   if (screenshotPixels(keys.image.keys()) > MAX_DRAFT_PIXELS) return TOO_MANY_PIXELS_TO_SAVE
+  if (![...keys.take.keys()].every(takeFitsDraftBounds)) return RECORDING_TOO_BIG_TO_SAVE
   return fitsDraftLimits(shots) ? null : TOO_MANY_PARTS_TO_SAVE
 }
 
@@ -147,14 +160,17 @@ async function saveCanvas(target: CawmeraBridge): Promise<boolean> {
   const { activeId, style, doc } = store.get()
   const status = draftToast('Saving draft…')
   status.started()
+  const refuse = (description: string) => {
+    status.failed(TOO_BIG_FOR_A_DRAFT, description)
+    return false
+  }
   try {
     const built = buildDraftManifest(shots, activeId, style, await target.getVersion(), sourceName)
     const tooBig = tooBigForADraft(shots, built)
-    if (tooBig) {
-      status.failed(TOO_BIG_FOR_A_DRAFT, tooBig)
-      return false
-    }
-    const files = await draftFiles(built)
+    if (tooBig) return refuse(tooBig)
+    const recordings = draftRecordings(built)
+    if (!fitsShownTracksBudget(recordings.map(({ track }) => track))) return refuse(TOO_MUCH_RECORDING_TO_SAVE)
+    const files: DraftFiles = { manifest: built.manifest, screenshots: await draftScreenshots(built), recordings }
     const result = await withProgress(target, status.progress, () => target.saveDraft(files, draftName(doc)))
     if (!result) {
       status.dismiss()
@@ -229,10 +245,17 @@ function headerSizes(screenshots: DraftFiles['screenshots']): Map<string, Size> 
   return sizes
 }
 
-/** Reads a take's track the first time a shot asks for it, so a track no shot shows is never read. `read` holds those read so far. */
+/**
+ * Reads a take's track the first time a shot asks for it, so a track no shot shows is never read, and refuses the tracks shots show
+ * before reading any when they'd parse past what one canvas may hold. `read` holds those read so far.
+ */
 function trackReader(recordings: DraftFiles['recordings']) {
   const jsonByKey = new Map(recordings.map(({ key, track }) => [key, track]))
   const read = new Map<string, RecordingTrack>()
+  const checkShown = (keys: ReadonlySet<string>) => {
+    const shown = [...keys].flatMap((key) => jsonByKey.get(key) ?? [])
+    if (!fitsShownTracksBudget(shown)) throw new DraftError('too-large', TOO_MUCH_RECORDING)
+  }
   const get = (key: string): RecordingTrack | undefined => {
     const json = jsonByKey.get(key)
     if (json === undefined) return undefined
@@ -240,7 +263,7 @@ function trackReader(recordings: DraftFiles['recordings']) {
     read.set(key, track)
     return track
   }
-  return { get, read }
+  return { checkShown, get, read }
 }
 
 interface ShownScreenshot {
@@ -265,7 +288,7 @@ function shownScreenshots(contents: DraftContents, screenshots: DraftFiles['scre
     pixels += size.width * size.height
     shown.push({ key, bytes, size, source: shot.source })
   }
-  if (pixels > MAX_DRAFT_PIXELS) throw new DraftError('too-large')
+  if (pixels > MAX_DRAFT_PIXELS) throw new DraftError('too-large', TOO_MANY_PIXELS)
   return shown
 }
 
@@ -373,7 +396,7 @@ async function replaceCanvasIfAllowed({ contents, sources, recordings }: OpenedD
 
 function failedToOpen(error: unknown): [title: string, description?: string] {
   if (!(error instanceof DraftError)) return [OPEN_FAILED, messageOf(error)]
-  return error.reason === 'too-large' ? [OPEN_FAILED, TOO_MANY_PIXELS] : [OPEN_FAILURES[error.reason]]
+  return [OPEN_FAILURES[error.reason], error.description]
 }
 
 async function openOntoCanvas(target: CawmeraBridge, path: string | null): Promise<boolean> {

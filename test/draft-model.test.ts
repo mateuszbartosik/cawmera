@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_DOC, type Doc, type Redaction } from '../src/renderer/src/app/doc'
 import { DEFAULT_HOUSE_STYLE, type HouseStyle } from '../src/renderer/src/app/house-style'
 import type { ShotRecord } from '../src/renderer/src/app/store'
@@ -7,11 +7,16 @@ import {
   buildDraftManifest,
   DRAFT_FORMAT,
   DRAFT_LIMITS,
+  DRAFT_SHOWN_TRACKS_BYTES,
   DRAFT_TRACK_BOUNDS,
   DRAFT_VERSION,
   DraftError,
+  fitsDraftTrackBounds,
+  fitsShownTracksBudget,
   parseDraftManifest,
-  parseDraftTrack
+  parseDraftTrack,
+  utf8Bytes,
+  type DraftTracks
 } from '../src/renderer/src/drafts/model'
 import { snapDownToFrame } from '../src/renderer/src/recording/blur-boxes'
 import { normalizePieces } from '../src/renderer/src/recording/pieces'
@@ -113,6 +118,60 @@ describe('a draft’s track', () => {
     for (const pastBound of [{ durationMs: durationMs + 1 }, { durationMs: 1e11 }, { width: side + 1 }, { height: side + 1 }, { fps: fps + 1 }]) {
       expect(reasonOf(trackJson(pastBound))).toBe('damaged')
     }
+  })
+
+  it('shares its bounds with the check made before saving', () => {
+    const { durationMs, side, fps } = DRAFT_TRACK_BOUNDS
+    expect(fitsDraftTrackBounds({ ...track, durationMs, width: side, height: side, fps })).toBe(true)
+    for (const pastBound of [{ durationMs: durationMs + 1 }, { width: side + 1 }, { height: side + 1 }, { fps: fps + 1 }]) {
+      expect(fitsDraftTrackBounds({ ...track, ...pastBound })).toBe(false)
+    }
+  })
+})
+
+describe('the tracks a draft’s shots show', () => {
+  const spaces = (count: number) => ' '.repeat(count)
+
+  it('are counted in UTF-8 bytes, as main reads them', () => {
+    expect([utf8Bytes(''), utf8Bytes('{"version":1}'), utf8Bytes('é'), utf8Bytes('€'), utf8Bytes('😀')]).toEqual([0, 13, 2, 3, 4])
+    for (const text of ['zażółć gęślą jaźń', '€ 😀 x', serializeTrack(track)]) expect(utf8Bytes(text)).toBe(new TextEncoder().encode(text).length)
+  })
+
+  it('may add up to 64 MB together, and no more', () => {
+    expect(DRAFT_SHOWN_TRACKS_BYTES).toBe(64_000_000)
+    expect(fitsShownTracksBudget([])).toBe(true)
+    expect(fitsShownTracksBudget([spaces(32_000_000), spaces(32_000_000)])).toBe(true)
+    expect(fitsShownTracksBudget([spaces(32_000_000), spaces(31_999_999), spaces(2)])).toBe(false)
+    expect(fitsShownTracksBudget([spaces(63_999_999), 'é'])).toBe(false)
+  })
+
+  it('are named to the tracks before any is read, once each, and only the takes recording shots show', () => {
+    const calls: string[] = []
+    const tracks: DraftTracks = {
+      checkShown: (keys) => void calls.push(`shown ${[...keys].join(' ')}`),
+      get: (key) => {
+        calls.push(`read ${key}`)
+        return track
+      }
+    }
+    const shotsInput = [
+      { kind: 'recording', key: 'take1', doc: {} },
+      { kind: 'empty', doc: {} },
+      { kind: 'recording', key: 'take2', doc: {} },
+      { kind: 'recording', key: 'take1', doc: {} }
+    ]
+    parseDraftManifest(JSON.stringify({ format: DRAFT_FORMAT, version: 1, shots: shotsInput }), tracks)
+    expect(calls).toEqual(['shown take1 take2', 'read take1', 'read take2', 'read take1'])
+  })
+
+  it('stop the draft before any track is read when the tracks refuse them', () => {
+    const get = vi.fn(() => track)
+    const refuse = () => {
+      throw new DraftError('too-large')
+    }
+    const text = JSON.stringify({ format: DRAFT_FORMAT, version: 1, shots: [{ kind: 'recording', key: 'take1', doc: {} }] })
+    expect(() => parseDraftManifest(text, { checkShown: refuse, get })).toThrow(DraftError)
+    expect(get).not.toHaveBeenCalled()
   })
 })
 

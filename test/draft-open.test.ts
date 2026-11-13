@@ -162,6 +162,18 @@ function manifest(fields: Record<string, unknown> = {}): string {
 
 const screenshotShot = (key: string) => ({ kind: 'screenshot', key, source: { name: `${key}.png`, origin: 'file', detected: 1 }, doc: { ...DEFAULT_DOC, sourceId: key } })
 
+const TAKE_IDS = ['5a0e7c1d-2b4f-4e83-9c61-0d8f3a7b2e15', '6b1f8d2e-3c50-4f94-8d72-1e9a4b8c3f26', '7c2a9e3f-4d61-4a05-9e83-2fab5c9d4a37']
+
+/** A draft of recording shots, one for each of the first `shownCount` takes; the rest come in the file with no shot showing them. */
+const recordingsDraft = (recordings: DraftFiles['recordings'], shownCount = recordings.length): DraftOpenResult => ({
+  ok: true,
+  files: {
+    manifest: manifest({ active: 0, shots: recordings.slice(0, shownCount).map(({ key }) => ({ kind: 'recording', key, name: 'Billing', doc: recordingDoc })) }),
+    screenshots: [],
+    recordings
+  }
+})
+
 /** A draft of screenshots only, one shot each. */
 const screenshotsDraft = (screenshots: DraftFiles['screenshots']): DraftOpenResult => ({
   ok: true,
@@ -441,6 +453,27 @@ describe('openDraft', () => {
     expect(await openDraft(null)).toBe(true)
     expect(getRecording(OPENED_TAKE)).toMatchObject({ track })
     for (const { id } of unused) expect(getRecording(id)).toBeNull()
+  })
+
+  it('refuses a draft whose shown tracks add up to more than 64 MB, reading none of them and asking nothing', async () => {
+    const before = store.get()
+    const notTracks = [32_000_000, 31_999_999, 2].map((bytes, i) => ({ key: `take${i + 1}`, id: TAKE_IDS[i], track: ' '.repeat(bytes) }))
+    mocks.bridge.openDraft.mockResolvedValue(recordingsDraft(notTracks))
+    expect(await openDraft(null)).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('The draft couldn’t be opened', { id: undefined, description: 'Its recordings add up to more than a draft can hold.' })
+    expect(store.get().shots).toBe(before.shots)
+    expect(mocks.bridge.confirmDiscard).not.toHaveBeenCalled()
+  })
+
+  it('opens a draft whose shown tracks come to exactly 64 MB, not counting a track no shot shows', async () => {
+    const atTheTrackLimit = serializeTrack(track).padEnd(32_000_000, ' ')
+    const shown = [0, 1].map((i) => ({ key: `take${i + 1}`, id: TAKE_IDS[i], track: atTheTrackLimit }))
+    const unshown = { key: 'take3', id: TAKE_IDS[2], track: ' '.repeat(32_000_000) }
+    mocks.bridge.openDraft.mockResolvedValue(recordingsDraft([...shown, unshown], 2))
+    expect(await openDraft(null)).toBe(true)
+    expect(liveShots().map((record) => record.doc.sourceId)).toEqual([TAKE_IDS[0], TAKE_IDS[1]])
+    expect(getRecording(TAKE_IDS[0])).toMatchObject({ track })
+    expect(getRecording(TAKE_IDS[2])).toBeNull()
   })
 
   it('asks about unsaved work only once the draft is read and decoded, just before replacing the canvas', async () => {

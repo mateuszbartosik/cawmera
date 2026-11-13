@@ -32,6 +32,10 @@ vi.mock('../src/renderer/src/platform/bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/renderer/src/platform/bridge')>()),
   bridge: mocks.bridge
 }))
+vi.mock('../src/renderer/src/recording/track', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/recording/track')>()
+  return { ...actual, serializeTrack: vi.fn(actual.serializeTrack) }
+})
 
 const { saveDraft, saveOrDiscardUnsaved } = await import('../src/renderer/src/drafts/actions')
 const { DRAFT_LIMITS } = await import('../src/renderer/src/drafts/model')
@@ -235,15 +239,58 @@ describe('saveDraft', () => {
     ['more shots than a draft holds', () => Array.from({ length: DRAFT_LIMITS.shots + 1 }, () => empty)],
     ['a shot with more blur boxes than a draft holds', () => [{ ...screenshot, redactions: boxes(DRAFT_LIMITS.redactions + 1) }]],
     ['a recording with more zooms than a draft holds', () => [withRecording({ zooms: zooms(DRAFT_LIMITS.zooms + 1) })]],
-    ['a recording with more clips than a draft holds', () => [withRecording({ pieces: splitInto(DRAFT_LIMITS.pieces + 1) })]]
+    ['a recording with more splits than a draft holds', () => [withRecording({ pieces: splitInto(DRAFT_LIMITS.pieces + 1) })]]
   ])('refuses %s, as the draft couldn’t be opened again', async (_, docs) => {
     setCanvas(docs())
     expect(await saveDraft()).toBe(false)
     expect(toast.error).toHaveBeenCalledWith('This canvas is too big for a draft', {
       id: 'saving',
-      description: 'It has more shots, blur boxes, zooms or clips than a draft can hold. Remove some and try again.'
+      description: 'It has more shots, blur boxes, zooms or splits than a draft can hold. Remove some and try again.'
     })
     expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['longer than 4 hours', { durationMs: 4 * 60 * 60 * 1000 + 1 }],
+    ['wider than 16,384 px', { width: 16_385 }],
+    ['taller than 16,384 px', { height: 16_385 }],
+    ['recorded at more than 240 fps', { fps: 241 }]
+  ])('refuses a recording %s at once, encoding nothing, as the draft couldn’t be opened again', async (_, changes) => {
+    registerRecording({ id: 'past-a-bound', name: 'Past a bound', track: { ...track, ...changes }, poster: null })
+    setCanvas([screenshot, { ...recording, sourceId: 'past-a-bound' }])
+    expect(await saveDraft()).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('This canvas is too big for a draft', { id: 'saving', description: 'A recording is too long or too large for a draft.' })
+    expect(toastsAtEncoding).toEqual([])
+    expect(serializeTrack).not.toHaveBeenCalled()
+    expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('saves a recording right at those bounds', async () => {
+    const atTheBounds = { ...track, durationMs: 4 * 60 * 60 * 1000, width: 16_384, height: 16_384, fps: 240 }
+    registerRecording({ id: 'at-the-bounds', name: 'At the bounds', track: atTheBounds, poster: null })
+    setCanvas([{ ...recording, sourceId: 'at-the-bounds' }])
+    expect(await saveDraft()).toBe(true)
+  })
+
+  it('refuses recordings whose tracks add up to more than 64 MB, before encoding any PNG', async () => {
+    for (const id of ['take-2', 'take-3']) registerRecording({ id, name: id, track: { ...track }, poster: null })
+    setCanvas([screenshot, ...['take-1', 'take-2', 'take-3'].map((sourceId) => ({ ...recording, sourceId }))])
+    vi.mocked(serializeTrack).mockReturnValueOnce(' '.repeat(32_000_000)).mockReturnValueOnce(' '.repeat(31_999_999)).mockReturnValueOnce('  ')
+    expect(await saveDraft()).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('This canvas is too big for a draft', {
+      id: 'saving',
+      description: 'Its recordings add up to more than a draft can hold. Remove some shots and try again.'
+    })
+    expect(toastsAtEncoding).toEqual([])
+    expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('saves recordings whose tracks come to exactly 64 MB', async () => {
+    registerRecording({ id: 'take-2', name: 'take-2', track: { ...track }, poster: null })
+    setCanvas([{ ...recording, sourceId: 'take-1' }, { ...recording, sourceId: 'take-2' }])
+    vi.mocked(serializeTrack).mockReturnValueOnce(' '.repeat(32_000_000)).mockReturnValueOnce(' '.repeat(32_000_000))
+    expect(await saveDraft()).toBe(true)
+    expect(handedOver()[0].recordings.map(({ track: json }) => json.length)).toEqual([32_000_000, 32_000_000])
   })
 
   it('saves a canvas right at what a draft holds', async () => {
