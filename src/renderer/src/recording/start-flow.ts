@@ -10,8 +10,8 @@ export interface StartFlow {
   startRecording(): Promise<RecordingError | null>
   beginRecording(): Promise<RecordingError | null>
   stopRecording(): Promise<void>
-  /** Null when there is no delay to count down. */
-  countdown: { show(): Promise<void>; run(): Promise<boolean>; interrupt(): void; hide(): Promise<void> } | null
+  /** At least MIN_RECORDING_COUNTDOWN_S long, so the helper has time to warm up. */
+  countdown: { show(): Promise<void>; run(): Promise<boolean>; interrupt(): void; hide(): Promise<void> }
   showError(error: RecordingError): void
 }
 
@@ -50,21 +50,16 @@ export async function runStartFlow(flow: StartFlow): Promise<boolean> {
     void warmedUp.then((error) => {
       if (!error) return
       start.failure = error
-      countdown?.interrupt()
+      countdown.interrupt()
     })
 
-    let counted = true
-    if (countdown) {
-      countdownShown = true
-      await countdown.show()
-      counted = await countdown.run()
-    }
+    countdownShown = true
+    await countdown.show()
+    const counted = await countdown.run()
     if (!counted && !start.failure) await stopHelper()
     await warmedUp
-    if (countdown && countdownShown) {
-      countdownShown = false
-      await countdown.hide()
-    }
+    countdownShown = false
+    await countdown.hide()
     if (start.failure) {
       report(start.failure)
       return false
@@ -84,7 +79,7 @@ export async function runStartFlow(flow: StartFlow): Promise<boolean> {
     return false
   } finally {
     if (!began) {
-      if (countdown && countdownShown) await countdown.hide().catch(() => {})
+      if (countdownShown) await countdown.hide().catch(() => {})
       if (helperRequested && !helperStopped && !start.failure) await flow.stopRecording().catch(() => {})
       await flow.restoreWindow()
     }

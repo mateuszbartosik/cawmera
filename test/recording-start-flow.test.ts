@@ -12,7 +12,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function setup(overrides: Partial<StartFlow> = {}, withCountdown = true) {
+function setup(overrides: Partial<StartFlow> = {}) {
   const calls: string[] = []
   const note = (name: string) => () => {
     calls.push(name)
@@ -30,17 +30,15 @@ function setup(overrides: Partial<StartFlow> = {}, withCountdown = true) {
       return Promise.resolve(null)
     },
     stopRecording: note('stopRecording'),
-    countdown: withCountdown
-      ? {
-          show: note('showCountdown'),
-          run: () => {
-            calls.push('runCountdown')
-            return Promise.resolve(true)
-          },
-          interrupt: () => calls.push('interrupt') && undefined,
-          hide: note('hideCountdown')
-        }
-      : null,
+    countdown: {
+      show: note('showCountdown'),
+      run: () => {
+        calls.push('runCountdown')
+        return Promise.resolve(true)
+      },
+      interrupt: () => calls.push('interrupt') && undefined,
+      hide: note('hideCountdown')
+    },
     showError: vi.fn(),
     ...overrides
   }
@@ -59,15 +57,15 @@ describe('recording start flow', () => {
     expect(flow.showError).not.toHaveBeenCalled()
   })
 
-  it('begins at once when there is no delay', async () => {
-    const { flow, calls } = setup({}, false)
+  it('always counts down between warming up and beginning', async () => {
+    const { flow, calls } = setup()
     expect(await runStartFlow(flow)).toBe(true)
-    expect(calls).toEqual(['hideWindow', 'startRecording', 'beginRecording'])
+    expect(calls).toEqual(['hideWindow', 'startRecording', 'showCountdown', 'runCountdown', 'hideCountdown', 'beginRecording'])
   })
 
   it('stops the helper, shows no error and restores once when the countdown is cancelled', async () => {
     const { flow, calls } = setup()
-    flow.countdown!.run = () => Promise.resolve(false)
+    flow.countdown.run = () => Promise.resolve(false)
     expect(await runStartFlow(flow)).toBe(false)
     expect(count(calls, 'stopRecording')).toBe(1)
     expect(count(calls, 'restoreWindow')).toBe(1)
@@ -79,7 +77,7 @@ describe('recording start flow', () => {
     const { flow, calls } = setup({
       startRecording: () => Promise.resolve({ code: 'cancelled', message: 'cancelled' })
     })
-    flow.countdown!.run = () => Promise.resolve(false)
+    flow.countdown.run = () => Promise.resolve(false)
     await runStartFlow(flow)
     expect(flow.showError).not.toHaveBeenCalled()
     expect(count(calls, 'restoreWindow')).toBe(1)
@@ -89,8 +87,8 @@ describe('recording start flow', () => {
     const failing = deferred<RecordingError | null>()
     const countdownEnded = deferred<boolean>()
     const { flow, calls } = setup({ startRecording: () => failing.promise })
-    flow.countdown!.run = () => countdownEnded.promise
-    flow.countdown!.interrupt = () => {
+    flow.countdown.run = () => countdownEnded.promise
+    flow.countdown.interrupt = () => {
       calls.push('interrupt')
       countdownEnded.resolve(false)
     }
@@ -121,8 +119,8 @@ describe('recording start flow', () => {
     const warm = deferred<RecordingError | null>()
     const countdownEnded = deferred<boolean>()
     const { flow, calls } = setup({ startRecording: () => warm.promise })
-    flow.countdown!.run = () => countdownEnded.promise
-    flow.countdown!.interrupt = () => {
+    flow.countdown.run = () => countdownEnded.promise
+    flow.countdown.interrupt = () => {
       calls.push('interrupt')
       countdownEnded.resolve(false)
     }
@@ -154,7 +152,7 @@ describe('recording start flow', () => {
 
   it('stops the warm helper once when something throws after the start', async () => {
     const { flow, calls } = setup()
-    flow.countdown!.show = () => Promise.reject(new Error('overlay failed'))
+    flow.countdown.show = () => Promise.reject(new Error('overlay failed'))
     vi.spyOn(console, 'error').mockImplementation(() => {})
     expect(await runStartFlow(flow)).toBe(false)
     expect(count(calls, 'stopRecording')).toBe(1)
