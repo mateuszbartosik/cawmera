@@ -1,7 +1,7 @@
 import { toast, type ExternalToast } from 'sonner'
 import { DRAFT_BUSY, type CawmeraBridge, type DiscardPurpose, type DraftFiles, type DraftOpenFailure } from '@shared/types'
 import { slugify, type Doc } from '../app/doc'
-import { houseStyleImported, type HouseStyle } from '../app/house-style'
+import { houseStyleImported } from '../app/house-style'
 import { savedFile } from '../app/save-toast'
 import {
   getSource,
@@ -21,7 +21,16 @@ import { blobBytes, bridge } from '../platform/bridge'
 import { getRecording, loadPoster, registerRecording, type RecordingEntry } from '../recording/registry'
 import { serializeTrack, type RecordingTrack } from '../recording/track'
 import type { Size } from '../render/geometry'
-import { buildDraftManifest, DraftError, parseDraftManifest, parseDraftTrack, type DraftContents, type DraftFailure, type DraftShot } from './model'
+import {
+  buildDraftManifest,
+  DraftError,
+  fitsDraftLimits,
+  parseDraftManifest,
+  parseDraftTrack,
+  type DraftContents,
+  type DraftFailure,
+  type DraftShot
+} from './model'
 
 export const DRAFT_EXTENSION = '.cawmera'
 const FALLBACK_NAME = 'whats-new-draft'
@@ -35,6 +44,9 @@ const OPEN_FAILURES: Record<DraftFailure | DraftOpenFailure, string> = {
   unreadable: OPEN_FAILED
 }
 const TOO_MANY_PIXELS = `Its screenshots add up to more than ${MAX_DRAFT_PIXELS / 1_000_000} megapixels.`
+const TOO_BIG_FOR_A_DRAFT = 'This canvas is too big for a draft'
+const TOO_MANY_PIXELS_TO_SAVE = `${TOO_MANY_PIXELS} Remove some shots and try again.`
+const TOO_MANY_PARTS_TO_SAVE = 'It has more shots, blur boxes, zooms or clips than a draft can hold. Remove some and try again.'
 const ONLY_THE_DRAFT = 'Only the draft was opened, not the other files'
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 const PNG_IHDR = 0x49484452
@@ -55,6 +67,9 @@ const syncDraftBusy = () => store.set({ draftBusy: saving !== null || opening !=
 function draftToast(running: string) {
   let id: string | number | undefined
   return {
+    started() {
+      id = toast.loading(running, { id })
+    },
     progress(share: number) {
       id = toast.loading(`${running} ${Math.round(share * 100)}%`, { id })
     },
@@ -101,12 +116,29 @@ function takeTrack(takeId: string): string {
   return serializeTrack(entry.track)
 }
 
-async function draftFiles(shots: ShotRecord[], activeId: string, style: HouseStyle, appVersion: string): Promise<DraftFiles> {
-  const { manifest, keys } = buildDraftManifest(shots, activeId, style, appVersion, sourceName)
+type BuiltManifest = ReturnType<typeof buildDraftManifest>
+
+async function draftFiles({ manifest, keys }: BuiltManifest): Promise<DraftFiles> {
   const recordings = [...keys.take].map(([id, key]) => ({ key, id, track: takeTrack(id) }))
   const screenshots: DraftFiles['screenshots'] = []
   for (const [sourceId, key] of keys.image) screenshots.push({ key, bytes: await screenshotPng(sourceId) })
   return { manifest, screenshots, recordings }
+}
+
+/** The screenshots' pixels as opening the draft would decode them: each source once, however many shots show it. */
+function screenshotPixels(sourceIds: Iterable<string>): number {
+  let pixels = 0
+  for (const id of sourceIds) {
+    const source = getSource(id)
+    if (source) pixels += source.width * source.height
+  }
+  return pixels
+}
+
+/** Why the draft couldn't be opened again, so it's never written; checked before any PNG is encoded. Null when it could. */
+function tooBigForADraft(shots: ShotRecord[], { keys }: BuiltManifest): string | null {
+  if (screenshotPixels(keys.image.keys()) > MAX_DRAFT_PIXELS) return TOO_MANY_PIXELS_TO_SAVE
+  return fitsDraftLimits(shots) ? null : TOO_MANY_PARTS_TO_SAVE
 }
 
 /** The shots as they are now go into the draft; edits made while it's written stay unsaved. */
@@ -114,10 +146,20 @@ async function saveCanvas(target: CawmeraBridge): Promise<boolean> {
   const shots = liveShots()
   const { activeId, style, doc } = store.get()
   const status = draftToast('Saving draft…')
+  status.started()
   try {
-    const files = await draftFiles(shots, activeId, style, await target.getVersion())
+    const built = buildDraftManifest(shots, activeId, style, await target.getVersion(), sourceName)
+    const tooBig = tooBigForADraft(shots, built)
+    if (tooBig) {
+      status.failed(TOO_BIG_FOR_A_DRAFT, tooBig)
+      return false
+    }
+    const files = await draftFiles(built)
     const result = await withProgress(target, status.progress, () => target.saveDraft(files, draftName(doc)))
-    if (!result) return false
+    if (!result) {
+      status.dismiss()
+      return false
+    }
     if ('error' in result) {
       status.failed(SAVE_FAILED, result.error)
       return false

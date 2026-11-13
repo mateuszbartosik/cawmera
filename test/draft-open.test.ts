@@ -96,7 +96,7 @@ const { deleteShots, openFilePicker } = await import('../src/renderer/src/app/ac
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { DEFAULT_HOUSE_STYLE, serializeHouseStyle } = await import('../src/renderer/src/app/house-style')
 const { FIT_ALL, getSource, liveShots, registerSource, store, unsavedCount, updateDoc } = await import('../src/renderer/src/app/store')
-const { getRecording } = await import('../src/renderer/src/recording/registry')
+const { getRecording, registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
 const { serializeTrack } = await import('../src/renderer/src/recording/track')
 
@@ -278,6 +278,19 @@ describe('applyOpenedDraft', () => {
     expect(getSource('previous')).toBeNull()
     expect(previousBitmap.close).toHaveBeenCalled()
     expect(store.get()).toMatchObject({ mode: 'compose', selection: [], shotSelection: [], timelineSelection: null, view: FIT_ALL })
+  })
+
+  it('lets go of the takes no opened shot shows, posters included, and keeps the opened ones', () => {
+    const oldPoster = { width: 1280, height: 720, close: vi.fn() }
+    registerRecording({ id: 'old-take', name: 'Old', track, poster: oldPoster as unknown as ImageBitmap })
+    registerRecording({ id: 'deleted-take', name: 'Deleted', track, poster: null })
+    updateDoc({ sourceId: 'old-take', recording: recordingDoc.recording })
+    const { contents, sources, recordings } = openedParts()
+    applyOpenedDraft(contents, sources, recordings)
+    expect(getRecording('old-take')).toBeNull()
+    expect(getRecording('deleted-take')).toBeNull()
+    expect(oldPoster.close).toHaveBeenCalledTimes(1)
+    expect(getRecording('take-1')).toBe(recordings.get('take1'))
   })
 
   it('reads each take’s poster as a finished take does', async () => {

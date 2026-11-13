@@ -47,8 +47,8 @@ export function registerDrafts(getWindow: () => BrowserWindow | null): (close: (
         buttons: ['Keep waiting', 'Close anyway'],
         defaultId: 0,
         cancelId: 0,
-        message: 'A draft is still being saved',
-        detail: 'The draft won’t be saved.'
+        message: 'A draft is still being saved.',
+        detail: 'The draft won’t be saved, and Cawmera doesn’t keep screenshots or recordings after it closes.'
       })
       return response === 1
     }

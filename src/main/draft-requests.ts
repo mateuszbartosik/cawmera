@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { DRAFT_BUSY, type DraftOpenResult } from '../shared/types'
 import { DraftFileError, draftParts, partialFileOf, readDraft, writeDraft } from './draft-file'
@@ -101,14 +101,14 @@ export function createDraftRequests(host: DraftHost) {
     askingToCloseAnyway = false
     if (!giveUp || !heldClose) return
     heldClose.givenUp = true
-    discardUnfinishedSave()
     closeAnyway()
+    discardUnfinishedSave()
   }
 
   /**
    * A close waits for the draft being written, so a save the user asked for is never dropped: `close` runs once, after the
    * write has ended either way and the renderer has its answer. Another close meanwhile asks whether to close anyway, in case
-   * the write is stuck; giving up removes the half-written file and runs `closeAnyway`, and closes aren't held after that.
+   * the write is stuck; giving up runs `closeAnyway`, then removes the half-written file, and closes aren't held after that.
    * False when no draft is being written, or once it was given up.
    */
   function holdCloseWhileWriting(close: () => void, closeAnyway: () => void): boolean {
@@ -126,14 +126,14 @@ export function createDraftRequests(host: DraftHost) {
     return true
   }
 
-  /** For quitting mid-save: the half-written file goes, and the draft it would replace stays. */
+  /**
+   * For giving up on a save or quitting mid-save: the half-written file goes, once, and the draft it would replace stays. Nothing
+   * waits for the removal, since the disk may be what's stuck; at worst a .partial file stays beside the draft.
+   */
   function discardUnfinishedSave() {
-    if (!unfinishedSave) return
-    try {
-      rmSync(unfinishedSave, { force: true })
-    } catch {
-      // Best effort: Cawmera is quitting, and what's left is only a .partial file beside the draft.
-    }
+    const partial = unfinishedSave
+    unfinishedSave = null
+    if (partial) void rm(partial, { force: true }).catch((error: unknown) => console.error('The half-written draft wasn’t removed', error))
   }
 
   return { save, open, discardUnfinishedSave, holdCloseWhileWriting }

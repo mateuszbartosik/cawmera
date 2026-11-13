@@ -30,6 +30,18 @@ export function registerRecording(entry: RecordingEntry) {
   announceChange()
 }
 
+/** Lets go of every take but `kept`, with its poster; the take view built from its track goes with it. Its folder stays until Cawmera quits. */
+export function releaseRecordingsExcept(kept: ReadonlySet<string | null>) {
+  let released = false
+  for (const [id, entry] of recordings) {
+    if (kept.has(id)) continue
+    entry.poster?.close()
+    recordings.delete(id)
+    released = true
+  }
+  if (released) announceChange()
+}
+
 export function setPoster(id: string, poster: ImageBitmap) {
   const entry = recordings.get(id)
   if (!entry) return poster.close()

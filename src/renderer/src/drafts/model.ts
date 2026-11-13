@@ -68,6 +68,13 @@ const FPS_CHOICES: RecordingFps[] = [30, 60]
 export const DRAFT_LIMITS = { shots: 500, redactions: 2000, zooms: 1000, pieces: 5000 }
 /** Far above any take Cawmera records; a track past one is damaged. */
 export const DRAFT_TRACK_BOUNDS = { durationMs: 4 * 60 * 60 * 1000, side: 16_384, fps: 240 }
+
+const docFitsDraftLimits = ({ redactions, recording }: Doc) =>
+  redactions.length <= DRAFT_LIMITS.redactions &&
+  (!recording || ((recording.zooms?.length ?? 0) <= DRAFT_LIMITS.zooms && recording.pieces.length <= DRAFT_LIMITS.pieces))
+
+/** A draft past DRAFT_LIMITS couldn't be opened again, so its shots are checked before it's written. */
+export const fitsDraftLimits = (shots: ShotRecord[]): boolean => shots.length <= DRAFT_LIMITS.shots && shots.every(({ doc }) => docFitsDraftLimits(doc))
 const MAX_NAME_LENGTH = 200
 const HEX = /^#[0-9a-f]{6}$/i
 

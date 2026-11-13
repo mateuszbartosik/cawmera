@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { decodeBackdrop } from './backdrop'
 import { DEFAULT_DOC, randomAngle, type Density, type Doc, type ExportFormat } from './doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from './house-style'
+import { releaseRecordingsExcept } from '../recording/registry'
 import { isAutomaticZoomId } from '../recording/zoom-edits'
 import type { TimelineView } from '../timeline/scale'
 
@@ -494,7 +495,8 @@ export function markDraftSaved(written: ShotRecord[]) {
 
 /**
  * An opened draft takes the place of every shot, with its house style. History starts over, every shot counts as saved
- * in the draft, and the screenshots no shot shows any more are let go.
+ * in the draft, and the screenshots and recordings no shot shows any more are let go; the new generation keeps any undo
+ * from bringing them back.
  */
 export function replaceCanvas(shots: ShotRecord[], activeIndex: number, style: HouseStyle) {
   flushGesture()
@@ -502,6 +504,7 @@ export function replaceCanvas(shots: ShotRecord[], activeIndex: number, style: H
   const opened = shots.map((record): ShotRecord => ({ ...record, past: [], future: [], savedDoc: null, draftDoc: record.doc }))
   store.set({ ...activate(opened, opened[activeIndex]?.id ?? opened[0].id), style, view: FIT_ALL, cropView: FIT_ALL })
   releaseUnshownSources()
+  releaseRecordingsExcept(new Set(liveShots().map((record) => record.doc.sourceId)))
 }
 
 // ---------------------------------------------------------------------------

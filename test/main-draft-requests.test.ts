@@ -3,8 +3,13 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createDraftRequests, type DraftHost } from '../src/main/draft-requests'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rm: vi.fn(actual.rm) }
+})
 
 const MANIFEST = '{"format":"cawmera-draft","version":1}'
 const TRACK = '{"version":1}'
@@ -17,6 +22,7 @@ const ON_DISK = { timeout: 30_000 }
 
 const tempDirs: string[] = []
 
+afterEach(() => vi.mocked(rm).mockReset())
 afterAll(() => Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3 }))))
 
 function deferred<T>() {
@@ -203,9 +209,11 @@ describe('draft requests from the renderer', ON_DISK, () => {
     expect(closeAnyway).not.toHaveBeenCalled()
   })
 
-  it('on Close anyway abandons the write: its .partial goes, the window closes at once, and later closes aren’t held', async () => {
+  it('on Close anyway abandons the write: the window closes at once, its .partial goes after, and later closes aren’t held', async () => {
     const t = await setup({ askToCloseAnyway: vi.fn(async () => true) })
     await writeFile(t.saved, 'the previous draft')
+    const partial = `${t.saved}.partial`
+    const removalsOfPartial = () => vi.mocked(rm).mock.calls.flatMap(([path], index) => (path === partial ? [vi.mocked(rm).mock.invocationCallOrder[index]] : []))
     const close = vi.fn()
     const closeAnyway = vi.fn()
     const holds: boolean[] = []
@@ -217,10 +225,47 @@ describe('draft requests from the renderer', ON_DISK, () => {
     expect(holds).toEqual([true, true, false])
     expect(closeAnyway).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ error: expect.any(String) })
-    expect(existsSync(`${t.saved}.partial`)).toBe(false)
+    await vi.waitFor(() => expect(existsSync(partial)).toBe(false))
     expect(await readFile(t.saved, 'utf8')).toBe('the previous draft')
+    expect(removalsOfPartial()).toHaveLength(1)
+    expect(removalsOfPartial()[0]).toBeGreaterThan(closeAnyway.mock.invocationCallOrder[0])
     await new Promise((resolve) => setImmediate(resolve))
     expect(close).not.toHaveBeenCalled()
+  })
+
+  it('leaves a given-up save alone when Cawmera quits after closing anyway', async () => {
+    const t = await setup({ askToCloseAnyway: vi.fn(async () => true) })
+    const partial = `${t.saved}.partial`
+    const hung = deferred<void>()
+    vi.mocked(rm).mockImplementationOnce(() => hung.promise)
+    const closeAnyway = vi.fn()
+    let quitDuringTheWrite = false
+    const result = await t.requests.save(t.files, 'a', (share) => {
+      if (share < 0.5) return
+      if (closeAnyway.mock.calls.length === 0) t.requests.holdCloseWhileWriting(noop, closeAnyway) && t.requests.holdCloseWhileWriting(noop, closeAnyway)
+      else if (!quitDuringTheWrite) {
+        quitDuringTheWrite = true
+        t.requests.discardUnfinishedSave()
+      }
+    })
+    expect(quitDuringTheWrite).toBe(true)
+    expect(vi.mocked(rm).mock.calls.filter(([path]) => path === partial)).toEqual([[partial, { force: true }]])
+    expect(result).toEqual({ path: t.saved })
+    hung.resolve()
+  })
+
+  it('never waits on a stuck disk when Cawmera quits during a save', async () => {
+    const t = await setup()
+    vi.mocked(rm).mockImplementationOnce(() => new Promise<void>(() => {}))
+    let quit = false
+    const result = await t.requests.save(t.files, 'a', (share) => {
+      if (quit || share < 0.5) return
+      quit = true
+      t.requests.discardUnfinishedSave()
+    })
+    expect(quit).toBe(true)
+    expect(rm).toHaveBeenCalledWith(`${t.saved}.partial`, { force: true })
+    expect(result).toEqual({ path: t.saved })
   })
 
   it('removes the half-written file when Cawmera quits during a save, and keeps the draft it would replace', async () => {

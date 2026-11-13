@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import type { CawmeraBridge, DiscardAnswer, DraftFiles } from '@shared/types'
-import type { Doc } from '../src/renderer/src/app/doc'
+import type { Doc, Redaction } from '../src/renderer/src/app/doc'
 import type { ShotRecord } from '../src/renderer/src/app/store'
+import type { RecordingDoc } from '../src/renderer/src/recording/settings'
+import type { Piece } from '../src/renderer/src/recording/timemap'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
+import type { ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 
 const mocks = vi.hoisted(() => {
   const listeners = new Set<(share: number) => void>()
@@ -24,13 +27,14 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), loading: vi.fn(() => 'saving') }) }))
+vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), loading: vi.fn(() => 'saving'), dismiss: vi.fn() }) }))
 vi.mock('../src/renderer/src/platform/bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/renderer/src/platform/bridge')>()),
   bridge: mocks.bridge
 }))
 
 const { saveDraft, saveOrDiscardUnsaved } = await import('../src/renderer/src/drafts/actions')
+const { DRAFT_LIMITS } = await import('../src/renderer/src/drafts/model')
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { isUnsaved, liveShots, registerSource, selectShot, store, updateDoc } = await import('../src/renderer/src/app/store')
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
@@ -43,6 +47,9 @@ interface FakeBitmap {
   width: number
   height: number
 }
+
+/** The toasts shown each time a PNG was encoded. */
+const toastsAtEncoding: number[] = []
 
 /** Encodes what was drawn where: the image's tag and the rect it covered, then the canvas size. */
 class PngCanvas {
@@ -58,6 +65,7 @@ class PngCanvas {
     }
   }
   async convertToBlob({ type }: { type: string }) {
+    toastsAtEncoding.push(vi.mocked(toast.loading).mock.calls.length)
     return new Blob([`${type} of ${this.drawn} on ${this.width} × ${this.height}`])
   }
 }
@@ -92,6 +100,11 @@ const recording: Doc = {
   fileName: 'Billing costs',
   recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 4000 }, pieces: wholeTake(4000), zooms: null }
 }
+const withRecording = (changes: Partial<RecordingDoc>): Doc => ({ ...recording, recording: { ...recording.recording!, ...changes } })
+const boxes = (count: number): Redaction[] => Array.from({ length: count }, (_, i) => ({ id: `box-${i}`, rect: { x: 0, y: 0, w: 10, h: 10 }, time: null }))
+const zooms = (count: number): ZoomEdit[] =>
+  Array.from({ length: count }, (_, i) => ({ id: `zoom-${i}`, start: i * 4, end: i * 4 + 2, depth: 2, aim: 'manual', focus: { x: 0, y: 0 } }))
+const splitInto = (count: number): Piece[] => Array.from({ length: count }, (_, i) => ({ start: (i * 4000) / count, end: ((i + 1) * 4000) / count, rate: 1, cut: false }))
 
 function setCanvas(docs: Doc[], active = 0) {
   const shots: ShotRecord[] = docs.map((doc, index) => ({ id: `shot-${index}`, doc, past: [], future: [], savedDoc: null, draftDoc: null }))
@@ -102,6 +115,7 @@ function setCanvas(docs: Doc[], active = 0) {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.listeners.clear()
+  toastsAtEncoding.length = 0
   mocks.bridge.saveDraft.mockResolvedValue({ path: SAVED_PATH })
   setCanvas([empty, screenshot, recording, screenshot], 2)
 })
@@ -153,7 +167,8 @@ describe('saveDraft', () => {
     await saveDraft()
     report(0.5)
     expect(vi.mocked(toast.loading).mock.calls).toEqual([
-      ['Saving draft… 0%', { id: undefined }],
+      ['Saving draft…', { id: undefined }],
+      ['Saving draft… 0%', { id: 'saving' }],
       ['Saving draft… 42%', { id: 'saving' }],
       ['Saving draft… 100%', { id: 'saving' }]
     ])
@@ -171,7 +186,73 @@ describe('saveDraft', () => {
     })
     await saveDraft()
     await saveDraft()
-    expect(vi.mocked(toast.loading).mock.calls.map(([, data]) => data?.id)).toEqual([undefined, undefined])
+    expect(vi.mocked(toast.loading).mock.calls.map(([, data]) => data?.id)).toEqual([undefined, 'saving', undefined, 'saving'])
+  })
+
+  it('shows “Saving draft…” as soon as a save starts, before any PNG is encoded or main’s dialog opens', async () => {
+    mocks.bridge.saveDraft.mockImplementation(async () => {
+      expect(toast.loading).toHaveBeenCalledWith('Saving draft…', { id: undefined })
+      return { path: SAVED_PATH }
+    })
+    expect(await saveDraft()).toBe(true)
+    expect(toastsAtEncoding).toEqual([1])
+    expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes the progress away when the save dialog is cancelled', async () => {
+    mocks.bridge.saveDraft.mockResolvedValue(null)
+    expect(await saveDraft()).toBe(false)
+    expect(toast.dismiss).toHaveBeenCalledWith('saving')
+    expect([toast.success, toast.error].map((shown) => vi.mocked(shown).mock.calls.length)).toEqual([0, 0])
+  })
+
+  it('refuses at once, encoding nothing, when the screenshots shots show add up to more than 400 megapixels', async () => {
+    const sixtyMegapixels = ['big-1', 'big-2', 'big-3', 'big-4', 'big-5', 'big-6']
+    for (const id of sixtyMegapixels) registerSource({ id, bitmap: bitmap(id, 10_000, 6000), width: 10_000, height: 6000, name: `${id}.png`, origin: 'file', detected: 1 })
+    registerSource({ id: 'one-more', bitmap: bitmap('one-more', 1, 40_000_001), width: 1, height: 40_000_001, name: 'tall.png', origin: 'file', detected: 1 })
+    const shownOnce = sixtyMegapixels.map((sourceId) => ({ ...screenshot, sourceId }))
+    setCanvas([...shownOnce, { ...screenshot, sourceId: 'one-more' }])
+    expect(await saveDraft()).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('This canvas is too big for a draft', {
+      id: 'saving',
+      description: 'Its screenshots add up to more than 400 megapixels. Remove some shots and try again.'
+    })
+    expect(toastsAtEncoding).toEqual([])
+    expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('counts each screenshot once however many shots show it, saving 400 megapixels', async () => {
+    const sixtyMegapixels = ['big-1', 'big-2', 'big-3', 'big-4', 'big-5', 'big-6']
+    for (const id of sixtyMegapixels) registerSource({ id, bitmap: bitmap(id, 10_000, 6000), width: 10_000, height: 6000, name: `${id}.png`, origin: 'file', detected: 1 })
+    registerSource({ id: 'forty', bitmap: bitmap('forty', 1, 40_000_000), width: 1, height: 40_000_000, name: 'tall.png', origin: 'file', detected: 1 })
+    const shown = [...sixtyMegapixels, 'forty'].map((sourceId) => ({ ...screenshot, sourceId }))
+    setCanvas([...shown, ...shown])
+    expect(await saveDraft()).toBe(true)
+    expect(toastsAtEncoding).toHaveLength(7)
+  })
+
+  it.each([
+    ['more shots than a draft holds', () => Array.from({ length: DRAFT_LIMITS.shots + 1 }, () => empty)],
+    ['a shot with more blur boxes than a draft holds', () => [{ ...screenshot, redactions: boxes(DRAFT_LIMITS.redactions + 1) }]],
+    ['a recording with more zooms than a draft holds', () => [withRecording({ zooms: zooms(DRAFT_LIMITS.zooms + 1) })]],
+    ['a recording with more clips than a draft holds', () => [withRecording({ pieces: splitInto(DRAFT_LIMITS.pieces + 1) })]]
+  ])('refuses %s, as the draft couldn’t be opened again', async (_, docs) => {
+    setCanvas(docs())
+    expect(await saveDraft()).toBe(false)
+    expect(toast.error).toHaveBeenCalledWith('This canvas is too big for a draft', {
+      id: 'saving',
+      description: 'It has more shots, blur boxes, zooms or clips than a draft can hold. Remove some and try again.'
+    })
+    expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('saves a canvas right at what a draft holds', async () => {
+    setCanvas([
+      { ...screenshot, redactions: boxes(DRAFT_LIMITS.redactions) },
+      withRecording({ zooms: zooms(DRAFT_LIMITS.zooms), pieces: splitInto(DRAFT_LIMITS.pieces) }),
+      ...Array.from({ length: DRAFT_LIMITS.shots - 2 }, () => empty)
+    ])
+    expect(await saveDraft()).toBe(true)
   })
 
   it('counts every shot as saved once the draft is written', async () => {
