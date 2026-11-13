@@ -33,11 +33,31 @@ export async function readBackdrop(file: Blob): Promise<{ url: string; bitmap: I
   return { url: await dataUrl(blob), bitmap: await createImageBitmap(blob) }
 }
 
-export function decodeBackdrop(url: string): Promise<ImageBitmap> {
+const fitsBackdrop = (size: Size) => Math.max(size.width, size.height) <= BACKDROP_MAX_SIDE
+
+/** The size an image declares, read by the browser without decoding its pixels; null when it can't be read. */
+function declaredSize(image: Blob): Promise<Size | null> {
+  const url = URL.createObjectURL(image)
+  return new Promise<Size | null>((resolve) => {
+    const element = new Image()
+    element.onload = () => resolve({ width: element.naturalWidth, height: element.naturalHeight })
+    element.onerror = () => resolve(null)
+    element.src = url
+  }).finally(() => URL.revokeObjectURL(url))
+}
+
+/** A style's background image, refused before its pixels are decoded when its size can't be read or a side is over BACKDROP_MAX_SIDE. */
+export async function decodeBackdrop(url: string): Promise<ImageBitmap> {
   const comma = url.indexOf(',')
   const type = url.slice(5, url.indexOf(';'))
   const bytes = Uint8Array.from(atob(url.slice(comma + 1)), (char) => char.charCodeAt(0))
-  return createImageBitmap(new Blob([bytes], { type }))
+  const image = new Blob([bytes], { type })
+  const size = await declaredSize(image)
+  if (!size || !fitsBackdrop(size)) throw new Error(`The background image is over ${BACKDROP_MAX_SIDE} px a side, or not an image`)
+  const bitmap = await createImageBitmap(image)
+  if (fitsBackdrop(bitmap)) return bitmap
+  bitmap.close()
+  throw new Error(`The background image is over ${BACKDROP_MAX_SIDE} px a side`)
 }
 
 function dataUrl(blob: Blob): Promise<string> {

@@ -223,7 +223,10 @@ const listeners = new Set<() => void>()
 
 let backdropDecoding: Promise<void> = Promise.resolve()
 
-/** Decodes the house background image whenever the style gets a different one. */
+/**
+ * Decodes the house background image whenever the style gets a different one, imported, opened with a draft or stored. One that's too
+ * large or won't decode leaves the style, and storage with it; the rest of the style stays, and shots set to Image show the gradient.
+ */
 function syncBackdrop() {
   const url = state.style.backgroundImage
   if ((state.backdrop?.url ?? null) === url) return
@@ -236,7 +239,7 @@ function syncBackdrop() {
       else bitmap.close()
     },
     () => {
-      /* not decodable: shots set to Image keep the gradient */
+      if (state.style.backgroundImage === url) store.set((s) => ({ style: { ...s.style, backgroundImage: null } }))
     }
   )
 }
