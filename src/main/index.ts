@@ -16,12 +16,12 @@ import {
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import type { CaptureSource, CountdownRequest, DiscardAnswer, DiscardPurpose, ImageFormat, MenuCommand, NamedImage } from '../shared/types'
+import type { CaptureSource, CountdownRequest, DiscardAnswer, DiscardPurpose, ImageFormat, MenuCommand } from '../shared/types'
 import { registerDrafts } from './drafts'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
 import { connectDirectly, disableProxyResolution } from './no-network'
 import { cancelWarmTake, recordingVideoFile, registerRecording, stopLiveTake } from './recording'
-import { isUncOrDevicePath } from './renderer-paths'
+import { imagesToSave, revealablePath } from './renderer-paths'
 
 registerMediaScheme()
 disableProxyResolution(app.commandLine)
@@ -377,29 +377,22 @@ function registerIpc() {
   )
 
   ipcMain.handle('file:save-images', async (_event, images: unknown) => {
-    if (!win || !Array.isArray(images) || images.length === 0) return null
-    const valid = (images as NamedImage[]).filter((image) => typeof image?.name === 'string' && image.bytes instanceof Uint8Array)
+    const files = imagesToSave(images)
+    if (!win || files.length === 0) return null
     const prefs = await readPrefs()
     const folder = prefs.lastSaveDir && existsSync(prefs.lastSaveDir) ? prefs.lastSaveDir : app.getPath('pictures')
     const result = await dialog.showOpenDialog(win, {
-      title: `Export ${valid.length} images to…`,
+      title: `Export ${files.length} images to…`,
       defaultPath: folder,
       buttonLabel: 'Export here',
       properties: ['openDirectory', 'createDirectory']
     })
     const target = result.filePaths[0]
     if (result.canceled || !target) return null
-    // Same names are allowed in the app; on disk the second one becomes name-2, and so on.
-    const taken = new Set<string>()
     const paths: string[] = []
-    for (const image of valid) {
-      const ext = extname(image.name)
-      const stem = basename(image.name, ext) || 'whats-new-shot'
-      let candidate = `${stem}${ext}`
-      for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${stem}-${n}${ext}`
-      taken.add(candidate.toLowerCase())
-      const path = join(target, candidate)
-      await writeFile(path, image.bytes)
+    for (const { name, bytes } of files) {
+      const path = join(target, name)
+      await writeFile(path, bytes)
       paths.push(path)
     }
     await writePrefs({ ...prefs, lastSaveDir: target })
@@ -449,8 +442,9 @@ function registerIpc() {
     return null
   })
 
-  ipcMain.handle('file:reveal', (_event, path: unknown) => {
-    if (typeof path === 'string' && !isUncOrDevicePath(path) && existsSync(path)) shell.showItemInFolder(path)
+  ipcMain.handle('file:reveal', async (_event, path: unknown) => {
+    const revealable = await revealablePath(path)
+    if (revealable) shell.showItemInFolder(revealable)
   })
 }
 

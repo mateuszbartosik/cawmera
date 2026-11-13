@@ -52,6 +52,19 @@ function diskFullAfter(capacity: number) {
   }) as unknown as WriteStream
 }
 
+/** A destination that fails at the first chunk holding `marker`, as if the disk filled up there. */
+function diskFullAt(marker: string) {
+  return new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      callback(chunk.includes(marker) ? new Error('ENOSPC: no space left on device, write') : null)
+    }
+  }) as unknown as WriteStream
+}
+
+const nextTurns = async (count: number) => {
+  for (let i = 0; i < count; i++) await new Promise((resolve) => setImmediate(resolve))
+}
+
 const reasonOf = (reading: Promise<unknown>) =>
   reading.then(
     () => null,
@@ -182,7 +195,7 @@ describe('writing and reading a draft', ON_DISK, () => {
     const parts = await partsIn(dir)
     await expect(
       writeDraft(target, { ...parts, recordings: [{ key: 'r1', video: join(dir, 'missing.mp4'), track: '{}' }] }, noop)
-    ).rejects.toThrow()
+    ).rejects.toThrow(`ENOENT: no such file or directory, stat '${join(dir, 'missing.mp4')}'`)
     expect(existsSync(`${target}.partial`)).toBe(false)
     expect(await readFile(target, 'utf8')).toBe('the previous draft')
   })
@@ -226,6 +239,27 @@ describe('writing and reading a draft', ON_DISK, () => {
     await vi.waitFor(() => expect(sources[0].closed).toBe(true))
     expect(existsSync(`${target}.partial`)).toBe(false)
     expect(await readFile(target, 'utf8')).toBe('the previous draft')
+  })
+
+  it('opens no other take’s video once a save has failed', async () => {
+    const { dir } = await workspace()
+    const firstVideo = join(dir, 'first.mp4')
+    const secondVideo = join(dir, 'second.mp4')
+    for (const video of [firstVideo, secondVideo]) await writeFile(video, randomBytes(100_000))
+    const firstTrack = '{"version":1,"take":"first"}'
+    const parts: DraftParts = {
+      manifest: MANIFEST,
+      screenshots: [],
+      recordings: [
+        { key: 'r1', video: firstVideo, track: firstTrack },
+        { key: 'r2', video: secondVideo, track: TRACK }
+      ]
+    }
+    vi.mocked(createReadStream).mockClear()
+    vi.mocked(createWriteStream).mockImplementationOnce(() => diskFullAt(firstTrack))
+    await expect(writeDraft(join(dir, 'a.cawmera'), parts, noop)).rejects.toThrow('ENOSPC')
+    await nextTurns(20)
+    expect(vi.mocked(createReadStream).mock.calls.map(([path]) => path)).toEqual([firstVideo])
   })
 })
 

@@ -466,7 +466,7 @@ describe('take lifecycle', () => {
       expect(t.takes.takeFolder(id)).toBe(join(t.recordingsRoot, id))
       expect(t.takes.takeFolder('3f2a3b19-e3de-4153-9d82-95ac5c46cbd1')).toBeNull()
       expect(t.takes.takeFolder('..')).toBeNull()
-      expect(() => t.takes.adopt('../x')).toThrow()
+      expect(() => t.takes.adopt('../x')).toThrow('Not a recording id')
     })
 
     it('hands out no folder for a take that is still recording', async () => {

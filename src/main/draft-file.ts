@@ -144,13 +144,16 @@ export async function writeDraft(
     }
   })
   const sources: ReadStream[] = []
+  let failed = false
   const zip = new ZipWriter()
   zip.on('error', (error: Error) => counter.destroy(error))
   const stored = { compress: false }
   zip.addBuffer(Buffer.from(parts.manifest), MANIFEST, stored)
   for (const { key, bytes } of parts.screenshots) zip.addBuffer(bufferOf(bytes), screenshotName(key), stored)
   for (const [index, { key, video, track }] of parts.recordings.entries()) {
+    // yazl goes on to the next entry after the output has failed; once the save has failed, it waits for a video that never comes.
     zip.addReadStreamLazy(videoName(key), { ...stored, size: videoSizes[index] }, (callback) => {
+      if (failed) return
       const source = createReadStream(video)
       source.on('error', (error) => counter.destroy(error))
       sources.push(source)
@@ -167,6 +170,7 @@ export async function writeDraft(
     await pipeline(zip.outputStream, counter, createWriteStream(partial))
     await rename(partial, target)
   } catch (error) {
+    failed = true
     for (const source of sources) source.destroy()
     await removePartial(partial).catch(() => {})
     throw error
