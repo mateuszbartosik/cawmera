@@ -11,6 +11,7 @@ import {
   materialize,
   moveZoom,
   removeZoom,
+  sameZoomEdits,
   segmentsFromEdits,
   setZoom,
   stretchZoom,
@@ -224,6 +225,28 @@ describe('editing zooms', () => {
     const edits = [edit('a', 2000, 4000), edit('b', 6000, 8000)]
     expect(moveZoom(edits, 'a', 5000, trim)[0]).toMatchObject({ start: 4000, end: 6000 })
     expect(moveZoom(edits, 'a', -500, trim)[0]).toMatchObject({ start: 0, end: 2000 })
+  })
+
+  it('leaves the zooms as they were when a move keeps the start', () => {
+    const edits = [edit('a', 2000, 4000), edit('b', 6000, 8000)]
+    expect(moveZoom(edits, 'a', 2000, trim)).toBe(edits)
+    expect(moveZoom(edits, 'b', 9000, { start: 0, end: 8000 })).toBe(edits)
+  })
+
+  it('tells zooms that are the same from ones an edit changed', () => {
+    const edits = [edit('a', 2000, 4000), autoEdit('b', 6000, 8000, 2.2)]
+    expect(sameZoomEdits(edits, edits.map((zoom) => ({ ...zoom, focus: { ...zoom.focus } })))).toBe(true)
+    const changed = [
+      [edits[0]],
+      [{ ...edits[0], id: 'c' }, edits[1]],
+      moveZoom(edits, 'a', 2100, trim),
+      stretchZoom(edits, 'b', 'end', 8100, trim),
+      setZoom(edits, 'a', { depth: 2.5 }),
+      setZoom(edits, 'b', { aim: 'manual' }),
+      setZoom(edits, 'a', { focus: { x: 961, y: 540 } }),
+      setZoom(edits, 'a', { focus: { x: 960, y: 541 } })
+    ]
+    for (const other of changed) expect(sameZoomEdits(edits, other)).toBe(false)
   })
 
   it('moves a zoom left partly past the trim back inside it, and leaves one with no room for its length where it is', () => {

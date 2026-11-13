@@ -44,6 +44,21 @@ export function dragSession(): DragSession {
   return session
 }
 
+/** Pointer travel before a press on a timeline block or handle edits anything, so a click leaves no undo step. */
+export const DRAG_THRESHOLD_PX = 3
+
+export interface TimelinePress {
+  /** False until the pointer has moved DRAG_THRESHOLD_PX from where the press went down; true from then on. */
+  dragsAt(pointerX: number): boolean
+}
+
+export function timelinePress(x: number): TimelinePress {
+  let dragging = false
+  return {
+    dragsAt: (pointerX) => (dragging ||= Math.abs(pointerX - x) >= DRAG_THRESHOLD_PX)
+  }
+}
+
 /** A component’s session, ended if the component goes mid-drag. */
 export function useDragSession(): DragSession {
   const [session] = useState(dragSession)

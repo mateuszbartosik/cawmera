@@ -7,9 +7,10 @@ vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 
 const { deleteAction } = await import('../src/renderer/src/app/selection-keys')
 const { beginGesture, emptyDoc, endGesture, store, undo, updateDoc } = await import('../src/renderer/src/app/store')
-const { cutSelection, rangeAt, rangeHasCut, rateOfRange, restoreSelection, selectRange, setSelectionRate, splitAtPlayhead } = await import(
+const { cutSelection, rangeAt, rangeHasCut, rateOfRange, restoreSelection, selectRange, setSelectionRate, splitAtPlayhead, trimEdgeTo } = await import(
   '../src/renderer/src/recording/edit-actions'
 )
+const { dragSession } = await import('../src/renderer/src/timeline/drag-session')
 const { scrubTo } = await import('../src/renderer/src/recording/playback')
 const { registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
@@ -46,6 +47,25 @@ beforeEach(() => {
 describe('edit actions', () => {
   it('finds the piece under a time, inside the trim', () => {
     expect(rangeAt([piece(0, 4000), piece(4000, 10_000)], { start: 1000, end: 9000 }, 5000)).toEqual({ start: 4000, end: 9000 })
+  })
+
+  it('drags a trim end as one undo step, and leaves none when the end stays where it is', () => {
+    openTake(10_000)
+    const atTheStart = dragSession()
+    atTheStart.begin()
+    trimEdgeTo('start', -500, 10_000)
+    trimEdgeTo('start', 0, 10_000)
+    atTheStart.end()
+    expect(store.get().past).toEqual([])
+
+    const before = store.get().doc
+    const moving = dragSession()
+    moving.begin()
+    trimEdgeTo('end', 9000, 10_000)
+    trimEdgeTo('end', 8000, 10_000)
+    moving.end()
+    expect(store.get().doc.recording!.trim).toEqual({ start: 0, end: 8000 })
+    expect(store.get().past).toEqual([before])
   })
 
   it('cuts the selected stretch in one undo step', () => {

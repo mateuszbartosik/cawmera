@@ -1,6 +1,7 @@
 import { toast } from 'sonner'
 import { store, updateDoc } from '../app/store'
-import { currentPlayhead, applyTimeMap } from './playback'
+import { dragTrim } from '../timeline/scale'
+import { currentPlayhead, applyTimeMap, scrubTo } from './playback'
 import { cutRange, pieceAt, restoreRange, samePieces, setRangeRate, splitAt } from './pieces'
 import { timeMapOf, type Piece, type Rate, type Span } from './timemap'
 import type { Trim } from './trim'
@@ -80,4 +81,19 @@ export function restoreSelection() {
 
 export function setSelectionRate(rate: Rate) {
   editPieces(({ pieces, trim }, range) => setRangeRate(pieces, range, rate, trim))
+}
+
+/**
+ * Moves one end of the trim towards `t` as far as dragTrim lets it, inside a drag or a run of key steps, and brings the playhead along.
+ * An end that stays where it is changes nothing, so no undo step comes of it.
+ */
+export function trimEdgeTo(edge: 'start' | 'end', t: number, durationMs: number) {
+  const recording = store.get().doc.recording
+  if (!recording) return
+  const next = dragTrim(recording.trim, edge, t, durationMs, recording.pieces)
+  if (next.start !== recording.trim.start || next.end !== recording.trim.end) {
+    updateDoc((doc) => (doc.recording ? { recording: { ...doc.recording, trim: next } } : {}), { history: false })
+    applyTimeMap(timeMapOf(next, recording.pieces), next)
+  }
+  scrubTo(next[edge])
 }

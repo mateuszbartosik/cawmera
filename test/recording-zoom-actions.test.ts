@@ -96,6 +96,34 @@ describe('zoom actions', () => {
     expect(store.get().past).toEqual([])
   })
 
+  it('stores no automatic zoom and adds no undo step for an edit that changes nothing', () => {
+    selectZoom('auto-1')
+    const { start, end, depth, aim } = currentZoomEdits()[1]
+    setSelectedZoom({ depth, aim })
+    stretchZoomTo('auto-1', 'end', end)
+    stretchZoomTo('auto-1', 'start', start)
+    const drag = dragSession()
+    drag.begin()
+    expect(moveZoomTo('auto-1', start, false)).toBe('auto-1')
+    drag.end()
+    expect(storedZooms()).toBeNull()
+    expect(store.get().past).toEqual([])
+    expect(store.get().timelineSelection).toEqual({ kind: 'zoom', id: 'auto-1' })
+  })
+
+  it('adds no undo step for a stored zoom set to what it already is', () => {
+    selectZoom('auto-0')
+    deleteSelectedZoom()
+    const [zoom] = currentZoomEdits()
+    selectZoom(zoom.id)
+    const steps = store.get().past.length
+    const zooms = storedZooms()
+    setSelectedZoom({ depth: zoom.depth, aim: zoom.aim })
+    moveZoomTo(zoom.id, zoom.start)
+    expect(store.get().past).toHaveLength(steps)
+    expect(storedZooms()).toBe(zooms)
+  })
+
   it('undoes the first edit back to automatic zooms', () => {
     selectZoom('auto-0')
     deleteSelectedZoom()

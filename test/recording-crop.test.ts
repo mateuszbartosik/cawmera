@@ -7,7 +7,7 @@ import type { ZoomEdit } from '../src/renderer/src/recording/zoom-edits'
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 
-const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
+const { DEFAULT_DOC, DEFAULT_SPOTLIGHT } = await import('../src/renderer/src/app/doc')
 const { enterCrop, leaveCrop, resetAll } = await import('../src/renderer/src/app/actions')
 const { beginGesture, emptyDoc, endGesture, selectShot, addShot, registerSource, store, undo, updateDoc } = await import('../src/renderer/src/app/store')
 const { currentCropFrame, drawnRecordingCrop, keepsDrawnCrop, RECORDING_CROP_MIN_PX, setCropFrame, settleRecordingCrop } = await import(
@@ -213,6 +213,38 @@ describe('Reset this shot on a recording', () => {
     resetAll()
     undo()
     expect(store.get().doc).toBe(before)
+  })
+
+  it('adds no undo step on a recording with nothing to reset, and still clears the selection', () => {
+    updateDoc((doc) => ({ spotlight: { ...doc.spotlight }, recording: { ...doc.recording!, pieces: wholeTake(10_000), trim: { start: 500, end: 9000 } } }), { history: false })
+    store.set({ past: [], timelineSelection: { kind: 'range', start: 1000, end: 2000 } })
+    const before = store.get().doc
+    resetAll()
+    expect(store.get().doc).toBe(before)
+    expect(store.get().past).toEqual([])
+    expect(store.get().timelineSelection).toBeNull()
+  })
+
+  it.each([
+    ['a crop', { crop: { x: 100, y: 100, w: 800, h: 600 } }],
+    ['a blur box', { redactions: [{ id: 'b', rect: { x: 0, y: 0, w: 50, h: 50 }, time: null }] }],
+    ['a blur style', { redactStyle: 'solid' as const }],
+    ['a spotlight', { spotlight: { ...DEFAULT_SPOTLIGHT, on: true, rect: { x: 0, y: 0, w: 100, h: 100 } } }]
+  ])('still resets a recording with only %s', (_, edit) => {
+    updateDoc(edit)
+    resetAll()
+    expect(store.get().past).toHaveLength(2)
+  })
+
+  it.each([
+    ['split', [piece(0, 4000), piece(4000, 10_000)]],
+    ['zoomed', null]
+  ])('still resets a recording that is only %s', (kind, pieces) => {
+    const zooms: ZoomEdit[] | null = kind === 'zoomed' ? [zoom] : null
+    updateDoc((doc) => ({ recording: { ...doc.recording!, pieces: pieces ?? doc.recording!.pieces, zooms } }))
+    resetAll()
+    expect(store.get().past).toHaveLength(2)
+    expect(store.get().doc.recording).toMatchObject({ pieces: wholeTake(10_000), zooms: null })
   })
 
   it('resets a screenshot as before', () => {

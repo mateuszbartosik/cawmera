@@ -4,6 +4,7 @@ import { setSelectionRate } from '../recording/edit-actions'
 import { RATES, type Rate } from '../recording/timemap'
 import { cn } from '../ui/controls'
 import { HeaderButton } from './HeaderButton'
+import { menuKeyAction } from './menu-keys'
 
 interface SpeedMenuProps { range: boolean; rate: Rate | 'mixed' | null }
 
@@ -35,20 +36,21 @@ export function SpeedMenu({ range, rate }: SpeedMenuProps) {
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
 
+  const pick = (option: Rate) => {
+    close(true)
+    setSelectionRate(option)
+  }
+
+  /** The open menu keeps every key from the window: Space would play behind it, S split and Delete cut. */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      close(true)
-      return
-    }
-    const current = itemRefs.current.findIndex((item) => item === document.activeElement)
-    const last = RATES.length - 1
-    const target =
-      event.key === 'ArrowDown' ? (current + 1) % RATES.length : event.key === 'ArrowUp' ? (current - 1 + RATES.length) % RATES.length : event.key === 'Home' ? 0 : event.key === 'End' ? last : null
-    if (target === null) return
+    event.stopPropagation()
+    const focused = itemRefs.current.findIndex((item) => item === document.activeElement)
+    const action = menuKeyAction(event.key, focused, RATES.length)
+    if (!action) return
     event.preventDefault()
-    itemRefs.current[target]?.focus()
+    if (action.kind === 'focus') itemRefs.current[action.index]?.focus()
+    else if (action.kind === 'pick') pick(RATES[action.index])
+    else close(true)
   }
 
   return (
@@ -84,10 +86,7 @@ export function SpeedMenu({ range, rate }: SpeedMenuProps) {
                 'rounded-md px-2 py-1 text-left text-xs tabular-nums outline-none hover:bg-(--tc-control) focus-visible:bg-(--tc-control)',
                 option === rate ? 'font-semibold text-(--tc-fg)' : 'text-(--tc-label)'
               )}
-              onClick={() => {
-                close(true)
-                setSelectionRate(option)
-              }}
+              onClick={() => pick(option)}
             >
               {option}×
             </button>

@@ -7,6 +7,7 @@ type PlayingListener = (playing: boolean) => void
 type ErrorListener = () => void
 
 const MS_PER_SECOND = 1000
+const SEEK_SETTLE_LIMIT_MS = 1000
 
 export class RecordingPlayer {
   readonly video = document.createElement('video')
@@ -15,6 +16,7 @@ export class RecordingPlayer {
   private readonly frameListeners = new Set<FrameListener>()
   private readonly playingListeners = new Set<PlayingListener>()
   private readonly errorListeners = new Set<ErrorListener>()
+  private readonly seekWaits = new Set<() => void>()
   private finished = false
   private frameRequest: number | null = null
   private disposed = false
@@ -67,16 +69,21 @@ export class RecordingPlayer {
     return createImageBitmap(this.video)
   }
 
+  /** A seek that never reports back is waited for a second at most; disposing the player ends the wait too. */
   private untilSeekSettles(): Promise<void> {
     const { video } = this
     return new Promise((resolve) => {
       const settle = () => {
+        clearTimeout(limit)
         video.removeEventListener('seeked', settle)
         video.removeEventListener('error', settle)
+        this.seekWaits.delete(settle)
         resolve()
       }
+      const limit = setTimeout(settle, SEEK_SETTLE_LIMIT_MS)
       video.addEventListener('seeked', settle)
       video.addEventListener('error', settle)
+      this.seekWaits.add(settle)
     })
   }
 
@@ -117,6 +124,7 @@ export class RecordingPlayer {
     video.pause()
     video.removeAttribute('src')
     video.load()
+    for (const settle of [...this.seekWaits]) settle()
     this.frameListeners.clear()
     this.playingListeners.clear()
     this.errorListeners.clear()

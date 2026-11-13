@@ -3,12 +3,12 @@ import { useApp } from '../app/store'
 import { addZoomAt, moveZoomTo, selectZoom, stretchZoomTo } from '../recording/zoom-actions'
 import type { ZoomEdit } from '../recording/zoom-edits'
 import { cn } from '../ui/controls'
-import { useDragSession } from './drag-session'
+import { timelinePress, useDragSession, type TimelinePress } from './drag-session'
 import { xToTime, type TimelineView } from './scale'
 import { drawnBlock, dragTarget, EDGE_GRAB_PX, grabAt, isBlockVisible, zoomAtX, type Grab } from './zoom-drag'
 
 interface ZoomRowProps { edits: ZoomEdit[]; view: TimelineView; width: number }
-interface DraggedZoom { id: string; grab: Grab }
+interface DraggedZoom { id: string; grab: Grab; press: TimelinePress }
 
 const ZOOM_ID_ATTRIBUTE = 'data-zoom-id'
 
@@ -67,14 +67,17 @@ export function ZoomRow({ edits, view, width }: ZoomRowProps) {
           return
         }
         event.currentTarget.setPointerCapture(event.pointerId)
-        dragged.current = { id: zoom.id, grab: grabAt(zoom, pointerX(event), view, width) }
+        const x = pointerX(event)
+        dragged.current = { id: zoom.id, grab: grabAt(zoom, x, view, width), press: timelinePress(x) }
         selectZoom(zoom.id)
         session.begin()
       }}
       onPointerMove={(event) => {
         if (!session.accepts(event.buttons) || !dragged.current) return
-        const { id, grab } = dragged.current
-        const target = dragTarget(grab, pointerX(event), view, width)
+        const { id, grab, press } = dragged.current
+        const x = pointerX(event)
+        if (!press.dragsAt(x)) return
+        const target = dragTarget(grab, x, view, width)
         dragged.current.id = grab.kind === 'move' ? moveZoomTo(id, target, false) : stretchZoomTo(id, grab.kind, target, false)
       }}
       onPointerUp={endDrag}

@@ -154,6 +154,11 @@ export function materialize(edits: ZoomEdit[], newId: () => string): { edits: Zo
   return { edits: stored, ids }
 }
 
+const sameZoomEdit = (a: ZoomEdit, b: ZoomEdit) =>
+  a.id === b.id && a.start === b.start && a.end === b.end && a.depth === b.depth && a.aim === b.aim && a.focus.x === b.focus.x && a.focus.y === b.focus.y
+
+export const sameZoomEdits = (a: ZoomEdit[], b: ZoomEdit[]): boolean => a === b || (a.length === b.length && a.every((edit, i) => sameZoomEdit(edit, b[i])))
+
 const replacing = (edits: ZoomEdit[], zoom: ZoomEdit) => edits.map((edit) => (edit.id === zoom.id ? zoom : edit))
 
 function roomOf(edits: ZoomEdit[], zoom: ZoomEdit, bounds: Span): Span {
@@ -171,7 +176,7 @@ export function moveZoom(edits: ZoomEdit[], id: string, start: number, bounds: S
   const length = zoom.end - zoom.start
   if (room.end - room.start < length) return edits
   const movedStart = clamp(start, room.start, room.end - length)
-  return replacing(edits, { ...zoom, start: movedStart, end: movedStart + length })
+  return movedStart === zoom.start ? edits : replacing(edits, { ...zoom, start: movedStart, end: movedStart + length })
 }
 
 export function stretchZoom(edits: ZoomEdit[], id: string, edge: 'start' | 'end', at: number, bounds: Span): ZoomEdit[] {

@@ -1,12 +1,10 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { store } from '../app/store'
-import { setRecording } from '../recording/actions'
-import { applyTimeMap, scrubTo } from '../recording/playback'
-import { timeMapOf } from '../recording/timemap'
+import { trimEdgeTo } from '../recording/edit-actions'
 import type { Trim } from '../recording/trim'
-import { useDragSession } from './drag-session'
+import { timelinePress, useDragSession, type TimelinePress } from './drag-session'
 import { CLIP_HEIGHT, CLIP_INSET, RULER_HEIGHT } from './layout'
-import { dragTrim, formatClock, timeToX, xToTime, type TimelineView } from './scale'
+import { formatClock, timeToX, xToTime, type TimelineView } from './scale'
 
 const HANDLE_WIDTH = 8
 const KEY_STEP_MS = 100
@@ -20,24 +18,17 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
   const drag = useDragSession()
   const keySteps = useDragSession()
   const grabOffset = useRef(0)
+  const press = useRef<TimelinePress | null>(null)
   const x = timeToX(trim[edge], view, width)
   const visible = x >= 0 && x <= width
 
-  const moveEdgeTo = (t: number) => {
-    const recording = store.get().doc.recording
-    if (!recording) return
-    const next = dragTrim(recording.trim, edge, t, duration, recording.pieces)
-    setRecording({ trim: next }, false)
-    applyTimeMap(timeMapOf(next, recording.pieces), next)
-    scrubTo(next[edge])
-  }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
     if (direction === 0) return
     event.preventDefault()
     keySteps.edit(() => {
       const current = store.get().doc.recording?.trim ?? trim
-      moveEdgeTo(current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS))
+      trimEdgeTo(edge, current[edge] + direction * (event.shiftKey ? KEY_STEP_SHIFT_MS : KEY_STEP_MS), duration)
     })
   }
 
@@ -75,12 +66,13 @@ export function TrimHandle({ edge, trim, duration, view, width }: TrimHandleProp
         event.currentTarget.setPointerCapture(event.pointerId)
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
         grabOffset.current = event.clientX - bounds.left - x
+        press.current = timelinePress(event.clientX)
         drag.begin()
       }}
       onPointerMove={(event) => {
-        if (!drag.accepts(event.buttons)) return
+        if (!drag.accepts(event.buttons) || !press.current?.dragsAt(event.clientX)) return
         const bounds = event.currentTarget.parentElement!.getBoundingClientRect()
-        moveEdgeTo(xToTime(event.clientX - bounds.left - grabOffset.current, view, bounds.width))
+        trimEdgeTo(edge, xToTime(event.clientX - bounds.left - grabOffset.current, view, bounds.width), duration)
       }}
       onPointerUp={() => drag.end()}
       onPointerCancel={() => drag.end()}

@@ -7,7 +7,7 @@ import { pausePlayback } from './playback'
 import { getRecording } from './registry'
 import { takeViewFor } from './take-view'
 import { snapToOutput, type Span } from './timemap'
-import { addZoom, materialize, moveZoom, removeZoom, setZoom, stretchZoom, type ZoomAim, type ZoomEdit } from './zoom-edits'
+import { addZoom, materialize, moveZoom, removeZoom, sameZoomEdits, setZoom, stretchZoom, type ZoomAim, type ZoomEdit } from './zoom-edits'
 
 const NO_ROOM_MESSAGE = 'No room for a zoom here'
 
@@ -43,14 +43,14 @@ export function selectZoom(id: string | null) {
   store.set({ timelineSelection: id === null ? null : { kind: 'zoom', id } })
 }
 
-/** Returns the ids the first edit gave the automatic zooms it stored; empty when nothing changed. */
+/** Returns the ids the first edit gave the automatic zooms it stored; empty when nothing changed, which stores nothing and adds no undo step. */
 export function editZooms(change: (edits: ZoomEdit[], selectedId: string | null) => ZoomEdit[] | null, history = true): Map<string, string> {
   const take = activeTake()
   if (!take) return new Map()
   const { edits } = take.view
   const selectedId = selectedZoomOf(edits)?.id ?? null
   const changed = change(edits, selectedId)
-  if (!changed || changed === edits) return new Map()
+  if (!changed || sameZoomEdits(changed, edits)) return new Map()
   const { edits: stored, ids } = materialize(changed, newId)
   updateDoc((doc) => (doc.recording ? { recording: { ...doc.recording, zooms: stored } } : {}), { history })
   const followed = selectedId === null ? null : (ids.get(selectedId) ?? selectedId)

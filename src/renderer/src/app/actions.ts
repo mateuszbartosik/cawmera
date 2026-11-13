@@ -14,7 +14,8 @@ import {
   type Doc,
   type Edge,
   type ExportFormat,
-  type Fill
+  type Fill,
+  type Spotlight
 } from './doc'
 import { readBackdrop } from './backdrop'
 import { toastExportFailed, toastSaved } from './save-toast'
@@ -42,13 +43,14 @@ import {
   type SourceEntry
 } from './store'
 import { layoutFor, renderImage, type Scene } from '../render/compose'
-import type { Size } from '../render/geometry'
+import { sameRect, type Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { cropSubject, revealActive } from '../canvas/view'
 import { DRAFT_EXTENSION, openDraftAmong } from '../drafts/actions'
 import { setCropFrame } from '../recording/crop'
 import { addTimedRedaction } from '../recording/blur-actions'
 import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
+import { samePieces } from '../recording/pieces'
 import type { RecordingDoc } from '../recording/settings'
 import { wholeTake } from '../recording/timemap'
 import {
@@ -627,15 +629,28 @@ export function resetAll() {
   store.set({ selection: [], mode: 'compose' })
 }
 
-/** A recording keeps its take, trim and Cursor and Motion settings: only what was edited on it goes. */
+const sameSpotlight = (a: Spotlight, b: Spotlight) => a.on === b.on && a.dim === b.dim && a.outline === b.outline && sameRect(a.rect, b.rect)
+
+/** A recording keeps its take, trim and Cursor and Motion settings: only what was edited on it goes, and with nothing edited, no undo step comes. */
 function resetRecordingEdits(recording: RecordingDoc) {
-  updateDoc({
-    crop: null,
-    redactions: DEFAULT_DOC.redactions,
-    redactStyle: DEFAULT_DOC.redactStyle,
-    spotlight: DEFAULT_SPOTLIGHT,
-    recording: { ...recording, pieces: wholeTake(recording.pieces.at(-1)?.end ?? 0), zooms: null }
-  })
+  const { doc } = store.get()
+  const pieces = wholeTake(recording.pieces.at(-1)?.end ?? 0)
+  const edited =
+    doc.crop !== null ||
+    doc.redactions.length > 0 ||
+    doc.redactStyle !== DEFAULT_DOC.redactStyle ||
+    !sameSpotlight(doc.spotlight, DEFAULT_SPOTLIGHT) ||
+    recording.zooms !== null ||
+    !samePieces(recording.pieces, pieces)
+  if (edited) {
+    updateDoc({
+      crop: null,
+      redactions: DEFAULT_DOC.redactions,
+      redactStyle: DEFAULT_DOC.redactStyle,
+      spotlight: DEFAULT_SPOTLIGHT,
+      recording: { ...recording, pieces, zooms: null }
+    })
+  }
   store.set({ selection: [], timelineSelection: null, mode: 'compose' })
 }
 

@@ -15,7 +15,7 @@ import {
   undo,
   updateDoc
 } from '../src/renderer/src/app/store'
-import { dragSession } from '../src/renderer/src/timeline/drag-session'
+import { DRAG_THRESHOLD_PX, dragSession, timelinePress } from '../src/renderer/src/timeline/drag-session'
 
 const turnTo = (angle: number) => updateDoc({ angle }, { history: false })
 const shot = (id: string) => liveShots().find((record) => record.id === id)!
@@ -195,6 +195,15 @@ describe('a drag session', () => {
     expect(store.get().doc.angle).toBe(30)
     expect(store.get().past).toEqual([before])
     expect(store.get().future).toEqual([])
+  })
+
+  it('is no drag while a press on the timeline moves less than 3 px, and stays one once it has moved that far', () => {
+    expect(DRAG_THRESHOLD_PX).toBe(3)
+    const press = timelinePress(100)
+    expect([100, 102, 97.5, 102.9].map(press.dragsAt)).toEqual([false, false, false, false])
+    expect(press.dragsAt(97)).toBe(true)
+    expect([100, 101].map(press.dragsAt)).toEqual([true, true])
+    expect(timelinePress(100).dragsAt(103)).toBe(true)
   })
 
   it('commits the gesture still open when another begins', () => {
