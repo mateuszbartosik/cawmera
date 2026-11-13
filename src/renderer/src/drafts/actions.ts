@@ -7,6 +7,7 @@ import {
   getSource,
   liveShots,
   markDraftSaved,
+  MAX_DRAFT_PIXELS,
   MAX_SOURCE_PIXELS,
   newId,
   registerSource,
@@ -33,7 +34,11 @@ const OPEN_FAILURES: Record<DraftFailure | DraftOpenFailure, string> = {
   'too-large': OPEN_FAILED,
   unreadable: OPEN_FAILED
 }
+const TOO_MANY_PIXELS = `Its screenshots add up to more than ${MAX_DRAFT_PIXELS / 1_000_000} megapixels.`
+const ONLY_THE_DRAFT = 'Only the draft was opened, not the other files'
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 const PNG_IHDR = 0x49484452
+const IHDR_LENGTH = 13
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -42,7 +47,7 @@ const draftName = (doc: Doc) => `${slugify(doc.fileName) || FALLBACK_NAME}${DRAF
 const sourceName = ({ doc }: ShotRecord) => (doc.recording ? getRecording(doc.sourceId)?.name : getSource(doc.sourceId)?.name) ?? ''
 
 let saving: Promise<boolean> | null = null
-let opening: Promise<void> | null = null
+let opening: Promise<boolean> | null = null
 
 const syncDraftBusy = () => store.set({ draftBusy: saving !== null || opening !== null })
 
@@ -58,9 +63,14 @@ function draftToast(running: string) {
     },
     failed(title: string, description?: string) {
       toast.error(title, { id, description })
+    },
+    dismiss() {
+      if (id !== undefined) toast.dismiss(id)
     }
   }
 }
+
+type DraftToast = ReturnType<typeof draftToast>
 
 async function withProgress<T>(target: CawmeraBridge, onProgress: (share: number) => void, work: () => Promise<T>): Promise<T> {
   const stopProgress = target.onDraftProgress(onProgress)
@@ -135,6 +145,11 @@ export async function saveDraft(): Promise<boolean> {
   return saving
 }
 
+/** Save draft from the File menu or Ctrl+Shift+D: like the toolbar button, it does nothing while a draft is saved or opened. */
+export function saveDraftUnlessBusy() {
+  if (!store.get().draftBusy) void saveDraft()
+}
+
 /** Before unsaved work would be lost, offers to save it in a draft or discard it. False when it's kept, or the draft didn't cover it. */
 export async function saveOrDiscardUnsaved(purpose: DiscardPurpose): Promise<boolean> {
   const count = unsavedCount()
@@ -144,38 +159,32 @@ export async function saveOrDiscardUnsaved(purpose: DiscardPurpose): Promise<boo
   if (answer !== 'save') return false
   // A save that ended while the dialog was up may have covered everything already.
   if (unsavedCount() === 0) return true
+  if (purpose === 'close' && opening) {
+    toast.error(SAVE_FAILED, { description: DRAFT_BUSY })
+    return false
+  }
   return (await saveDraft()) && unsavedCount() === 0
 }
 
 // ---------------------------------------------------------------------------
 // Opening
 
+/** Width and height from a PNG's header, the signature then the IHDR chunk; null for anything else, which Cawmera never saves. */
 function pngSize(bytes: Uint8Array): Size | null {
-  if (bytes.byteLength < 24) return null
+  if (bytes.byteLength < 24 || PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return null
   const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  return header.getUint32(12) === PNG_IHDR ? { width: header.getUint32(16), height: header.getUint32(20) } : null
+  if (header.getUint32(8) !== IHDR_LENGTH || header.getUint32(12) !== PNG_IHDR) return null
+  return { width: header.getUint32(16), height: header.getUint32(20) }
 }
 
-/** Cawmera saves only screenshots it could load, so a larger one is refused from its header, before a small file unpacks into gigapixels. */
-async function decodedScreenshot(bytes: Uint8Array): Promise<ImageBitmap> {
-  const size = pngSize(bytes)
-  if (!size || size.width * size.height > MAX_SOURCE_PIXELS) throw new DraftError('damaged')
-  try {
-    return await createImageBitmap(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }))
-  } catch {
-    throw new DraftError('damaged')
+/** A shot whose screenshot has no size here makes the manifest damaged. */
+function headerSizes(screenshots: DraftFiles['screenshots']): Map<string, Size> {
+  const sizes = new Map<string, Size>()
+  for (const { key, bytes } of screenshots) {
+    const size = pngSize(bytes)
+    if (size) sizes.set(key, size)
   }
-}
-
-async function decodedScreenshots(screenshots: DraftFiles['screenshots']): Promise<Map<string, ImageBitmap>> {
-  const bitmaps = new Map<string, ImageBitmap>()
-  try {
-    for (const { key, bytes } of screenshots) bitmaps.set(key, await decodedScreenshot(bytes))
-    return bitmaps
-  } catch (error) {
-    for (const bitmap of bitmaps.values()) bitmap.close()
-    throw error
-  }
+  return sizes
 }
 
 function trackOf(json: string): RecordingTrack {
@@ -186,15 +195,61 @@ function trackOf(json: string): RecordingTrack {
   }
 }
 
-/** The decoded screenshots that shots show, as sources; the rest are closed. */
-function sourcesOf(shots: DraftShot[], bitmaps: Map<string, ImageBitmap>): Map<string, SourceEntry> {
-  const sources = new Map<string, SourceEntry>()
-  for (const [key, bitmap] of bitmaps) {
-    const shot = shots.find((candidate) => candidate.kind === 'screenshot' && candidate.key === key)
-    if (shot?.kind === 'screenshot') sources.set(key, { id: newId(), bitmap, width: bitmap.width, height: bitmap.height, ...shot.source })
-    else bitmap.close()
+interface ShownScreenshot {
+  key: string
+  bytes: Uint8Array
+  size: Size
+  source: Extract<DraftShot, { kind: 'screenshot' }>['source']
+}
+
+/**
+ * The screenshots some shot shows; the rest are never decoded. Their header sizes are checked before anything is decoded, since a
+ * small file can unpack into gigapixels: each must be one Cawmera would load, and together they must stay within the draft's budget.
+ */
+function shownScreenshots(contents: DraftContents, screenshots: DraftFiles['screenshots'], sizes: Map<string, Size>): ShownScreenshot[] {
+  const shown: ShownScreenshot[] = []
+  let pixels = 0
+  for (const { key, bytes } of screenshots) {
+    const shot = contents.shots.find((candidate) => candidate.kind === 'screenshot' && candidate.key === key)
+    const size = sizes.get(key)
+    if (shot?.kind !== 'screenshot' || !size) continue
+    if (size.width * size.height > MAX_SOURCE_PIXELS) throw new DraftError('damaged')
+    pixels += size.width * size.height
+    shown.push({ key, bytes, size, source: shot.source })
   }
-  return sources
+  if (pixels > MAX_DRAFT_PIXELS) throw new DraftError('too-large')
+  return shown
+}
+
+/** The manifest was checked against the header's size, so the bitmap must have exactly that size. */
+async function decodedScreenshot({ bytes, size }: ShownScreenshot): Promise<ImageBitmap> {
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }))
+  } catch {
+    throw new DraftError('damaged')
+  }
+  if (bitmap.width === size.width && bitmap.height === size.height) return bitmap
+  bitmap.close()
+  throw new DraftError('damaged')
+}
+
+function releaseSources(sources: Map<string, SourceEntry>) {
+  for (const { bitmap } of sources.values()) bitmap.close()
+}
+
+async function decodedSources(shown: ShownScreenshot[]): Promise<Map<string, SourceEntry>> {
+  const sources = new Map<string, SourceEntry>()
+  try {
+    for (const screenshot of shown) {
+      const bitmap = await decodedScreenshot(screenshot)
+      sources.set(screenshot.key, { id: newId(), bitmap, width: bitmap.width, height: bitmap.height, ...screenshot.source })
+    }
+    return sources
+  } catch (error) {
+    releaseSources(sources)
+    throw error
+  }
 }
 
 function recordingsOf(shots: DraftShot[], files: DraftFiles['recordings'], tracks: Map<string, RecordingTrack>): Map<string, RecordingEntry> {
@@ -213,18 +268,23 @@ interface OpenedDraft {
   recordings: Map<string, RecordingEntry>
 }
 
-/** The manifest is checked against its screenshots' sizes, so they're decoded first; a failure closes them all. */
-async function readOpenedDraft(files: DraftFiles): Promise<OpenedDraft> {
+async function decodedDraft(files: DraftFiles): Promise<OpenedDraft> {
   const tracks = new Map(files.recordings.map(({ key, track }) => [key, trackOf(track)]))
-  const bitmaps = await decodedScreenshots(files.screenshots)
-  try {
-    const sizes = new Map([...bitmaps].map(([key, bitmap]) => [key, { width: bitmap.width, height: bitmap.height }]))
-    const contents = parseDraftManifest(files.manifest, tracks, sizes)
-    return { contents, sources: sourcesOf(contents.shots, bitmaps), recordings: recordingsOf(contents.shots, files.recordings, tracks) }
-  } catch (error) {
-    for (const bitmap of bitmaps.values()) bitmap.close()
-    throw error
+  const sizes = headerSizes(files.screenshots)
+  const contents = parseDraftManifest(files.manifest, tracks, sizes)
+  const sources = await decodedSources(shownScreenshots(contents, files.screenshots, sizes))
+  return { contents, sources, recordings: recordingsOf(contents.shots, files.recordings, tracks) }
+}
+
+/** Main's dialog or the given path, then the read and the decode. Null when the dialog was cancelled, or when main refused, with a toast saying why. */
+async function readDraft(target: CawmeraBridge, path: string | null, status: DraftToast): Promise<OpenedDraft | null> {
+  const result = await withProgress(target, status.progress, () => target.openDraft(path))
+  if (!result) return null
+  if (!result.ok) {
+    status.failed(OPEN_FAILURES[result.reason], result.message)
+    return null
   }
+  return decodedDraft(result.files)
 }
 
 function sourceIdOf(shot: DraftShot, sources: Map<string, SourceEntry>, recordings: Map<string, RecordingEntry>): string | null {
@@ -249,29 +309,49 @@ export function applyOpenedDraft(contents: DraftContents, sources: Map<string, S
   void loadPosters([...recordings.values()].map(({ id }) => id))
 }
 
-function failedToOpen(error: unknown): [title: string, description?: string] {
-  return error instanceof DraftError ? [OPEN_FAILURES[error.reason]] : [OPEN_FAILED, messageOf(error)]
-}
-
-async function openOntoCanvas(target: CawmeraBridge, path: string | null): Promise<void> {
-  const status = draftToast('Opening draft…')
+/** Unsaved work is asked about only now, just before the canvas is replaced, so nothing done while the draft was read goes unasked. */
+async function replaceCanvasIfAllowed({ contents, sources, recordings }: OpenedDraft): Promise<boolean> {
+  let applied = false
   try {
-    if (!(await saveOrDiscardUnsaved('open'))) return
-    const result = await withProgress(target, status.progress, () => target.openDraft(path))
-    if (!result) return
-    if (!result.ok) return status.failed(OPEN_FAILURES[result.reason], result.message)
-    const { contents, sources, recordings } = await readOpenedDraft(result.files)
-    applyOpenedDraft(contents, sources, recordings)
-    status.done(houseStyleImported(contents.style))
-  } catch (error) {
-    status.failed(...failedToOpen(error))
+    if (await saveOrDiscardUnsaved('open')) {
+      applyOpenedDraft(contents, sources, recordings)
+      applied = true
+    }
+    return applied
+  } finally {
+    if (!applied) releaseSources(sources)
   }
 }
 
-/** Asks first when work is unsaved. A null path lets main's dialog pick the draft; on failure the canvas stays as it was. */
-export async function openDraft(path: string | null): Promise<void> {
-  if (!bridge) return
-  if (saving || opening) return void toast.error(OPEN_FAILED, { description: DRAFT_BUSY })
+function failedToOpen(error: unknown): [title: string, description?: string] {
+  if (!(error instanceof DraftError)) return [OPEN_FAILED, messageOf(error)]
+  return error.reason === 'too-large' ? [OPEN_FAILED, TOO_MANY_PIXELS] : [OPEN_FAILURES[error.reason]]
+}
+
+async function openOntoCanvas(target: CawmeraBridge, path: string | null): Promise<boolean> {
+  const status = draftToast('Opening draft…')
+  try {
+    const draft = await readDraft(target, path, status)
+    if (!draft) return false
+    if (!(await replaceCanvasIfAllowed(draft))) {
+      status.dismiss()
+      return false
+    }
+    status.done(houseStyleImported(draft.contents.style))
+    return true
+  } catch (error) {
+    status.failed(...failedToOpen(error))
+    return false
+  }
+}
+
+/** True once the draft replaced the canvas. A null path lets main's dialog pick the draft; on failure the canvas stays as it was. */
+export async function openDraft(path: string | null): Promise<boolean> {
+  if (!bridge) return false
+  if (saving || opening) {
+    toast.error(OPEN_FAILED, { description: DRAFT_BUSY })
+    return false
+  }
   opening = openOntoCanvas(bridge, path).finally(() => {
     opening = null
     syncDraftBusy()
@@ -281,12 +361,22 @@ export async function openDraft(path: string | null): Promise<void> {
 }
 
 /** A dropped or picked draft opens from its path, which main takes only from a local drive. */
-export async function openDraftFile(file: File): Promise<void> {
-  if (!bridge) return
+export async function openDraftFile(file: File): Promise<boolean> {
+  if (!bridge) return false
   return openDraft(bridge.pathForFile(file))
 }
 
 const isDraftFile = (file: File) => file.name.toLowerCase().endsWith(DRAFT_EXTENSION)
 
-/** On desktop, the first draft among dropped or picked files: it opens alone, in place of the canvas. */
+/** On desktop, the first draft among dropped or picked files. */
 export const draftAmong = (files: File[]): File | undefined => (bridge ? files.find(isDraftFile) : undefined)
+
+/** A draft among dropped or picked files opens alone, and a toast says when other files came with it. Null when there's no draft among them. */
+export function openDraftAmong(files: File[]): Promise<boolean> | null {
+  const draft = draftAmong(files)
+  if (!draft) return null
+  return openDraftFile(draft).then((opened) => {
+    if (opened && files.length > 1) toast.info(ONLY_THE_DRAFT)
+    return opened
+  })
+}

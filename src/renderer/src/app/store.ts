@@ -409,7 +409,14 @@ export interface RemovedShots {
   removed: { record: ShotRecord; index: number }[]
   /** The empty shot that replaced them when no shot was left. */
   placeholder: string | null
+  /** The canvas they were taken from: once an opened draft replaces it, they can't come back. */
+  generation: number
 }
+
+let generation = 0
+
+/** Changes whenever an opened draft replaces the canvas. */
+export const canvasGeneration = () => generation
 
 /** Removes shots; returns what's needed to put them back. When none is left, an empty one takes over. */
 export function removeShots(ids: string[]): RemovedShots | null {
@@ -425,11 +432,12 @@ export function removeShots(ids: string[]): RemovedShots | null {
   }
   const nextActive = ids.includes(state.activeId) ? rest[Math.min(removed[0].index, rest.length - 1)].id : state.activeId
   store.set(() => activate(rest, nextActive))
-  return { removed, placeholder }
+  return { removed, placeholder, generation }
 }
 
-/** Undo for `removeShots`: every shot back in its place, picked again when there were several. */
-export function restoreShots({ removed, placeholder }: RemovedShots) {
+/** Undo for `removeShots`: every shot back in its place, picked again when there were several. Nothing, once a draft replaced the canvas. */
+export function restoreShots({ removed, placeholder, generation: removedFrom }: RemovedShots) {
+  if (removedFrom !== generation) return
   flushGesture()
   store.set((s) => {
     const back = new Set(removed.map(({ record }) => record.id))
@@ -487,6 +495,7 @@ export function markDraftSaved(written: ShotRecord[]) {
  */
 export function replaceCanvas(shots: ShotRecord[], activeIndex: number, style: HouseStyle) {
   flushGesture()
+  generation += 1
   const opened = shots.map((record): ShotRecord => ({ ...record, past: [], future: [], savedDoc: null, draftDoc: record.doc }))
   store.set({ ...activate(opened, opened[activeIndex]?.id ?? opened[0].id), style, view: FIT_ALL, cropView: FIT_ALL })
   releaseUnshownSources()
@@ -499,6 +508,8 @@ const sources = new Map<string, SourceEntry>()
 const MAX_SOURCES = 24
 /** A larger screenshot isn't loaded. */
 export const MAX_SOURCE_PIXELS = 60_000_000
+/** All the screenshots of an opened draft together: about 1.6 GB once decoded. */
+export const MAX_DRAFT_PIXELS = 400_000_000
 
 export function getSource(id: string | null): SourceEntry | null {
   return id ? (sources.get(id) ?? null) : null

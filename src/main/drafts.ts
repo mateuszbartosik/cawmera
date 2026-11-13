@@ -11,7 +11,7 @@ const progressTo = (sender: WebContents) => (share: number) => {
 }
 
 /** Returns the hold a window's close goes through while a draft is being written. */
-export function registerDrafts(getWindow: () => BrowserWindow | null): (close: () => void) => boolean {
+export function registerDrafts(getWindow: () => BrowserWindow | null): (close: () => void, closeAnyway: () => void) => boolean {
   const requests = createDraftRequests({
     recordingsRoot: recordingsRoot(),
     newId: randomUUID,
@@ -38,6 +38,19 @@ export function registerDrafts(getWindow: () => BrowserWindow | null): (close: (
         properties: ['openFile']
       })
       return result.canceled ? null : (result.filePaths[0] ?? null)
+    },
+    async askToCloseAnyway() {
+      const window = getWindow()
+      if (!window) return true
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['Keep waiting', 'Close anyway'],
+        defaultId: 0,
+        cancelId: 0,
+        message: 'A draft is still being saved',
+        detail: 'The draft won’t be saved.'
+      })
+      return response === 1
     }
   })
 

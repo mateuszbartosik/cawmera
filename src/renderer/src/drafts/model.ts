@@ -32,7 +32,8 @@ import { normalizeZoomEdits } from '../recording/zoom-edits'
 export const DRAFT_FORMAT = 'cawmera-draft'
 export const DRAFT_VERSION = 1
 
-export type DraftFailure = 'not-a-draft' | 'newer-version' | 'damaged'
+/** `too-large` comes from opening, not parsing: the screenshots would decode past what one canvas may hold. */
+export type DraftFailure = 'not-a-draft' | 'newer-version' | 'damaged' | 'too-large'
 
 export class DraftError extends Error {
   constructor(readonly reason: DraftFailure) {

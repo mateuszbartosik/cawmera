@@ -16,6 +16,8 @@ export interface DraftHost {
   chooseSaveTarget: (fileName: string) => Promise<string | null>
   /** The open dialog: the path picked, or null when cancelled. */
   chooseDraft: () => Promise<string | null>
+  /** Asked when a close comes while another waits for a draft being written: true to close anyway, giving that draft up. */
+  askToCloseAnyway: () => Promise<boolean>
 }
 
 type SaveResult = { path: string } | { error: string } | null
@@ -35,7 +37,8 @@ export function createDraftRequests(host: DraftHost) {
   let busy = false
   let unfinishedSave: string | null = null
   let writing: Promise<void> | null = null
-  let heldClose: Promise<void> | null = null
+  let heldClose: { givenUp: boolean } | null = null
+  let askingToCloseAnyway = false
 
   async function oneAtATime<T>(whenBusy: T, work: () => Promise<T>): Promise<T> {
     if (busy) return whenBusy
@@ -91,15 +94,34 @@ export function createDraftRequests(host: DraftHost) {
   const open = (requested: unknown, onProgress: (share: number) => void) =>
     oneAtATime<DraftOpenResult | null>({ ok: false, reason: 'unreadable', message: DRAFT_BUSY }, () => openNow(requested, onProgress))
 
+  async function offerToCloseAnyway(closeAnyway: () => void) {
+    if (askingToCloseAnyway) return
+    askingToCloseAnyway = true
+    const giveUp = await host.askToCloseAnyway().catch(() => false)
+    askingToCloseAnyway = false
+    if (!giveUp || !heldClose) return
+    heldClose.givenUp = true
+    discardUnfinishedSave()
+    closeAnyway()
+  }
+
   /**
    * A close waits for the draft being written, so a save the user asked for is never dropped: `close` runs once, after the
-   * write has ended either way and the renderer has its answer. False when no draft is being written.
+   * write has ended either way and the renderer has its answer. Another close meanwhile asks whether to close anyway, in case
+   * the write is stuck; giving up removes the half-written file and runs `closeAnyway`, and closes aren't held after that.
+   * False when no draft is being written, or once it was given up.
    */
-  function holdCloseWhileWriting(close: () => void): boolean {
-    if (!writing) return false
-    heldClose ??= writing.then(afterReplies, afterReplies).then(() => {
-      heldClose = null
-      close()
+  function holdCloseWhileWriting(close: () => void, closeAnyway: () => void): boolean {
+    if (!writing || heldClose?.givenUp) return false
+    if (heldClose) {
+      void offerToCloseAnyway(closeAnyway)
+      return true
+    }
+    const hold = { givenUp: false }
+    heldClose = hold
+    void writing.then(afterReplies, afterReplies).then(() => {
+      if (heldClose === hold) heldClose = null
+      if (!hold.givenUp) close()
     })
     return true
   }

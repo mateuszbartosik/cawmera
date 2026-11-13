@@ -24,6 +24,7 @@ import { shuffledLook } from './shuffle'
 import {
   addShot,
   backdropReady,
+  canvasGeneration,
   FIT_ALL,
   getSource,
   liveShots,
@@ -44,7 +45,7 @@ import { layoutFor, renderImage, type Scene } from '../render/compose'
 import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { cropSubject, revealActive } from '../canvas/view'
-import { DRAFT_EXTENSION, draftAmong, openDraftFile } from '../drafts/actions'
+import { DRAFT_EXTENSION, openDraftAmong } from '../drafts/actions'
 import { setCropFrame } from '../recording/crop'
 import { addTimedRedaction } from '../recording/blur-actions'
 import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
@@ -148,8 +149,7 @@ export function openFilePicker() {
   input.accept = isDesktop ? `${IMAGE_TYPES},${DRAFT_EXTENSION}` : IMAGE_TYPES
   input.onchange = () => {
     const files = [...(input.files ?? [])]
-    const draft = draftAmong(files)
-    void (draft ? openDraftFile(draft) : loadFiles(files, 'file'))
+    if (!openDraftAmong(files)) void loadFiles(files, 'file')
   }
   input.click()
 }
@@ -198,14 +198,29 @@ export function deleteShot(id: string) {
   deleteShots([id])
 }
 
+/** "Shot deleted" toasts whose Undo is still on offer. */
+const undoToasts = new Set<string | number>()
+let undoToastsGeneration = canvasGeneration()
+
+// Once an opened draft replaces the canvas, an Undo has nothing to bring the shots back into.
+store.subscribe(() => {
+  if (canvasGeneration() === undoToastsGeneration) return
+  undoToastsGeneration = canvasGeneration()
+  for (const id of undoToasts) toast.dismiss(id)
+  undoToasts.clear()
+})
+
 /** Deletes shots, with one Undo for all of them. Empty shots go without a toast: there's nothing to lose. */
 export function deleteShots(ids: string[]) {
   const result = removeShots(ids)
   if (!result || result.removed.every(({ record }) => record.doc.sourceId === null)) return
   const count = result.removed.length
-  toast(count === 1 ? 'Shot deleted' : `${count} shots deleted`, {
-    action: { label: 'Undo', onClick: () => restoreShots(result) }
+  const id = toast(count === 1 ? 'Shot deleted' : `${count} shots deleted`, {
+    action: { label: 'Undo', onClick: () => restoreShots(result) },
+    onDismiss: () => undoToasts.delete(id),
+    onAutoClose: () => undoToasts.delete(id)
   })
+  undoToasts.add(id)
 }
 
 /** Delete with shots picked on the canvas. */

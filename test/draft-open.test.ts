@@ -29,7 +29,12 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), loading: vi.fn(() => 'opening') }) }))
+vi.mock('sonner', () => ({
+  toast: Object.assign(
+    vi.fn(() => 'shot-deleted'),
+    { success: vi.fn(), error: vi.fn(), info: vi.fn(), loading: vi.fn(() => 'opening'), dismiss: vi.fn() }
+  )
+}))
 vi.mock('../src/renderer/src/platform/bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/renderer/src/platform/bridge')>()),
   bridge: mocks.bridge,
@@ -42,8 +47,9 @@ interface FakeBitmap {
   close: Mock<() => void>
 }
 
-/** Fake PNGs carry their size where a real one does; this body byte makes one that won't decode. */
+/** Fake PNGs carry their size where a real one does; these body bytes make one that won't decode, or decodes wider than its header says. */
 const UNDECODABLE = 0xff
+const MISREPORTED = 0xfe
 const decoded: FakeBitmap[] = []
 const poster = { width: 1280, height: 720, close: vi.fn() }
 
@@ -54,7 +60,7 @@ vi.stubGlobal(
     const bytes = new Uint8Array(await source.arrayBuffer())
     if (bytes[24] === UNDECODABLE) throw new Error('The source image could not be decoded')
     const header = new DataView(bytes.buffer)
-    const bitmap = { width: header.getUint32(16), height: header.getUint32(20), close: vi.fn() }
+    const bitmap = { width: header.getUint32(16) + (bytes[24] === MISREPORTED ? 1 : 0), height: header.getUint32(20), close: vi.fn() }
     decoded.push(bitmap)
     return bitmap
   })
@@ -83,8 +89,10 @@ vi.stubGlobal(
   }
 )
 
-const { applyOpenedDraft, draftAmong, openDraft, openDraftFile, saveDraft } = await import('../src/renderer/src/drafts/actions')
-const { openFilePicker } = await import('../src/renderer/src/app/actions')
+const { applyOpenedDraft, draftAmong, openDraft, openDraftAmong, openDraftFile, saveDraft, saveDraftUnlessBusy, saveOrDiscardUnsaved } = await import(
+  '../src/renderer/src/drafts/actions'
+)
+const { deleteShots, openFilePicker } = await import('../src/renderer/src/app/actions')
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { DEFAULT_HOUSE_STYLE, serializeHouseStyle } = await import('../src/renderer/src/app/house-style')
 const { FIT_ALL, getSource, liveShots, registerSource, store, unsavedCount, updateDoc } = await import('../src/renderer/src/app/store')
@@ -152,7 +160,17 @@ function manifest(fields: Record<string, unknown> = {}): string {
   })
 }
 
+const screenshotShot = (key: string) => ({ kind: 'screenshot', key, source: { name: `${key}.png`, origin: 'file', detected: 1 }, doc: { ...DEFAULT_DOC, sourceId: key } })
+
+/** A draft of screenshots only, one shot each. */
+const screenshotsDraft = (screenshots: DraftFiles['screenshots']): DraftOpenResult => ({
+  ok: true,
+  files: { manifest: manifest({ active: 0, shots: screenshots.map(({ key }) => screenshotShot(key)) }), screenshots, recordings: [] }
+})
+
 const PNG_HEADER = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]
+const JPEG_START = [0xff, 0xd8, 0xff, 0xfe, 0x00, 0x16, 0x00, 0x00]
+const IDAT = [0x49, 0x44, 0x41, 0x54]
 
 function png(width: number, height: number, body = 0): Uint8Array {
   const bytes = new Uint8Array(25)
@@ -162,6 +180,12 @@ function png(width: number, height: number, body = 0): Uint8Array {
   header.setUint32(20, height)
   bytes[24] = body
   return bytes
+}
+
+function overwritten(bytes: Uint8Array, offset: number, values: number[]): Uint8Array {
+  const copy = bytes.slice()
+  copy.set(values, offset)
+  return copy
 }
 
 const opened = (changes: Partial<DraftFiles> = {}): DraftOpenResult => ({
@@ -191,6 +215,7 @@ function openedParts(): { contents: DraftContents; sources: Map<string, SourceEn
 }
 
 const report = (share: number) => mocks.listeners.forEach((listener) => listener(share))
+const nothingDecodedKept = () => decoded.filter((bitmap) => bitmap.close.mock.calls.length === 0)
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined
@@ -263,6 +288,17 @@ describe('applyOpenedDraft', () => {
     ;(video.onloadeddata as () => void)()
     await vi.waitFor(() => expect(getRecording('take-1')?.poster).toBe(poster))
   })
+
+  it('turns a pending “Shot deleted” Undo into a no-op once a draft replaces the canvas, and dismisses its toast', async () => {
+    deleteShots(['shot-0'])
+    const [, options] = vi.mocked(toast).mock.calls.find(([title]) => title === 'Shot deleted')!
+    const undo = options?.action as unknown as { onClick: () => void }
+    await openDraft(null)
+    const openedShots = store.get().shots
+    undo.onClick()
+    expect(store.get().shots).toBe(openedShots)
+    expect(toast.dismiss).toHaveBeenCalledWith('shot-deleted')
+  })
 })
 
 describe('openDraft', () => {
@@ -280,7 +316,7 @@ describe('openDraft', () => {
       report(1)
       return opened()
     })
-    await openDraft(null)
+    expect(await openDraft(null)).toBe(true)
     expect(mocks.bridge.confirmDiscard).toHaveBeenCalledWith(1, 'open')
     expect(mocks.bridge.openDraft).toHaveBeenCalledWith(null)
     const [empty, screenshot, take] = liveShots()
@@ -304,85 +340,140 @@ describe('openDraft', () => {
     ['is damaged', 'damaged', 'The draft is damaged'],
     ['is too large', 'too-large', 'The draft couldn’t be opened'],
     ['can’t be read', 'unreadable', 'The draft couldn’t be opened']
-  ] as const)('names the reason when the file %s, with main’s details, and leaves the canvas as it was', async (_, reason, title) => {
+  ] as const)('names the reason when the file %s, with main’s details, and leaves the canvas as it was without asking', async (_, reason, title) => {
     const before = store.get()
     mocks.bridge.openDraft.mockResolvedValue({ ok: false, reason, message: 'Not a .cawmera file on a local drive' })
-    await openDraft(null)
+    expect(await openDraft(null)).toBe(false)
     expect(store.get().shots).toBe(before.shots)
     expect(store.get().style).toBe(before.style)
     expect(toast.error).toHaveBeenCalledWith(title, { id: undefined, description: 'Not a .cawmera file on a local drive' })
     expect(toast.success).not.toHaveBeenCalled()
+    expect(mocks.bridge.confirmDiscard).not.toHaveBeenCalled()
   })
 
   it.each([
     ['comes from a newer Cawmera', { manifest: manifest({ version: 2 }) }, 'This draft was made by a newer Cawmera'],
     ['holds something else', { manifest: JSON.stringify({ format: 'cawmera-template', version: 1 }) }, 'That file isn’t a Cawmera draft'],
     ['misses a shot’s screenshot', { screenshots: [] }, 'The draft is damaged'],
-    [
-      'holds a screenshot that won’t decode',
-      {
-        screenshots: [
-          { key: 'image0', bytes: png(40, 30) },
-          { key: 'image1', bytes: png(800, 600, UNDECODABLE) }
-        ]
-      },
-      'The draft is damaged'
-    ],
+    ['holds a screenshot that won’t decode', { screenshots: [{ key: 'image1', bytes: png(800, 600, UNDECODABLE) }] }, 'The draft is damaged'],
+    ['holds a screenshot that decodes to another size than its header’s', { screenshots: [{ key: 'image1', bytes: png(800, 600, MISREPORTED) }] }, 'The draft is damaged'],
     ['holds a broken track', { recordings: [{ key: 'take1', id: OPENED_TAKE, track: '{"version":1}' }] }, 'The draft is damaged']
-  ])('leaves the canvas as it was, keeping no screenshot, when the draft %s', async (_, changes, title) => {
+  ])('leaves the canvas as it was, keeping no screenshot and asking nothing, when the draft %s', async (_, changes, title) => {
     const before = store.get()
     mocks.bridge.openDraft.mockResolvedValue(opened(changes))
-    await openDraft(null)
+    expect(await openDraft(null)).toBe(false)
     expect(store.get().shots).toBe(before.shots)
     expect(store.get().style).toBe(before.style)
     expect(toast.error).toHaveBeenCalledWith(title, expect.anything())
-    expect(decoded.filter((bitmap) => bitmap.close.mock.calls.length === 0)).toEqual([])
+    expect(nothingDecodedKept()).toEqual([])
+    expect(mocks.bridge.confirmDiscard).not.toHaveBeenCalled()
   })
 
-  it('lets go of a screenshot in the file that no shot shows', async () => {
-    mocks.bridge.openDraft.mockResolvedValue(opened({ screenshots: [{ key: 'image1', bytes: png(800, 600) }, { key: 'image9', bytes: png(30, 20) }] }))
+  it('lets go of every screenshot decoded before one that won’t decode', async () => {
+    const draft = screenshotsDraft([
+      { key: 'image1', bytes: png(40, 30) },
+      { key: 'image2', bytes: png(800, 600, UNDECODABLE) }
+    ])
+    mocks.bridge.openDraft.mockResolvedValue(draft)
     await openDraft(null)
-    const [shown, unshown] = decoded
-    expect(getSource(liveShots()[1].doc.sourceId)?.bitmap).toBe(shown)
-    expect([shown.close, unshown.close].map((close) => close.mock.calls.length)).toEqual([0, 1])
+    expect(decoded).toHaveLength(1)
+    expect(nothingDecodedKept()).toEqual([])
+    expect(toast.error).toHaveBeenCalledWith('The draft is damaged', expect.anything())
   })
 
-  it('decodes a screenshot of up to 60 megapixels, and none whose header claims more', async () => {
-    mocks.bridge.openDraft.mockResolvedValue(opened({ screenshots: [{ key: 'image1', bytes: png(10_000, 6001) }] }))
-    await openDraft(null)
+  it.each([
+    ['a JPEG that carries “IHDR” and 1 × 1 where a PNG header would be', overwritten(png(1, 1), 0, JPEG_START)],
+    ['a header cut short', png(800, 600).slice(0, 23)],
+    ['no IHDR chunk first', overwritten(png(800, 600), 12, IDAT)],
+    ['an IHDR chunk of the wrong length', overwritten(png(800, 600), 8, [0, 0, 0, 12])],
+    ['a header claiming over 60 megapixels', png(10_000, 6001)]
+  ])('decodes no screenshot with %s, and calls the draft damaged', async (_, bytes) => {
+    mocks.bridge.openDraft.mockResolvedValue(opened({ screenshots: [{ key: 'image1', bytes }] }))
+    expect(await openDraft(null)).toBe(false)
     expect(createImageBitmap).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith('The draft is damaged', expect.anything())
-
-    mocks.bridge.openDraft.mockResolvedValue(opened({ screenshots: [{ key: 'image1', bytes: png(10_000, 6000) }] }))
-    await openDraft(null)
-    expect(getSource(liveShots()[1].doc.sourceId)).toMatchObject({ width: 10_000, height: 6000 })
   })
 
-  it('asks first with unsaved work: Cancel leaves everything, and Save draft… saves before the draft opens', async () => {
-    const before = store.get().shots
-    mocks.bridge.confirmDiscard.mockResolvedValue('keep')
+  it('opens screenshots of up to 400 megapixels together, and decodes none of a draft whose screenshots claim more', async () => {
+    const keys = ['image1', 'image2', 'image3', 'image4', 'image5', 'image6']
+    const sixtyEach = keys.map((key) => ({ key, bytes: png(10_000, 6000) }))
+    mocks.bridge.openDraft.mockResolvedValue(screenshotsDraft([...sixtyEach, { key: 'image7', bytes: png(1, 40_000_001) }]))
+    expect(await openDraft(null)).toBe(false)
+    expect(createImageBitmap).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('The draft couldn’t be opened', { id: undefined, description: 'Its screenshots add up to more than 400 megapixels.' })
+
+    mocks.bridge.openDraft.mockResolvedValue(screenshotsDraft([...sixtyEach, { key: 'image7', bytes: png(1, 40_000_000) }]))
+    expect(await openDraft(null)).toBe(true)
+    expect(decoded).toHaveLength(7)
+    expect(liveShots().map((record) => getSource(record.doc.sourceId)?.height)).toEqual([6000, 6000, 6000, 6000, 6000, 6000, 40_000_000])
+  })
+
+  it('neither decodes nor counts a screenshot in the file that no shot shows', async () => {
+    const unused = ['image2', 'image3', 'image4', 'image5', 'image6', 'image7', 'image8'].map((key) => ({ key, bytes: png(10_000, 6000) }))
+    mocks.bridge.openDraft.mockResolvedValue(
+      opened({ screenshots: [{ key: 'image1', bytes: png(800, 600) }, ...unused, { key: 'image9', bytes: overwritten(png(1, 1), 0, JPEG_START) }] })
+    )
+    expect(await openDraft(null)).toBe(true)
+    expect(decoded).toHaveLength(1)
+    expect(getSource(liveShots()[1].doc.sourceId)?.bitmap).toBe(decoded[0])
+  })
+
+  it('asks about unsaved work only once the draft is read and decoded, just before replacing the canvas', async () => {
+    expect(await openDraft(null)).toBe(true)
+    const [asked] = mocks.bridge.confirmDiscard.mock.invocationCallOrder
+    expect(asked).toBeGreaterThan(mocks.bridge.openDraft.mock.invocationCallOrder[0])
+    expect(asked).toBeGreaterThan(vi.mocked(createImageBitmap).mock.invocationCallOrder[0])
+  })
+
+  it('counts edits made while the draft was read as unsaved work to ask about', async () => {
+    store.set({ draftDoc: store.get().doc })
+    mocks.bridge.openDraft.mockImplementation(async () => {
+      updateDoc({ angle: 77 })
+      return opened()
+    })
     await openDraft(null)
     expect(mocks.bridge.confirmDiscard).toHaveBeenCalledWith(1, 'open')
-    expect(mocks.bridge.openDraft).not.toHaveBeenCalled()
-    expect(store.get().shots).toBe(before)
+  })
 
+  it('on Cancel keeps the canvas, lets go of everything decoded, and takes the progress away', async () => {
+    const before = store.get()
+    mocks.bridge.openDraft.mockImplementation(async () => {
+      report(1)
+      return opened()
+    })
+    mocks.bridge.confirmDiscard.mockResolvedValue('keep')
+    expect(await openDraft(null)).toBe(false)
+    expect(store.get().shots).toBe(before.shots)
+    expect(store.get().style).toBe(before.style)
+    expect(decoded).toHaveLength(1)
+    expect(nothingDecodedKept()).toEqual([])
+    expect(toast.dismiss).toHaveBeenCalledWith('opening')
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('on Save draft… saves the canvas as it is then, edits made while reading included, and opens once it’s saved', async () => {
+    mocks.bridge.openDraft.mockImplementation(async () => {
+      updateDoc({ angle: 77 })
+      return opened()
+    })
     mocks.bridge.confirmDiscard.mockResolvedValue('save')
     mocks.bridge.saveDraft.mockResolvedValue(null)
-    await openDraft(null)
-    expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
-    expect(mocks.bridge.openDraft).not.toHaveBeenCalled()
-    expect(store.get().shots).toBe(before)
+    expect(await openDraft(null)).toBe(false)
+    expect(nothingDecodedKept()).toEqual([])
+    expect(store.get().doc.angle).toBe(77)
 
     mocks.bridge.saveDraft.mockResolvedValue({ path: 'C:\\Drafts\\before.cawmera' })
-    await openDraft(null)
-    expect(mocks.bridge.saveDraft.mock.invocationCallOrder[1]).toBeLessThan(mocks.bridge.openDraft.mock.invocationCallOrder[0])
+    expect(await openDraft(null)).toBe(true)
+    const [files] = mocks.bridge.saveDraft.mock.calls[1]
+    expect(JSON.parse(files.manifest).shots[0].doc.angle).toBe(77)
+    expect(mocks.bridge.saveDraft.mock.invocationCallOrder[1]).toBeGreaterThan(mocks.bridge.openDraft.mock.invocationCallOrder[1])
     expect(store.get().style).toEqual(style)
   })
 
   it('changes nothing when the open dialog is cancelled', async () => {
     const before = store.get()
     mocks.bridge.openDraft.mockResolvedValue(null)
-    await openDraft(null)
+    expect(await openDraft(null)).toBe(false)
     expect(store.get().shots).toBe(before.shots)
     expect([toast.loading, toast.success, toast.error].map((show) => vi.mocked(show).mock.calls.length)).toEqual([0, 0, 0])
   })
@@ -393,9 +484,8 @@ describe('openDraft', () => {
     const first = openDraft(null)
     expect(store.get().draftBusy).toBe(true)
     await vi.waitFor(() => expect(mocks.bridge.openDraft).toHaveBeenCalledTimes(1))
-    await openDraft('C:\\Drafts\\second.cawmera')
+    expect(await openDraft('C:\\Drafts\\second.cawmera')).toBe(false)
     expect(mocks.bridge.openDraft).toHaveBeenCalledTimes(1)
-    expect(mocks.bridge.confirmDiscard).toHaveBeenCalledTimes(1)
     expect(toast.error).toHaveBeenCalledWith('The draft couldn’t be opened', { description: DRAFT_BUSY })
     reading.resolve(null)
     await first
@@ -406,8 +496,7 @@ describe('openDraft', () => {
     const writing = deferred<{ path: string } | null>()
     mocks.bridge.saveDraft.mockImplementation(() => writing.promise)
     const saving = saveDraft()
-    await openDraft(null)
-    expect(mocks.bridge.confirmDiscard).not.toHaveBeenCalled()
+    expect(await openDraft(null)).toBe(false)
     expect(mocks.bridge.openDraft).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith('The draft couldn’t be opened', { description: DRAFT_BUSY })
     writing.resolve(null)
@@ -415,24 +504,48 @@ describe('openDraft', () => {
     expect(store.get().draftBusy).toBe(false)
   })
 
-  it('stays busy until the draft is open when its Save draft… ends first', async () => {
+  it('stays busy through its own Save draft…, until the draft is open', async () => {
     mocks.bridge.confirmDiscard.mockResolvedValue('save')
+    const writing = deferred<{ path: string } | null>()
+    mocks.bridge.saveDraft.mockImplementation(() => writing.promise)
+    const opening = openDraft(null)
+    await vi.waitFor(() => expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1))
+    expect(store.get().draftBusy).toBe(true)
+    writing.resolve({ path: 'C:\\Drafts\\before.cawmera' })
+    expect(await opening).toBe(true)
+    expect(store.get().draftBusy).toBe(false)
+  })
+
+  it('refuses the close dialog’s Save draft… while a draft opens', async () => {
     const reading = deferred<DraftOpenResult | null>()
     mocks.bridge.openDraft.mockImplementation(() => reading.promise)
     const opening = openDraft(null)
-    await vi.waitFor(() => expect(mocks.bridge.openDraft).toHaveBeenCalledTimes(1))
-    expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
-    expect(store.get().draftBusy).toBe(true)
-    reading.resolve(opened())
+    mocks.bridge.confirmDiscard.mockResolvedValue('save')
+    expect(await saveOrDiscardUnsaved('close')).toBe(false)
+    expect(mocks.bridge.saveDraft).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('The draft couldn’t be saved', { description: DRAFT_BUSY })
+    reading.resolve(null)
     await opening
-    expect(store.get().draftBusy).toBe(false)
+  })
+
+  it('leaves Save draft from the menu or Ctrl+Shift+D alone while a draft opens, as the disabled button does', async () => {
+    const reading = deferred<DraftOpenResult | null>()
+    mocks.bridge.openDraft.mockImplementation(() => reading.promise)
+    const opening = openDraft(null)
+    saveDraftUnlessBusy()
+    expect(mocks.bridge.getVersion).not.toHaveBeenCalled()
+    reading.resolve(null)
+    await opening
+    saveDraftUnlessBusy()
+    await vi.waitFor(() => expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(store.get().draftBusy).toBe(false))
   })
 })
 
 describe('dropped and picked drafts', () => {
   it('opens a dropped draft from its path on disk', async () => {
     const file = new File(['draft'], 'Launch.cawmera')
-    await openDraftFile(file)
+    expect(await openDraftFile(file)).toBe(true)
     expect(mocks.bridge.pathForFile).toHaveBeenCalledWith(file)
     expect(mocks.bridge.openDraft).toHaveBeenCalledWith('C:\\Drafts\\Launch.cawmera')
   })
@@ -442,15 +555,30 @@ describe('dropped and picked drafts', () => {
     const draft = new File([''], 'Launch.CAWMERA')
     expect(draftAmong([image, draft, new File([''], 'Other.cawmera')])).toBe(draft)
     expect(draftAmong([image, new File([''], 'notes.txt')])).toBeUndefined()
+    expect(openDraftAmong([image])).toBeNull()
   })
 
-  it('lets the file picker take drafts too, and opens a picked one', async () => {
+  it('opens a draft that came with other files alone, and says so once it’s open', async () => {
+    const image = new File([''], 'shot.png', { type: 'image/png' })
+    const draft = new File([''], 'Launch.cawmera')
+    expect(await openDraftAmong([image, draft])).toBe(true)
+    expect(toast.info).toHaveBeenCalledWith('Only the draft was opened, not the other files')
+
+    vi.mocked(toast.info).mockClear()
+    expect(await openDraftAmong([draft])).toBe(true)
+    mocks.bridge.openDraft.mockResolvedValue({ ok: false, reason: 'damaged', message: 'Unexpected end' })
+    expect(await openDraftAmong([image, draft])).toBe(false)
+    expect(toast.info).not.toHaveBeenCalled()
+  })
+
+  it('lets the file picker take drafts too, and opens a picked one alone', async () => {
     openFilePicker()
     const [input] = createdOf('input')
     expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif,image/bmp,.cawmera')
     input.files = [new File([''], 'shot.png', { type: 'image/png' }), new File([''], 'Launch.cawmera')]
     ;(input.onchange as () => void)()
     await vi.waitFor(() => expect(mocks.bridge.openDraft).toHaveBeenCalledWith('C:\\Drafts\\Launch.cawmera'))
-    await vi.waitFor(() => expect(store.get().draftBusy).toBe(false))
+    await vi.waitFor(() => expect(toast.info).toHaveBeenCalledWith('Only the draft was opened, not the other files'))
+    expect(getSource('previous')).toBeNull()
   })
 })

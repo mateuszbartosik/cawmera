@@ -43,6 +43,7 @@ async function setup(host: Partial<DraftHost> = {}) {
     adoptTake: vi.fn(),
     chooseSaveTarget: vi.fn(async () => join(dir, 'saved')),
     chooseDraft: vi.fn(async (): Promise<string | null> => null),
+    askToCloseAnyway: vi.fn(async () => false),
     ...host
   }
   const files = { manifest: MANIFEST, screenshots: [{ key: 'image1', bytes: new Uint8Array(randomBytes(1000)) }], recordings: [{ key: 'take1', id: take, track: TRACK }] }
@@ -117,21 +118,23 @@ describe('draft requests from the renderer', ON_DISK, () => {
     const t = await setup()
     const order: string[] = []
     const close = vi.fn(() => order.push('closed'))
-    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
-    const held: boolean[] = []
+    const closeAnyway = vi.fn()
+    expect(t.requests.holdCloseWhileWriting(close, closeAnyway)).toBe(false)
+    let held = false
     const saved = await t.requests
       .save(t.files, 'a', (share) => {
-        if (share < 0.5 || held.length > 0) return
-        held.push(t.requests.holdCloseWhileWriting(close), t.requests.holdCloseWhileWriting(close))
+        if (held || share < 0.5) return
+        held = t.requests.holdCloseWhileWriting(close, closeAnyway)
       })
       .then((result) => {
         order.push('saved')
         return result
       })
     expect(saved).toEqual({ path: t.saved })
-    expect(held).toEqual([true, true])
+    expect(held).toBe(true)
     await vi.waitFor(() => expect(order).toEqual(['saved', 'closed']))
-    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
+    expect(t.requests.holdCloseWhileWriting(close, closeAnyway)).toBe(false)
+    expect(closeAnyway).not.toHaveBeenCalled()
   })
 
   it('closes once a write that failed has ended', async () => {
@@ -140,7 +143,7 @@ describe('draft requests from the renderer', ON_DISK, () => {
     let held = false
     const result = await t.requests.save(t.files, 'a', (share) => {
       if (held || share < 0.5) return
-      held = t.requests.holdCloseWhileWriting(close)
+      held = t.requests.holdCloseWhileWriting(close, noop)
       t.requests.discardUnfinishedSave()
     })
     expect(held).toBe(true)
@@ -153,16 +156,70 @@ describe('draft requests from the renderer', ON_DISK, () => {
     const t = await setup({ chooseSaveTarget: vi.fn<DraftHost['chooseSaveTarget']>(() => saveDialog.promise) })
     const close = vi.fn()
     const cancelled = t.requests.save(t.files, 'a', noop)
-    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
+    expect(t.requests.holdCloseWhileWriting(close, noop)).toBe(false)
     saveDialog.resolve(null)
     expect(await cancelled).toBeNull()
 
     vi.mocked(t.host.chooseSaveTarget).mockResolvedValue(join(t.dir, 'saved'))
     await t.requests.save(t.files, 'a', noop)
     const holds: boolean[] = []
-    expect(await t.requests.open(t.saved, () => holds.push(t.requests.holdCloseWhileWriting(close)))).toMatchObject({ ok: true })
+    expect(await t.requests.open(t.saved, () => holds.push(t.requests.holdCloseWhileWriting(close, noop)))).toMatchObject({ ok: true })
     expect(holds).not.toEqual([])
     expect(holds).not.toContain(true)
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it('asks whether to close anyway when another close comes while one is held, one dialog at a time', async () => {
+    const answer = deferred<boolean>()
+    const t = await setup({ askToCloseAnyway: vi.fn(() => answer.promise) })
+    const close = vi.fn()
+    const closeAnyway = vi.fn()
+    let held = false
+    const saved = await t.requests.save(t.files, 'a', (share) => {
+      if (held || share < 0.5) return
+      held = [1, 2, 3].map(() => t.requests.holdCloseWhileWriting(close, closeAnyway)).every(Boolean)
+    })
+    expect(saved).toEqual({ path: t.saved })
+    expect(held).toBe(true)
+    expect(t.host.askToCloseAnyway).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    answer.resolve(true)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(closeAnyway).not.toHaveBeenCalled()
+  })
+
+  it('keeps holding the close after Keep waiting, and closes once the draft is written', async () => {
+    const t = await setup()
+    const close = vi.fn()
+    const closeAnyway = vi.fn()
+    let held = false
+    const saved = await t.requests.save(t.files, 'a', (share) => {
+      if (held || share < 0.5) return
+      held = t.requests.holdCloseWhileWriting(close, closeAnyway) && t.requests.holdCloseWhileWriting(close, closeAnyway)
+    })
+    expect(saved).toEqual({ path: t.saved })
+    expect(t.host.askToCloseAnyway).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+    expect(closeAnyway).not.toHaveBeenCalled()
+  })
+
+  it('on Close anyway abandons the write: its .partial goes, the window closes at once, and later closes aren’t held', async () => {
+    const t = await setup({ askToCloseAnyway: vi.fn(async () => true) })
+    await writeFile(t.saved, 'the previous draft')
+    const close = vi.fn()
+    const closeAnyway = vi.fn()
+    const holds: boolean[] = []
+    const result = await t.requests.save(t.files, 'a', (share) => {
+      if (share < 0.5) return
+      if (holds.length === 0) holds.push(t.requests.holdCloseWhileWriting(close, closeAnyway), t.requests.holdCloseWhileWriting(close, closeAnyway))
+      else if (closeAnyway.mock.calls.length > 0 && holds.length === 2) holds.push(t.requests.holdCloseWhileWriting(close, closeAnyway))
+    })
+    expect(holds).toEqual([true, true, false])
+    expect(closeAnyway).toHaveBeenCalledTimes(1)
+    expect(result).toEqual({ error: expect.any(String) })
+    expect(existsSync(`${t.saved}.partial`)).toBe(false)
+    expect(await readFile(t.saved, 'utf8')).toBe('the previous draft')
+    await new Promise((resolve) => setImmediate(resolve))
     expect(close).not.toHaveBeenCalled()
   })
 

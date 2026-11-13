@@ -31,8 +31,8 @@ let win: BrowserWindow | null = null
 let closeApproved = false
 /** Closes anyway if the renderer never answers (crashed, reloading). */
 let closeFallback: NodeJS.Timeout | null = null
-/** True when a close has to wait for the draft being written; it then closes once that draft is written. */
-let holdCloseWhileDraftIsWritten: (close: () => void) => boolean = () => false
+/** True when a close has to wait for the draft being written; it then closes once that draft is written, or at once when the user gives up waiting. */
+let holdCloseWhileDraftIsWritten: (close: () => void, closeAnyway: () => void) => boolean = () => false
 const clearCloseFallback = () => {
   if (closeFallback) clearTimeout(closeFallback)
   closeFallback = null
@@ -90,7 +90,7 @@ function buildMenu() {
         item('Open image…', 'CmdOrCtrl+O', 'open'),
         item('Capture…', 'CmdOrCtrl+Shift+2', 'capture'),
         { type: 'separator' },
-        { label: 'Open…', click: () => send('open-draft') },
+        { label: 'Open draft…', click: () => send('open-draft') },
         item('Save draft…', 'CmdOrCtrl+Shift+D', 'save-draft'),
         { type: 'separator' },
         item('Copy image', 'CmdOrCtrl+Shift+C', 'copy'),
@@ -485,9 +485,13 @@ function createWindow() {
   // Let the renderer check for unexported shots before the window goes away. Closing during a
   // take stops it instead: the take becomes a shot, and the next close asks about it. Any close,
   // the fallback's included, first waits for a draft being written.
+  const closeAnyway = () => {
+    closeApproved = true
+    win?.close()
+  }
   win.on('close', (event) => {
     if (!win) return
-    if (holdCloseWhileDraftIsWritten(() => win?.close())) {
+    if (holdCloseWhileDraftIsWritten(() => win?.close(), closeAnyway)) {
       event.preventDefault()
       return
     }

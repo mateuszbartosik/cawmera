@@ -5,7 +5,7 @@ import { CropBar } from '../canvas/CropBar'
 import { SelectionBar } from '../canvas/SelectionBar'
 import { Workspace } from '../canvas/Workspace'
 import { isNarrow, PANEL_GAP, timelineEditable, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
-import { draftAmong, openDraft, openDraftFile, saveDraft, saveOrDiscardUnsaved } from '../drafts/actions'
+import { openDraft, openDraftAmong, saveDraftUnlessBusy, saveOrDiscardUnsaved } from '../drafts/actions'
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge, isDesktop } from '../platform/bridge'
@@ -51,8 +51,7 @@ function runCommand(command: MenuCommand) {
     case 'open-draft':
       return void openDraft(null)
     case 'save-draft':
-      if (!store.get().draftBusy) void saveDraft()
-      return
+      return saveDraftUnlessBusy()
     case 'export':
       return void (store.get().doc.recording ? exportRecording() : exportImage())
     case 'export-all':
@@ -201,9 +200,7 @@ export function App() {
       if (event.defaultPrevented) return
       event.preventDefault()
       const files = [...(event.dataTransfer?.files ?? [])]
-      if (!files.length) return
-      const draft = draftAmong(files)
-      if (draft) return void openDraftFile(draft)
+      if (!files.length || openDraftAmong(files)) return
       // Dropped onto an empty shot: fill that one.
       const s = store.get()
       if (s.mode === 'compose') {
