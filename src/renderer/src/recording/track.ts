@@ -1,5 +1,5 @@
 import type { RecordingFinished } from '@shared/types'
-import type { Size } from '../render/geometry'
+import type { Rect, Size } from '../render/geometry'
 
 export const CURSOR_SHAPES = ['arrow', 'hand', 'ibeam', 'wait', 'progress', 'crosshair', 'not-allowed', 'move',
   'resize-ew', 'resize-ns', 'resize-nwse', 'resize-nesw', 'help', 'other'] as const
@@ -102,6 +102,9 @@ export function isInFrame(click: Click, frame: Size): boolean {
 export function isShownClick(click: Click, frame: Size): boolean {
   return click.button === 'left' && isInFrame(click, frame)
 }
+
+/** isShownClick for a click in video px, as the take view sees it in the cropped frame: one the crop leaves out drives nothing. */
+export const isShownClickIn = (click: Click, crop: Rect): boolean => isShownClick({ ...click, x: click.x - crop.x, y: click.y - crop.y }, { width: crop.w, height: crop.h })
 
 function couldBeOnTaskbar(click: Click, track: RecordingTrack): boolean {
   const nearestEdgePx = Math.min(click.x, track.width - click.x, click.y, track.height - click.y)

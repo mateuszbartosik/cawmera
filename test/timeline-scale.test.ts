@@ -41,6 +41,12 @@ describe('timeline scale', () => {
     expect(tickStep({ start: 30_000, end: 36_000 }, 812)).toBe(1000)
   })
 
+  it('steps the ruler by 2, 5 or 10 minutes over a long take', () => {
+    expect(tickStep(wholeView(20 * 60_000), 812)).toBe(120_000)
+    expect(tickStep(wholeView(60 * 60_000), 812)).toBe(300_000)
+    expect(tickStep(wholeView(2 * 60 * 60_000), 812)).toBe(600_000)
+  })
+
   it('zooms around the pointer, never closer than 2 s or wider than the take', () => {
     const zoomed = zoomView(view, 2, 12_500, 60_000)
     expect(zoomed.end - zoomed.start).toBe(5000)

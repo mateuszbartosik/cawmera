@@ -2,7 +2,7 @@ import { outputFloor } from '../recording/pieces'
 import { timeMapOf, type Piece, type Span } from '../recording/timemap'
 import { clampTrim, TRIM_RULES, type Trim } from '../recording/trim'
 
-const TICK_STEPS_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000]
+const TICK_STEPS_MS = [1000, 2000, 5000, 10_000, 30_000, 60_000, 120_000, 300_000, 600_000]
 const MIN_LABEL_GAP_PX = 64
 
 /** The stretch of the take the rows show, in source ms. */

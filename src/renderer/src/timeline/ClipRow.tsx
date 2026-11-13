@@ -1,15 +1,14 @@
 import { useRef } from 'react'
 import { useApp } from '../app/store'
 import { rangeAt, selectRange } from '../recording/edit-actions'
-import { pieceAt } from '../recording/pieces'
 import type { Piece, Span } from '../recording/timemap'
-import type { Click } from '../recording/track'
 import type { Trim } from '../recording/trim'
 import { cn } from '../ui/controls'
+import type { ClickDot } from './click-dots'
 import { CLIP_INSET } from './layout'
 import { timeToX, xToTime, type TimelineView } from './scale'
 
-interface ClipRowProps { clicks: Click[]; pieces: Piece[]; trim: Trim; view: TimelineView; width: number }
+interface ClipRowProps { dots: ClickDot[]; pieces: Piece[]; trim: Trim; view: TimelineView; width: number }
 
 const DRAG_THRESHOLD_PX = 3
 const CUT_HATCH = 'repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--tc-fg) 14%, transparent) 4px 5px)'
@@ -38,7 +37,7 @@ function PieceBlock({ piece, view, width }: { piece: Piece; view: TimelineView; 
   )
 }
 
-export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
+export function ClipRow({ dots, pieces, trim, view, width }: ClipRowProps) {
   const selection = useApp((s) => s.timelineSelection)
   const press = useRef<{ x: number; dragged: boolean; range: Span | null } | null>(null)
   const startX = Math.min(Math.max(timeToX(trim.start, view, width), 0), width)
@@ -91,14 +90,14 @@ export function ClipRow({ clicks, pieces, trim, view, width }: ClipRowProps) {
       {pieces.map((piece) => (
         <PieceBlock key={piece.start} piece={piece} view={view} width={width} />
       ))}
-      {clicks.map((click) => (
+      {dots.map((dot) => (
         <span
-          key={click.t}
+          key={dot.key}
           className={cn(
             'absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-(--tc-accent) bg-(--tc-chip)',
-            (pieceAt(pieces, click.t).cut || click.t < trim.start || click.t > trim.end) && 'opacity-30'
+            dot.dimmed && 'opacity-30'
           )}
-          style={{ left: timeToX(click.t, view, width) }}
+          style={{ left: timeToX(dot.t, view, width) }}
         />
       ))}
       <span className="absolute inset-y-0 left-0 bg-(--tc-canvas)/70" style={{ width: startX }} />

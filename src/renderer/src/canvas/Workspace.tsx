@@ -679,9 +679,10 @@ export function Workspace() {
 
   const onDoubleClick = (event: ReactMouseEvent) => {
     if (cropping) return leaveCrop()
-    if (!layout) return
+    const content = editing.layout?.content
+    if (!content) return
     const world = worldPoint(event)
-    if (shotAt(sizes, world) === active && contains(layout.content, inActive(world))) enterCrop()
+    if (shotAt(sizes, world) === active && contains(content, inActive(world))) enterCrop()
   }
 
   // -------------------------------------------------------------------------

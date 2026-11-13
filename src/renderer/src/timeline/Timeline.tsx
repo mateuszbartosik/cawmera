@@ -7,10 +7,10 @@ import { togglePlayback, usePlayhead } from '../recording/playback'
 import { getRecording } from '../recording/registry'
 import { takeViewFor } from '../recording/take-view'
 import { snapToOutput } from '../recording/timemap'
-import { isShownClick } from '../recording/track'
 import { addZoomAt } from '../recording/zoom-actions'
 import { cn, IconButton } from '../ui/controls'
 import { BlurRow } from './BlurRow'
+import { clickDots } from './click-dots'
 import { ClipRow } from './ClipRow'
 import { HeaderButton } from './HeaderButton'
 import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
@@ -94,10 +94,10 @@ function TimelinePanel() {
   const { track } = entry
   const { trim, pieces } = recording
   const range = selection?.kind === 'range' ? selection : null
-  const { map, edits } = takeViewFor(entry, recording, crop)
+  const { map, edits, crop: frameCrop } = takeViewFor(entry, recording, crop)
   const view = fitView(storedView, duration)
   const viewLength = view.end - view.start
-  const shownClicks = track.clicks.filter((click) => isShownClick(click, track))
+  const dots = clickDots(track, pieces, trim, frameCrop)
 
   const zoomAroundPlayhead = (factor: number) => {
     const anchor = time >= view.start && time <= view.end ? time : view.start + viewLength / 2
@@ -160,7 +160,7 @@ function TimelinePanel() {
 
         <div className="grid" style={rowColumns}>
           <RowLabel>Clip</RowLabel>
-          <ClipRow clicks={shownClicks} pieces={pieces} trim={trim} view={view} width={width} />
+          <ClipRow dots={dots} pieces={pieces} trim={trim} view={view} width={width} />
         </div>
 
         <div className="grid" style={rowColumns}>
