@@ -19,7 +19,7 @@ import {
 import { readBackdrop } from './backdrop'
 import { toastExportFailed, toastSaved } from './save-toast'
 import { evenSize } from './size'
-import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle } from './house-style'
+import { DEFAULT_HOUSE_STYLE, houseStyleImported, loadHouseStyle, serializeHouseStyle } from './house-style'
 import { shuffledLook } from './shuffle'
 import {
   addShot,
@@ -28,6 +28,7 @@ import {
   getSource,
   liveShots,
   markSaved,
+  MAX_SOURCE_PIXELS,
   newId,
   registerSource,
   removeShots,
@@ -43,6 +44,7 @@ import { layoutFor, renderImage, type Scene } from '../render/compose'
 import type { Size } from '../render/geometry'
 import { centeredBox } from '../render/layout'
 import { cropSubject, revealActive } from '../canvas/view'
+import { DRAFT_EXTENSION, draftAmong, openDraftFile } from '../drafts/actions'
 import { setCropFrame } from '../recording/crop'
 import { addTimedRedaction } from '../recording/blur-actions'
 import { grabPlayheadFrame, pausePlayback } from '../recording/playback'
@@ -53,13 +55,14 @@ import {
   copyPng as copyPngToClipboard,
   displayDensity,
   grabFrame,
+  isDesktop,
   readClipboardImageFallback,
   saveImage,
   saveImages,
   stopStream
 } from '../platform/bridge'
 
-const MAX_PIXELS = 60_000_000
+const IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/gif,image/bmp'
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 // ---------------------------------------------------------------------------
@@ -67,7 +70,7 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 // end of the row, so nothing already framed is ever replaced.
 
 export async function loadBitmap(bitmap: ImageBitmap, meta: { name: string; origin: SourceEntry['origin']; density?: Density }) {
-  if (bitmap.width * bitmap.height > MAX_PIXELS) {
+  if (bitmap.width * bitmap.height > MAX_SOURCE_PIXELS) {
     bitmap.close()
     toast.error('That image is too large', { description: 'Use a screenshot under 60 megapixels.' })
     return
@@ -137,12 +140,17 @@ export async function loadFiles(files: File[], origin: SourceEntry['origin']) {
   if (images.length > 1) toast(`Added ${images.length} shots`)
 }
 
+/** On desktop a draft can be picked too, and it opens in place of the canvas. */
 export function openFilePicker() {
   const input = document.createElement('input')
   input.type = 'file'
   input.multiple = true
-  input.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp'
-  input.onchange = () => void loadFiles([...(input.files ?? [])], 'file')
+  input.accept = isDesktop ? `${IMAGE_TYPES},${DRAFT_EXTENSION}` : IMAGE_TYPES
+  input.onchange = () => {
+    const files = [...(input.files ?? [])]
+    const draft = draftAmong(files)
+    void (draft ? openDraftFile(draft) : loadFiles(files, 'file'))
+  }
   input.click()
 }
 
@@ -514,7 +522,7 @@ export async function setBackgroundImage(file: File) {
 export function pickBackgroundImage() {
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp'
+  input.accept = IMAGE_TYPES
   input.onchange = () => {
     const file = input.files?.[0]
     if (file) void setBackgroundImage(file)
@@ -677,7 +685,7 @@ export async function importHouseStyleFile(file: File) {
     if (!raw || typeof raw !== 'object' || !('plateFrom' in raw || 'glow' in raw)) throw new Error('not a house style')
     const style = loadHouseStyle(raw)
     store.set({ style })
-    toast.success(style.name ? `${style.name} house style imported` : 'House style imported')
+    toast.success(houseStyleImported(style))
   } catch {
     toast.error(`${file.name} is not a house style`)
   }

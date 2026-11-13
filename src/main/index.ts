@@ -31,6 +31,8 @@ let win: BrowserWindow | null = null
 let closeApproved = false
 /** Closes anyway if the renderer never answers (crashed, reloading). */
 let closeFallback: NodeJS.Timeout | null = null
+/** True when a close has to wait for the draft being written; it then closes once that draft is written. */
+let holdCloseWhileDraftIsWritten: (close: () => void) => boolean = () => false
 const clearCloseFallback = () => {
   if (closeFallback) clearTimeout(closeFallback)
   closeFallback = null
@@ -88,6 +90,7 @@ function buildMenu() {
         item('Open image…', 'CmdOrCtrl+O', 'open'),
         item('Capture…', 'CmdOrCtrl+Shift+2', 'capture'),
         { type: 'separator' },
+        { label: 'Open…', click: () => send('open-draft') },
         item('Save draft…', 'CmdOrCtrl+Shift+D', 'save-draft'),
         { type: 'separator' },
         item('Copy image', 'CmdOrCtrl+Shift+C', 'copy'),
@@ -480,9 +483,15 @@ function createWindow() {
 
   win.once('ready-to-show', () => win?.show())
   // Let the renderer check for unexported shots before the window goes away. Closing during a
-  // take stops it instead: the take becomes a shot, and the next close asks about it.
+  // take stops it instead: the take becomes a shot, and the next close asks about it. Any close,
+  // the fallback's included, first waits for a draft being written.
   win.on('close', (event) => {
-    if (closeApproved || !win || win.webContents.isCrashed()) return
+    if (!win) return
+    if (holdCloseWhileDraftIsWritten(() => win?.close())) {
+      event.preventDefault()
+      return
+    }
+    if (closeApproved || win.webContents.isCrashed()) return
     event.preventDefault()
     clearCloseFallback()
     if (stopLiveTake()) return
@@ -539,7 +548,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc()
     registerDisplayMedia()
     registerRecording(() => win)
-    registerDrafts(() => win)
+    holdCloseWhileDraftIsWritten = registerDrafts(() => win)
     registerMediaProtocol(recordingVideoFile)
     createWindow()
     app.on('activate', () => {

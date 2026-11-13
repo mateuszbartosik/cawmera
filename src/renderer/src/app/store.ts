@@ -92,7 +92,7 @@ export interface AppState {
   playback: Playback
   /** Share of the video export done (0..1); null when no export runs. */
   exportProgress: number | null
-  /** A draft is being saved. The main process runs one draft operation at a time. */
+  /** A draft is being saved or opened. The main process runs one draft operation at a time. */
   draftBusy: boolean
   houseStyleOpen: boolean
   style: HouseStyle
@@ -481,14 +481,36 @@ export function markDraftSaved(written: ShotRecord[]) {
   }))
 }
 
+/**
+ * An opened draft takes the place of every shot, with its house style. History starts over, every shot counts as saved
+ * in the draft, and the screenshots no shot shows any more are let go.
+ */
+export function replaceCanvas(shots: ShotRecord[], activeIndex: number, style: HouseStyle) {
+  flushGesture()
+  const opened = shots.map((record): ShotRecord => ({ ...record, past: [], future: [], savedDoc: null, draftDoc: record.doc }))
+  store.set({ ...activate(opened, opened[activeIndex]?.id ?? opened[0].id), style, view: FIT_ALL, cropView: FIT_ALL })
+  releaseUnshownSources()
+}
+
 // ---------------------------------------------------------------------------
 // Sources live outside the state: big bitmaps, referenced by id from documents and history.
 
 const sources = new Map<string, SourceEntry>()
 const MAX_SOURCES = 24
+/** A larger screenshot isn't loaded. */
+export const MAX_SOURCE_PIXELS = 60_000_000
 
 export function getSource(id: string | null): SourceEntry | null {
   return id ? (sources.get(id) ?? null) : null
+}
+
+function releaseUnshownSources() {
+  const shown = new Set(liveShots().map((record) => record.doc.sourceId))
+  for (const [id, source] of sources) {
+    if (shown.has(id)) continue
+    source.bitmap.close()
+    sources.delete(id)
+  }
 }
 
 export function registerSource(entry: SourceEntry) {

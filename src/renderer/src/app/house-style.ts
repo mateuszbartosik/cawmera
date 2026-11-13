@@ -71,6 +71,9 @@ export function loadHouseStyle(input: unknown): HouseStyle {
 /** What gets stored or exported: the style plus its format version. */
 export const serializeHouseStyle = (style: HouseStyle) => ({ version: HOUSE_STYLE_VERSION, ...style })
 
+/** The toast for a style that replaced the current one, imported on its own or with a draft. */
+export const houseStyleImported = (style: HouseStyle) => (style.name ? `${style.name} house style imported` : 'House style imported')
+
 /**
  * Export px per CSS px of the captured UI at 100% UI zoom. The same in every image size: the design
  * width says how wide a default 1600 px image is shown.

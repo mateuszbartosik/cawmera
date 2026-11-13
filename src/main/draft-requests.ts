@@ -1,11 +1,10 @@
 import { rmSync } from 'node:fs'
 import { basename, extname } from 'node:path'
-import type { DraftOpenResult } from '../shared/types'
+import { DRAFT_BUSY, type DraftOpenResult } from '../shared/types'
 import { DraftFileError, draftParts, partialFileOf, readDraft, writeDraft } from './draft-file'
 import { localFile } from './renderer-paths'
 
 const EXTENSION = '.cawmera'
-const BUSY = 'Another draft is being saved or opened'
 const NOT_LOCAL = 'Not a .cawmera file on a local drive'
 
 export interface DraftHost {
@@ -28,10 +27,15 @@ const fileNameFor = (suggestedName: unknown) =>
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+/** Electron sends a save's reply once its promise settles; a task later, the reply has gone out. */
+const afterReplies = () => new Promise<void>((resolve) => setImmediate(resolve))
+
 /** A path from the renderer must name a local .cawmera file; one the user picked in a dialog opens as picked. */
 export function createDraftRequests(host: DraftHost) {
   let busy = false
   let unfinishedSave: string | null = null
+  let writing: Promise<void> | null = null
+  let heldClose: Promise<void> | null = null
 
   async function oneAtATime<T>(whenBusy: T, work: () => Promise<T>): Promise<T> {
     if (busy) return whenBusy
@@ -50,12 +54,14 @@ export function createDraftRequests(host: DraftHost) {
       if (!picked) return null
       const target = withExtension(picked)
       unfinishedSave = partialFileOf(target)
-      await writeDraft(target, parts, onProgress)
+      writing = writeDraft(target, parts, onProgress)
+      await writing
       return { path: target }
     } catch (error) {
       return { error: messageOf(error) }
     } finally {
       unfinishedSave = null
+      writing = null
     }
   }
 
@@ -80,10 +86,23 @@ export function createDraftRequests(host: DraftHost) {
   }
 
   const save = (files: unknown, suggestedName: unknown, onProgress: (share: number) => void) =>
-    oneAtATime<SaveResult>({ error: BUSY }, () => saveNow(files, suggestedName, onProgress))
+    oneAtATime<SaveResult>({ error: DRAFT_BUSY }, () => saveNow(files, suggestedName, onProgress))
 
   const open = (requested: unknown, onProgress: (share: number) => void) =>
-    oneAtATime<DraftOpenResult | null>({ ok: false, reason: 'unreadable', message: BUSY }, () => openNow(requested, onProgress))
+    oneAtATime<DraftOpenResult | null>({ ok: false, reason: 'unreadable', message: DRAFT_BUSY }, () => openNow(requested, onProgress))
+
+  /**
+   * A close waits for the draft being written, so a save the user asked for is never dropped: `close` runs once, after the
+   * write has ended either way and the renderer has its answer. False when no draft is being written.
+   */
+  function holdCloseWhileWriting(close: () => void): boolean {
+    if (!writing) return false
+    heldClose ??= writing.then(afterReplies, afterReplies).then(() => {
+      heldClose = null
+      close()
+    })
+    return true
+  }
 
   /** For quitting mid-save: the half-written file goes, and the draft it would replace stays. */
   function discardUnfinishedSave() {
@@ -95,5 +114,5 @@ export function createDraftRequests(host: DraftHost) {
     }
   }
 
-  return { save, open, discardUnfinishedSave }
+  return { save, open, discardUnfinishedSave, holdCloseWhileWriting }
 }

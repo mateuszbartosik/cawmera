@@ -35,6 +35,7 @@ export type MenuCommand =
   | 'new-shot'
   | 'next-shot'
   | 'previous-shot'
+  | 'open-draft'
   | 'save-draft'
   | 'export'
   | 'export-all'
@@ -84,6 +85,9 @@ export interface DraftFiles {
 export type DraftOpenFailure = 'not-a-draft' | 'damaged' | 'too-large' | 'unreadable'
 
 export type DraftOpenResult = { ok: true; files: DraftFiles } | { ok: false; reason: DraftOpenFailure; message: string }
+
+/** Why a second draft save or open is refused: the main process runs one at a time. */
+export const DRAFT_BUSY = 'Another draft is being saved or opened'
 
 /** What is about to drop the unsaved work: closing the window, or opening a draft over it. */
 export type DiscardPurpose = 'close' | 'open'

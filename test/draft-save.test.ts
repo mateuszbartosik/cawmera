@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
-import type { CawmeraBridge, DraftFiles } from '@shared/types'
+import type { CawmeraBridge, DiscardAnswer, DraftFiles } from '@shared/types'
 import type { Doc } from '../src/renderer/src/app/doc'
 import type { ShotRecord } from '../src/renderer/src/app/store'
 import type { RecordingTrack } from '../src/renderer/src/recording/track'
@@ -38,6 +38,13 @@ const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settin
 const { wholeTake } = await import('../src/renderer/src/recording/timemap')
 const { serializeTrack } = await import('../src/renderer/src/recording/track')
 
+interface FakeBitmap {
+  tag: string
+  width: number
+  height: number
+}
+
+/** Encodes what was drawn where: the image's tag and the rect it covered, then the canvas size. */
 class PngCanvas {
   private drawn = ''
   constructor(
@@ -45,10 +52,13 @@ class PngCanvas {
     readonly height: number
   ) {}
   getContext() {
-    return { drawImage: (image: { tag: string }) => void (this.drawn = image.tag) }
+    return {
+      drawImage: (image: FakeBitmap, x: number, y: number, w = image.width, h = image.height) =>
+        void (this.drawn = `${image.tag} drawn at ${x}, ${y}, ${w} × ${h}`)
+    }
   }
   async convertToBlob({ type }: { type: string }) {
-    return new Blob([`${type} of ${this.drawn} at ${this.width} × ${this.height}`])
+    return new Blob([`${type} of ${this.drawn} on ${this.width} × ${this.height}`])
   }
 }
 vi.stubGlobal('OffscreenCanvas', PngCanvas)
@@ -56,7 +66,7 @@ vi.stubGlobal('OffscreenCanvas', PngCanvas)
 const SAVED_PATH = 'C:\\Drafts\\billing.cawmera'
 const report = (share: number) => mocks.listeners.forEach((listener) => listener(share))
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
-const bitmap = (tag: string) => ({ tag, close: () => undefined }) as unknown as ImageBitmap
+const bitmap = (tag: string, width: number, height: number) => ({ tag, width, height, close: () => undefined }) as unknown as ImageBitmap
 const handedOver = () => mocks.bridge.saveDraft.mock.calls[0] as [DraftFiles, string]
 const unsavedIds = () => liveShots().filter(isUnsaved).map((record) => record.id)
 
@@ -71,7 +81,7 @@ const track: RecordingTrack = {
   clicks: [{ t: 1000, x: 10, y: 20, button: 'left', up: 1100 }]
 }
 registerRecording({ id: 'take-1', name: 'Billing', track, poster: null })
-registerSource({ id: 'image-a', bitmap: bitmap('image-a'), width: 800, height: 600, name: 'billing.png', origin: 'file', detected: 1 })
+registerSource({ id: 'image-a', bitmap: bitmap('image-a', 800, 600), width: 800, height: 600, name: 'billing.png', origin: 'file', detected: 1 })
 
 const empty: Doc = { ...DEFAULT_DOC }
 const screenshot: Doc = { ...DEFAULT_DOC, sourceId: 'image-a' }
@@ -118,18 +128,18 @@ describe('saveDraft', () => {
       ['screenshot', 'image1']
     ])
     expect(manifest.shots[2].name).toBe('Billing')
-    expect(files.screenshots.map(({ key, bytes }) => [key, text(bytes)])).toEqual([['image1', 'image/png of image-a at 800 × 600']])
+    expect(files.screenshots.map(({ key, bytes }) => [key, text(bytes)])).toEqual([['image1', 'image/png of image-a drawn at 0, 0, 800 × 600 on 800 × 600']])
     expect(files.recordings).toEqual([{ key: 'take1', id: 'take-1', track: serializeTrack(track) }])
     expect(suggestedName).toBe('billing-costs.cawmera')
   })
 
   it('files a screenshot and a take that share an id under keys of their own kind', async () => {
-    registerSource({ id: 'shared', bitmap: bitmap('shared'), width: 10, height: 20, name: 'shared.png', origin: 'paste', detected: 1 })
+    registerSource({ id: 'shared', bitmap: bitmap('shared', 10, 20), width: 10, height: 20, name: 'shared.png', origin: 'paste', detected: 1 })
     registerRecording({ id: 'shared', name: 'Shared', track, poster: null })
     setCanvas([{ ...recording, sourceId: 'shared' }, { ...screenshot, sourceId: 'shared' }])
     await saveDraft()
     const [files] = handedOver()
-    expect(files.screenshots.map(({ key, bytes }) => [key, text(bytes)])).toEqual([['image1', 'image/png of shared at 10 × 20']])
+    expect(files.screenshots.map(({ key, bytes }) => [key, text(bytes)])).toEqual([['image1', 'image/png of shared drawn at 0, 0, 10 × 20 on 10 × 20']])
     expect(files.recordings.map(({ key, id }) => [key, id])).toEqual([['take1', 'shared']])
   })
 
@@ -266,6 +276,25 @@ describe('closing with unsaved work', () => {
     })
     finish({ path: SAVED_PATH })
     expect(await Promise.all([running, closing])).toEqual([true, true])
+    expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts no second save when the running one saved everything while the dialog was up', async () => {
+    let finish: (result: { path: string }) => void = () => undefined
+    mocks.bridge.saveDraft.mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    let answer: (choice: DiscardAnswer) => void = () => undefined
+    mocks.bridge.confirmDiscard.mockImplementation(() => new Promise((resolve) => (answer = resolve)))
+    const running = saveDraft()
+    const closing = saveOrDiscardUnsaved('close')
+    await vi.waitFor(() => {
+      expect(mocks.bridge.confirmDiscard).toHaveBeenCalledTimes(1)
+      expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
+    })
+    finish({ path: SAVED_PATH })
+    expect(await running).toBe(true)
+    mocks.bridge.saveDraft.mockResolvedValue({ path: SAVED_PATH })
+    answer('save')
+    expect(await closing).toBe(true)
     expect(mocks.bridge.saveDraft).toHaveBeenCalledTimes(1)
   })
 

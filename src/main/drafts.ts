@@ -10,7 +10,8 @@ const progressTo = (sender: WebContents) => (share: number) => {
   if (!sender.isDestroyed()) sender.send('draft:progress', share)
 }
 
-export function registerDrafts(getWindow: () => BrowserWindow | null) {
+/** Returns the hold a window's close goes through while a draft is being written. */
+export function registerDrafts(getWindow: () => BrowserWindow | null): (close: () => void) => boolean {
   const requests = createDraftRequests({
     recordingsRoot: recordingsRoot(),
     newId: randomUUID,
@@ -45,4 +46,5 @@ export function registerDrafts(getWindow: () => BrowserWindow | null) {
   ipcMain.handle('draft:open', (event, path: unknown) => requests.open(path, progressTo(event.sender)))
 
   app.on('quit', () => requests.discardUnfinishedSave())
+  return requests.holdCloseWhileWriting
 }

@@ -1,19 +1,17 @@
 import { toast } from 'sonner'
 import type { CaptureSource, RecordingError, RecordingFinished } from '@shared/types'
-import { recordingUrl } from '@shared/media'
 import { countdown, interruptCountdown, resetCancellation } from '../app/actions'
 import { exportFileName, shotFallbackName, type Doc } from '../app/doc'
 import { toastExportFailed, toastSaved } from '../app/save-toast'
 import { addShot, backdropReady, emptyDoc, liveShots, markSnapshotSaved, store, updateDoc } from '../app/store'
 import { revealActive } from '../canvas/view'
 import { bridge, saveVideo } from '../platform/bridge'
-import { getRecording, registerRecording, setPoster } from './registry'
+import { getRecording, loadPoster, registerRecording } from './registry'
 import { recordingCountdownSeconds, runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { unavailableReason } from './support'
 import { parseTrack, stopClickOf, withoutStopClick } from './track'
 
-const POSTER_TIMEOUT_MS = 5000
 const DEFAULT_RECORDING_NAME = 'Recording'
 
 export const PRIVACY_SETTING_PATH = 'Settings › Privacy & security › Screenshots and screen recording'
@@ -96,29 +94,6 @@ export async function recordingFailed(error: RecordingError) {
   toastFor(error)
 }
 
-function grabFirstFrame(id: string): Promise<ImageBitmap | null> {
-  return new Promise((resolve) => {
-    const video = document.createElement('video')
-    let settled = false
-    const finish = (poster: ImageBitmap | null) => {
-      if (settled) return poster?.close()
-      settled = true
-      clearTimeout(timer)
-      video.onerror = video.onloadeddata = null
-      video.removeAttribute('src')
-      video.load()
-      resolve(poster)
-    }
-    const timer = setTimeout(() => finish(null), POSTER_TIMEOUT_MS)
-    video.muted = true
-    video.preload = 'auto'
-    video.crossOrigin = 'anonymous'
-    video.onerror = () => finish(null)
-    video.onloadeddata = () => void createImageBitmap(video).then(finish, () => finish(null))
-    video.src = recordingUrl(id)
-  })
-}
-
 export async function finishRecording(result: RecordingFinished) {
   try {
     const recorded = parseTrack(JSON.parse(result.track))
@@ -126,8 +101,7 @@ export async function finishRecording(result: RecordingFinished) {
     registerRecording({ id: result.id, name: recordingName, track, poster: null })
     const settings = recordingDocFor(track, lastRecordingDoc()?.recording ?? null, stopClickOf(recorded, result.stoppedBy))
     addRecordingShot(result.id, settings)
-    const poster = await grabFirstFrame(result.id)
-    if (poster) setPoster(result.id, poster)
+    await loadPoster(result.id)
   } catch (error) {
     console.error('Recording could not be opened', error)
     toast.error('The recording could not be opened', { description: error instanceof Error ? error.message : String(error) })

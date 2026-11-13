@@ -113,6 +113,59 @@ describe('draft requests from the renderer', ON_DISK, () => {
     expect(t.host.adoptTake).toHaveBeenCalledTimes(2)
   })
 
+  it('holds a close while a draft is written, and closes once, after the save has answered', async () => {
+    const t = await setup()
+    const order: string[] = []
+    const close = vi.fn(() => order.push('closed'))
+    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
+    const held: boolean[] = []
+    const saved = await t.requests
+      .save(t.files, 'a', (share) => {
+        if (share < 0.5 || held.length > 0) return
+        held.push(t.requests.holdCloseWhileWriting(close), t.requests.holdCloseWhileWriting(close))
+      })
+      .then((result) => {
+        order.push('saved')
+        return result
+      })
+    expect(saved).toEqual({ path: t.saved })
+    expect(held).toEqual([true, true])
+    await vi.waitFor(() => expect(order).toEqual(['saved', 'closed']))
+    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
+  })
+
+  it('closes once a write that failed has ended', async () => {
+    const t = await setup()
+    const close = vi.fn()
+    let held = false
+    const result = await t.requests.save(t.files, 'a', (share) => {
+      if (held || share < 0.5) return
+      held = t.requests.holdCloseWhileWriting(close)
+      t.requests.discardUnfinishedSave()
+    })
+    expect(held).toBe(true)
+    expect(result).toEqual({ error: expect.any(String) })
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1))
+  })
+
+  it('holds no close while the save dialog is open or a draft is opened', async () => {
+    const saveDialog = deferred<string | null>()
+    const t = await setup({ chooseSaveTarget: vi.fn<DraftHost['chooseSaveTarget']>(() => saveDialog.promise) })
+    const close = vi.fn()
+    const cancelled = t.requests.save(t.files, 'a', noop)
+    expect(t.requests.holdCloseWhileWriting(close)).toBe(false)
+    saveDialog.resolve(null)
+    expect(await cancelled).toBeNull()
+
+    vi.mocked(t.host.chooseSaveTarget).mockResolvedValue(join(t.dir, 'saved'))
+    await t.requests.save(t.files, 'a', noop)
+    const holds: boolean[] = []
+    expect(await t.requests.open(t.saved, () => holds.push(t.requests.holdCloseWhileWriting(close)))).toMatchObject({ ok: true })
+    expect(holds).not.toEqual([])
+    expect(holds).not.toContain(true)
+    expect(close).not.toHaveBeenCalled()
+  })
+
   it('removes the half-written file when Cawmera quits during a save, and keeps the draft it would replace', async () => {
     const t = await setup()
     await writeFile(t.saved, 'the previous draft')
