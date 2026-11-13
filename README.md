@@ -24,7 +24,7 @@ Every image gets the same background and shows the UI at the same scale, at 1600
 - **One scale for the UI.** Cawmera never shrinks a screenshot to fit. Its scale comes from how it was captured, so text reads the same in every image.
 - **One look for a product.** Background, light, frame and shadow come from a house style that a team shares as a single file.
 - **Any size.** 1600 × 1000 by default, Article (OG) for link previews, presets for slides and social posts, or your own width and height.
-- **Private.** Screenshots and recordings stay on your computer: Cawmera never stores them and makes no network requests.
+- **Private.** Screenshots and recordings stay on your computer and make no network requests. Cawmera never persists them unless you save a draft.
 
 ## Download
 
@@ -45,11 +45,24 @@ Shots sit side by side on the canvas. `Shift`- or `Ctrl`-click them, or drag a b
 
 ## Record
 
-**Record** a window or screen and Cawmera turns it into an MP4 with the same framing as a screenshot. It zooms in on your clicks, redraws the cursor smoothly, adds click effects and motion blur, and trims the quiet ends. Check the result in the preview, adjust the trim on its timeline, then export.
+**Record** a window or screen and Cawmera turns it into an MP4 with the same framing as a screenshot. A countdown of at least 3 seconds comes first, longer if your capture delay is. Cawmera zooms in on your clicks, redraws the cursor smoothly, adds click effects and motion blur, and trims the quiet ends. Check the result in the preview, edit it on the timeline, then export.
 
-Press `Ctrl+Shift+2` to stop, or click Cawmera on the taskbar. Clicking it during the countdown cancels the recording. If you close Cawmera while recording, it stops and keeps the take. Recordings are deleted when Cawmera closes, so export what you want to keep. Export is MP4 without sound.
+Press `Ctrl+Shift+2` to stop, or click Cawmera on the taskbar. Clicking it during the countdown cancels the recording. If you close Cawmera while recording, it stops and keeps the take. Recordings live in your temp folder and are cleared when Cawmera quits, so export what you want to keep, or save a draft. Export is MP4 without sound.
+
+### Edit a recording
+
+- **Timeline.** `Space` plays and pauses. Zoom and scroll the timeline to edit closely, and drag the trim handles to change where the video starts and ends.
+- **Clip row.** **Split** (`S`) cuts a clip at the playhead. Select a range and press `Delete` to cut it out. **Speed** runs a range from 1× to 8×, and **Restore** brings a cut back.
+- **Zooms.** Select a zoom to move or stretch it, add one, or delete it. In the Zoom section, **Depth** sets how close it gets and **Aim** where it looks. You can also drag the zoom area on the shot. **Back to automatic zooms** drops your edits.
+- **Crop** (`C`) works on recordings too.
+- **Blur boxes.** Redact private details for as long as you need: add a box on the **Blur** row, or `Alt` + drag on the recording.
+- **Motion.** **Cursor blur**, **Camera blur** and **Zoom speed** set how the motion feels.
 
 Recording limits: monitors wider than 4096 px may fail to record, because of H.264 encoder limits. Windows N editions need the Media Feature Pack.
+
+## Drafts
+
+A draft is a `.cawmera` file that keeps your shots and recordings with their edits, so you can come back later. **Save draft** (`Ctrl+Shift+D`, the toolbar button, or when you close Cawmera with unsaved work) writes one. Open it with **Open draft…** in the File menu, with **Open image…** (`Ctrl+O`), whose picker also takes drafts, or by dropping it onto Cawmera. Nothing is kept unless you save a draft.
 
 ## House styles
 
@@ -62,15 +75,18 @@ The background, light, frame and scale come from a house style, and so does the 
 
 | Action | Keys |
 | --- | --- |
-| Open images | `Ctrl+O` |
+| Open images or a draft | `Ctrl+O` |
+| Save draft | `Ctrl+Shift+D` |
 | Capture | `Ctrl+Shift+2` |
 | Stop recording | `Ctrl+Shift+2` or click Cawmera on the taskbar |
 | New shot / next / previous | `Ctrl+N` / `Ctrl+PageDown` / `Ctrl+PageUp` |
 | Crop on / off | `C` or double-click the shot (`Enter` or `Esc` to finish) |
 | Shuffle the edge and light | `R` |
 | Draw a blur box | `Alt` + drag |
+| Play / pause a recording | `Space` |
+| Split a recording at the playhead | `S` |
 | Select several shots or boxes | `Shift`/`Ctrl` + click, drag on empty canvas (shots), `Ctrl+A` |
-| Delete / nudge what's selected | `Delete` / arrow keys for boxes (`Shift` for 10 px) |
+| Delete / nudge what's selected | `Delete` / arrow keys for boxes (`Shift` for 10 px); on a recording, `Delete` cuts a range or removes a zoom |
 | Undo / redo (per shot) | `Ctrl+Z` / `Ctrl+Shift+Z` |
 | Export / export all / copy | `Ctrl+S` / `Ctrl+Shift+S` / `Ctrl+Shift+C` |
 | Zoom in / out / 100% | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
