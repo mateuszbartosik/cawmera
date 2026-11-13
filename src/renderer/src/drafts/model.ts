@@ -26,7 +26,7 @@ import type { ZoomSpeed } from '../recording/camera'
 import { normalizePieces } from '../recording/pieces'
 import { CURSOR_SIZE_RANGE, DEFAULT_RECORDING, type RecordingDoc, type RecordingFps } from '../recording/settings'
 import { clampTrim, type Trim } from '../recording/trim'
-import type { RecordingTrack } from '../recording/track'
+import { parseTrack, type RecordingTrack } from '../recording/track'
 import { normalizeZoomEdits } from '../recording/zoom-edits'
 
 export const DRAFT_FORMAT = 'cawmera-draft'
@@ -54,6 +54,9 @@ export interface DraftContents {
   shots: DraftShot[]
 }
 
+/** The takes' tracks by key: a map, or a reader that reads a track only once a shot asks for it. */
+export type DraftTracks = Pick<ReadonlyMap<string, RecordingTrack>, 'get'>
+
 const ORIGINS: SourceEntry['origin'][] = ['paste', 'drop', 'file', 'capture']
 const REDACT_STYLES: RedactStyle[] = ['blur', 'pixelate', 'solid']
 const FILLS: Fill[] = ['gradient', 'image']
@@ -63,6 +66,8 @@ const ZOOM_SPEEDS: ZoomSpeed[] = ['calm', 'quick']
 const FPS_CHOICES: RecordingFps[] = [30, 60]
 /** Far above what Cawmera makes itself; a manifest past them is damaged. */
 export const DRAFT_LIMITS = { shots: 500, redactions: 2000, zooms: 1000, pieces: 5000 }
+/** Far above any take Cawmera records; a track past one is damaged. */
+export const DRAFT_TRACK_BOUNDS = { durationMs: 4 * 60 * 60 * 1000, side: 16_384, fps: 240 }
 const MAX_NAME_LENGTH = 200
 const HEX = /^#[0-9a-f]{6}$/i
 
@@ -110,7 +115,7 @@ function recordingDocFrom(value: unknown, track: RecordingTrack): RecordingDoc {
   return {
     trim,
     pieces: normalizePieces(raw.pieces, track.durationMs),
-    zooms: normalizeZoomEdits(raw.zooms, trim)?.map((edit) => ({ ...edit, focus: { x: clamp(edit.focus.x, 0, track.width), y: clamp(edit.focus.y, 0, track.height) } })) ?? null,
+    zooms: normalizeZoomEdits(raw.zooms, track.durationMs)?.map((edit) => ({ ...edit, focus: { x: clamp(edit.focus.x, 0, track.width), y: clamp(edit.focus.y, 0, track.height) } })) ?? null,
     cursorSize: numberIn(raw.cursorSize, CURSOR_SIZE_RANGE.min, CURSOR_SIZE_RANGE.max, defaults.cursorSize),
     smoothing: numberIn(raw.smoothing, 0, 1, defaults.smoothing),
     look: oneOf(LOOKS, raw.look, defaults.look),
@@ -134,7 +139,7 @@ function spotlightFrom(value: unknown, bounds: Size | null): Spotlight {
   }
 }
 
-function redactionsFrom(value: unknown, bounds: Size | null, recording: { doc: RecordingDoc; track: RecordingTrack } | null): Redaction[] {
+function redactionsFrom(value: unknown, bounds: Size | null, track: RecordingTrack | null): Redaction[] {
   withinLimit(value, DRAFT_LIMITS.redactions)
   if (!bounds || !Array.isArray(value)) return []
   const ids = new Set<string>()
@@ -144,13 +149,9 @@ function redactionsFrom(value: unknown, bounds: Size | null, recording: { doc: R
     const clipped = rectWithin(rect, bounds)
     if (typeof id !== 'string' || id === '' || ids.has(id) || !clipped) continue
     const span = spanOf(time)
-    if (recording && !span) continue
+    if (track && !span) continue
     ids.add(id)
-    redactions.push({
-      id,
-      rect: clipped,
-      time: recording && span ? settledBoxTime(span, recording.doc.trim, recording.track.fps, recording.track.durationMs) : null
-    })
+    redactions.push({ id, rect: clipped, time: track && span ? settledBoxTime(span, track.fps, track.durationMs) : null })
   }
   return redactions
 }
@@ -181,7 +182,7 @@ function docFrom(value: unknown, { key, bounds, track }: Source): Doc {
     zoom: oneOf(UI_ZOOMS, raw.zoom, defaults.zoom),
     crop: cropFrom(raw.crop, bounds, recording !== null),
     edge: isEdge(raw.edge) ? raw.edge : defaults.edge,
-    redactions: redactionsFrom(raw.redactions, bounds, track && recording ? { doc: recording, track } : null),
+    redactions: redactionsFrom(raw.redactions, bounds, track),
     redactStyle: oneOf(REDACT_STYLES, raw.redactStyle, defaults.redactStyle),
     spotlight: spotlightFrom(raw.spotlight, bounds),
     angle: typeof raw.angle === 'number' ? normalizeAngle(raw.angle) : defaults.angle,
@@ -198,7 +199,7 @@ function keyOf(value: unknown): string {
   return value
 }
 
-function shotFrom(value: unknown, tracks: Map<string, RecordingTrack>, sizes: Map<string, Size>, kindsByKey: Map<string, string>): DraftShot {
+function shotFrom(value: unknown, tracks: DraftTracks, sizes: Map<string, Size>, kindsByKey: Map<string, string>): DraftShot {
   const raw = fieldsOf(value)
   if (raw.kind === 'empty') return { kind: 'empty', doc: docFrom(raw.doc, { key: null, bounds: null, track: null }) }
   if (raw.kind !== 'screenshot' && raw.kind !== 'recording') throw new DraftError('damaged')
@@ -218,6 +219,19 @@ function shotFrom(value: unknown, tracks: Map<string, RecordingTrack>, sizes: Ma
   return { kind: 'screenshot', key, doc, source: { name: text(source.name, ''), origin: oneOf(ORIGINS, source.origin, 'file'), detected: snapDensity(Number(source.detected)) } }
 }
 
+/** A take's track.json as parseTrack reads it, within the bounds a draft allows. */
+export function parseDraftTrack(json: string): RecordingTrack {
+  let track: RecordingTrack
+  try {
+    track = parseTrack(JSON.parse(json))
+  } catch {
+    throw new DraftError('damaged')
+  }
+  const { durationMs, side, fps } = DRAFT_TRACK_BOUNDS
+  if (track.durationMs > durationMs || track.width > side || track.height > side || track.fps > fps) throw new DraftError('damaged')
+  return track
+}
+
 function manifestFields(manifest: string): Fields {
   let parsed: unknown
   try {
@@ -231,8 +245,11 @@ function manifestFields(manifest: string): Fields {
   return fields
 }
 
-/** Everything is read as sanitizeHouseStyle reads a style: clamped or defaulted, never trusted. `tracks` hold the takes by key and `sizes` the decoded screenshots by key. */
-export function parseDraftManifest(manifest: string, tracks: Map<string, RecordingTrack>, sizes: Map<string, Size> = new Map()): DraftContents {
+/**
+ * Everything is read as sanitizeHouseStyle reads a style: clamped or defaulted, never trusted. `tracks` hold the takes by key, and
+ * `sizes` the screenshots' sizes by key, as their PNG headers give them.
+ */
+export function parseDraftManifest(manifest: string, tracks: DraftTracks, sizes: Map<string, Size> = new Map()): DraftContents {
   try {
     const fields = manifestFields(manifest)
     if (!Array.isArray(fields.shots) || fields.shots.length === 0 || fields.shots.length > DRAFT_LIMITS.shots) throw new DraftError('damaged')

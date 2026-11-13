@@ -19,9 +19,9 @@ import {
 } from '../app/store'
 import { blobBytes, bridge } from '../platform/bridge'
 import { getRecording, loadPoster, registerRecording, type RecordingEntry } from '../recording/registry'
-import { parseTrack, serializeTrack, type RecordingTrack } from '../recording/track'
+import { serializeTrack, type RecordingTrack } from '../recording/track'
 import type { Size } from '../render/geometry'
-import { buildDraftManifest, DraftError, parseDraftManifest, type DraftContents, type DraftFailure, type DraftShot } from './model'
+import { buildDraftManifest, DraftError, parseDraftManifest, parseDraftTrack, type DraftContents, type DraftFailure, type DraftShot } from './model'
 
 export const DRAFT_EXTENSION = '.cawmera'
 const FALLBACK_NAME = 'whats-new-draft'
@@ -187,12 +187,18 @@ function headerSizes(screenshots: DraftFiles['screenshots']): Map<string, Size> 
   return sizes
 }
 
-function trackOf(json: string): RecordingTrack {
-  try {
-    return parseTrack(JSON.parse(json))
-  } catch {
-    throw new DraftError('damaged')
+/** Reads a take's track the first time a shot asks for it, so a track no shot shows is never read. `read` holds those read so far. */
+function trackReader(recordings: DraftFiles['recordings']) {
+  const jsonByKey = new Map(recordings.map(({ key, track }) => [key, track]))
+  const read = new Map<string, RecordingTrack>()
+  const get = (key: string): RecordingTrack | undefined => {
+    const json = jsonByKey.get(key)
+    if (json === undefined) return undefined
+    const track = read.get(key) ?? parseDraftTrack(json)
+    read.set(key, track)
+    return track
   }
+  return { get, read }
 }
 
 interface ShownScreenshot {
@@ -269,11 +275,11 @@ interface OpenedDraft {
 }
 
 async function decodedDraft(files: DraftFiles): Promise<OpenedDraft> {
-  const tracks = new Map(files.recordings.map(({ key, track }) => [key, trackOf(track)]))
+  const tracks = trackReader(files.recordings)
   const sizes = headerSizes(files.screenshots)
   const contents = parseDraftManifest(files.manifest, tracks, sizes)
   const sources = await decodedSources(shownScreenshots(contents, files.screenshots, sizes))
-  return { contents, sources, recordings: recordingsOf(contents.shots, files.recordings, tracks) }
+  return { contents, sources, recordings: recordingsOf(contents.shots, files.recordings, tracks.read) }
 }
 
 /** Main's dialog or the given path, then the read and the decode. Null when the dialog was cancelled, or when main refused, with a toast saying why. */

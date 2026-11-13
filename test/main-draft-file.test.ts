@@ -270,6 +270,18 @@ describe('reading a draft from anyone', ON_DISK, () => {
     expect((await readDraft(draft, root, newId, noop, AT_LIMITS)).recordings).toHaveLength(1)
   })
 
+  it('refuses a track over 32 MB before reading it, far above an hour-long take’s', async () => {
+    const { dir, root, newId } = await workspace()
+    expect(DRAFT_LIMITS.trackBytes).toBe(32_000_000)
+    const oversized = await handDraft(dir, [
+      manifestEntry,
+      { name: 'recordings/r1/video.mp4', data: text('video') },
+      { name: 'recordings/r1/track.json', data: new Uint8Array(DRAFT_LIMITS.trackBytes + 1) }
+    ])
+    expect(await reasonOf(readDraft(oversized, root, newId, noop))).toBe('too-large')
+    expect(await takeFolders(root)).toEqual([])
+  })
+
   it('reads a draft written in ZIP64', async () => {
     const { dir, root } = await workspace()
     const file = join(dir, 'zip64.cawmera')
@@ -356,6 +368,12 @@ describe('draft parts from the renderer', () => {
   it('refuses parts it couldn’t open again, before anything asks where to save', () => {
     expect(() => draftParts({ ...files, screenshots: [{ key: 'Image-1', bytes: png }] }, takeFolder)).toThrow('The draft key “Image-1” is invalid or repeated')
     expect(() => draftParts(files, takeFolder, { ...DRAFT_LIMITS, screenshotBytes: png.length - 1 })).toThrow(`screenshots/s1.png is over ${png.length - 1} bytes`)
+  })
+
+  it('keeps a track up to 32 MB, and refuses a larger one before anything asks where to save', () => {
+    const withTrack = (bytes: number) => ({ ...files, recordings: [{ key: 'r1', id: UUID, track: 'x'.repeat(bytes) }] })
+    expect(draftParts(withTrack(DRAFT_LIMITS.trackBytes), takeFolder).recordings[0].track).toHaveLength(32_000_000)
+    expect(() => draftParts(withTrack(DRAFT_LIMITS.trackBytes + 1), takeFolder)).toThrow('recordings/r1/track.json is over 32000000 bytes')
   })
 
   it('refuses files of the wrong shape', () => {

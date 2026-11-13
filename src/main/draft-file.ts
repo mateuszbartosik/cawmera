@@ -10,11 +10,11 @@ import { DRAFT_KEY } from '../shared/draft-key'
 import type { DraftFiles, DraftOpenFailure } from '../shared/types'
 import { recordingDir, removeRecording } from './recording-files'
 
-/** Far above any draft Cawmera writes: 500 shots make at most 1,001 entries. */
+/** Far above any draft Cawmera writes: 500 shots make at most 1,001 entries, and an hour-long take's track is about 5 MB. */
 export const DRAFT_LIMITS = {
   manifestBytes: 50_000_000,
   screenshotBytes: 200_000_000,
-  trackBytes: 200_000_000,
+  trackBytes: 32_000_000,
   bufferedBytes: 1_000_000_000,
   entries: 5_000
 }

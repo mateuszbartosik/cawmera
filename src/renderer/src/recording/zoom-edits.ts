@@ -2,7 +2,6 @@ import { clamp, type Point, type Rect } from '../render/geometry'
 import { clampFocus, ZOOM_TRANSITION_MS, type ZoomSpeed } from './camera'
 import type { TakeView } from './take-view'
 import { outputToSource, snapToOutput, type Span, type TimeMap } from './timemap'
-import type { Trim } from './trim'
 import { isShownClick, type Click } from './track'
 import { autoHoldLimits, autoZoomsWithClicks, clickGroupsAtDepth, focusOn, ZOOM_RULES, type ZoomSegment } from './zooms'
 
@@ -16,7 +15,7 @@ export const MIN_MAPPED_HOLD_MS = 300
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
-function zoomEditFrom(raw: unknown, trim: Trim): ZoomEdit | null {
+function zoomEditFrom(raw: unknown, durationMs: number): ZoomEdit | null {
   if (typeof raw !== 'object' || raw === null) return null
   const { id, start, end, depth, aim, focus } = raw as Record<string, unknown>
   if (typeof id !== 'string' || id === '' || !isFiniteNumber(start) || !isFiniteNumber(end) || !isFiniteNumber(depth)) return null
@@ -24,15 +23,18 @@ function zoomEditFrom(raw: unknown, trim: Trim): ZoomEdit | null {
   if (typeof focus !== 'object' || focus === null) return null
   const { x, y } = focus as Record<string, unknown>
   if (!isFiniteNumber(x) || !isFiniteNumber(y)) return null
-  const held = { start: Math.max(start, trim.start), end: Math.min(end, trim.end) }
+  const held = { start: Math.max(start, 0), end: Math.min(end, durationMs) }
   if (held.end - held.start < ZOOM_RULES.minHoldMs) return null
   return { id, ...held, depth: clamp(depth, ZOOM_DEPTH_RANGE.min, ZOOM_DEPTH_RANGE.max), aim, focus: { x, y } }
 }
 
-/** What a stored or loaded `zooms` field may hold: valid edits in time order that never overlap, or null while the zooms stay automatic. */
-export function normalizeZoomEdits(raw: unknown, trim: Trim): ZoomEdit[] | null {
+/**
+ * What a stored or loaded `zooms` field may hold: valid edits inside the take, in time order, that never overlap, or null while the zooms
+ * stay automatic. A zoom the trim leaves out is kept, as the editor keeps it.
+ */
+export function normalizeZoomEdits(raw: unknown, durationMs: number): ZoomEdit[] | null {
   if (!Array.isArray(raw)) return null
-  const edits = raw.map((entry) => zoomEditFrom(entry, trim)).filter((edit): edit is ZoomEdit => edit !== null).sort((a, b) => a.start - b.start)
+  const edits = raw.map((entry) => zoomEditFrom(entry, durationMs)).filter((edit): edit is ZoomEdit => edit !== null).sort((a, b) => a.start - b.start)
   const ids = new Set<string>()
   const kept: ZoomEdit[] = []
   for (const edit of edits) {

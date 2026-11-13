@@ -357,7 +357,8 @@ describe('openDraft', () => {
     ['misses a shot’s screenshot', { screenshots: [] }, 'The draft is damaged'],
     ['holds a screenshot that won’t decode', { screenshots: [{ key: 'image1', bytes: png(800, 600, UNDECODABLE) }] }, 'The draft is damaged'],
     ['holds a screenshot that decodes to another size than its header’s', { screenshots: [{ key: 'image1', bytes: png(800, 600, MISREPORTED) }] }, 'The draft is damaged'],
-    ['holds a broken track', { recordings: [{ key: 'take1', id: OPENED_TAKE, track: '{"version":1}' }] }, 'The draft is damaged']
+    ['holds a broken track', { recordings: [{ key: 'take1', id: OPENED_TAKE, track: '{"version":1}' }] }, 'The draft is damaged'],
+    ['holds a track hours longer than any take', { recordings: [{ key: 'take1', id: OPENED_TAKE, track: serializeTrack({ ...track, durationMs: 1e11 }) }] }, 'The draft is damaged']
   ])('leaves the canvas as it was, keeping no screenshot and asking nothing, when the draft %s', async (_, changes, title) => {
     const before = store.get()
     mocks.bridge.openDraft.mockResolvedValue(opened(changes))
@@ -416,6 +417,17 @@ describe('openDraft', () => {
     expect(await openDraft(null)).toBe(true)
     expect(decoded).toHaveLength(1)
     expect(getSource(liveShots()[1].doc.sourceId)?.bitmap).toBe(decoded[0])
+  })
+
+  it('reads no track that no shot shows, so a broken one there doesn’t stop the draft', async () => {
+    const unused = [
+      { key: 'take2', id: 'b5d3c6a1-3f0e-4c38-9a51-6f2b8e0d7c14', track: '{"version":1}' },
+      { key: 'take3', id: 'c0a4e2f9-8b17-4d6e-a3c5-1e9f7b2d4a60', track: '{' }
+    ]
+    mocks.bridge.openDraft.mockResolvedValue(opened({ recordings: [{ key: 'take1', id: OPENED_TAKE, track: serializeTrack(track) }, ...unused] }))
+    expect(await openDraft(null)).toBe(true)
+    expect(getRecording(OPENED_TAKE)).toMatchObject({ track })
+    for (const { id } of unused) expect(getRecording(id)).toBeNull()
   })
 
   it('asks about unsaved work only once the draft is read and decoded, just before replacing the canvas', async () => {

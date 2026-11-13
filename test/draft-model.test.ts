@@ -3,8 +3,17 @@ import { DEFAULT_DOC, type Doc, type Redaction } from '../src/renderer/src/app/d
 import { DEFAULT_HOUSE_STYLE, type HouseStyle } from '../src/renderer/src/app/house-style'
 import type { ShotRecord } from '../src/renderer/src/app/store'
 import { DRAFT_KEY } from '@shared/draft-key'
-import { buildDraftManifest, DRAFT_FORMAT, DRAFT_LIMITS, DRAFT_VERSION, DraftError, parseDraftManifest } from '../src/renderer/src/drafts/model'
-import { newBoxTime } from '../src/renderer/src/recording/blur-boxes'
+import {
+  buildDraftManifest,
+  DRAFT_FORMAT,
+  DRAFT_LIMITS,
+  DRAFT_TRACK_BOUNDS,
+  DRAFT_VERSION,
+  DraftError,
+  parseDraftManifest,
+  parseDraftTrack
+} from '../src/renderer/src/drafts/model'
+import { snapDownToFrame } from '../src/renderer/src/recording/blur-boxes'
 import { normalizePieces } from '../src/renderer/src/recording/pieces'
 import { CURSOR_SIZE_RANGE, DEFAULT_RECORDING, type RecordingDoc } from '../src/renderer/src/recording/settings'
 import { wholeTake, type Piece } from '../src/renderer/src/recording/timemap'
@@ -80,6 +89,33 @@ describe('serializeTrack', () => {
   it('writes track.json version 1', () => expect(JSON.parse(serializeTrack(track))).toMatchObject({ version: 1, kind: 'monitor', durationMs: 10_000 }))
 })
 
+describe('a draft’s track', () => {
+  const trackJson = (changes: Partial<RecordingTrack>) => serializeTrack({ ...track, ...changes })
+  const reasonOf = (json: string) => {
+    try {
+      parseDraftTrack(json)
+      return null
+    } catch (error) {
+      return error instanceof DraftError ? error.reason : `other: ${String(error)}`
+    }
+  }
+
+  it('reads a take’s track.json', () => expect(parseDraftTrack(serializeTrack(track))).toEqual(track))
+
+  it('calls a track that isn’t one damaged', () => {
+    for (const bad of ['', '{', '[]', '{"version":1}', trackJson({ fps: 0 }), trackJson({ width: 12.5 })]) expect(reasonOf(bad)).toBe('damaged')
+  })
+
+  it('takes a track right at each bound and calls one past a bound damaged', () => {
+    const { durationMs, side, fps } = DRAFT_TRACK_BOUNDS
+    expect([durationMs, side, fps]).toEqual([4 * 60 * 60 * 1000, 16_384, 240])
+    for (const atBound of [{ durationMs }, { width: side }, { height: side }, { fps }]) expect(reasonOf(trackJson(atBound))).toBeNull()
+    for (const pastBound of [{ durationMs: durationMs + 1 }, { durationMs: 1e11 }, { width: side + 1 }, { height: side + 1 }, { fps: fps + 1 }]) {
+      expect(reasonOf(trackJson(pastBound))).toBe('damaged')
+    }
+  })
+})
+
 describe('normalizePieces', () => {
   it('falls back to the whole take for anything invalid', () => {
     for (const bad of [undefined, null, 'x', 4, {}, [], [{ start: 'a', end: 2 }]]) expect(normalizePieces(bad, 5000)).toEqual(wholeTake(5000))
@@ -88,13 +124,13 @@ describe('normalizePieces', () => {
 })
 
 describe('normalizeZoomEdits', () => {
-  const trim = { start: 1000, end: 9000 }
+  const takeMs = 9000
   it('keeps null as automatic and turns non-arrays into automatic', () => {
-    expect(normalizeZoomEdits(null, trim)).toBeNull()
-    expect(normalizeZoomEdits('x', trim)).toBeNull()
-    expect(normalizeZoomEdits(undefined, trim)).toBeNull()
+    expect(normalizeZoomEdits(null, takeMs)).toBeNull()
+    expect(normalizeZoomEdits('x', takeMs)).toBeNull()
+    expect(normalizeZoomEdits(undefined, takeMs)).toBeNull()
   })
-  it('keeps valid edits in time order', () => expect(normalizeZoomEdits([zoom('b', 4000, 5000), zoom('a', 1500, 3000)], trim)).toEqual([zoom('a', 1500, 3000), zoom('b', 4000, 5000)]))
+  it('keeps valid edits in time order', () => expect(normalizeZoomEdits([zoom('b', 4000, 5000), zoom('a', 1500, 3000)], takeMs)).toEqual([zoom('a', 1500, 3000), zoom('b', 4000, 5000)]))
   it('drops what cannot be a zoom', () => {
     const edits = normalizeZoomEdits(
       [
@@ -104,20 +140,21 @@ describe('normalizeZoomEdits', () => {
         { id: '', start: 1500, end: 2500, depth: 2, aim: 'auto', focus: { x: 0, y: 0 } },
         zoom('short', 3000, 3000 + ZOOM_RULES.minHoldMs - 1),
         zoom('outside', 9500, 12_000),
+        zoom('mostly outside', 8500, 12_000),
         'junk',
         null
       ],
-      trim
+      takeMs
     )
     expect(edits).toEqual([])
   })
-  it('clamps depth and holds into the trim', () => {
-    const [low, high] = normalizeZoomEdits([zoom('low', 500, 2000, { depth: 0.1 }), zoom('high', 5000, 12_000, { depth: 9 })], trim)!
-    expect(low).toMatchObject({ start: 1000, end: 2000, depth: ZOOM_DEPTH_RANGE.min })
+  it('clamps depth and holds into the take', () => {
+    const [low, high] = normalizeZoomEdits([zoom('low', -500, 2000, { depth: 0.1 }), zoom('high', 5000, 12_000, { depth: 9 })], takeMs)!
+    expect(low).toMatchObject({ start: 0, end: 2000, depth: ZOOM_DEPTH_RANGE.min })
     expect(high).toMatchObject({ start: 5000, end: 9000, depth: ZOOM_DEPTH_RANGE.max })
   })
   it('drops the later of two overlapping zooms and repeated ids', () => {
-    const edits = normalizeZoomEdits([zoom('a', 2000, 4000), zoom('b', 3000, 5000), zoom('a', 6000, 7000), zoom('c', 4000, 5000)], trim)!
+    const edits = normalizeZoomEdits([zoom('a', 2000, 4000), zoom('b', 3000, 5000), zoom('a', 6000, 7000), zoom('c', 4000, 5000)], takeMs)!
     expect(edits.map((edit) => edit.id)).toEqual(['a', 'c'])
   })
 })
@@ -238,7 +275,7 @@ describe('draft manifest', () => {
     expect(parsedRecording({ crop: 'x' }).crop).toBeNull()
   })
 
-  it('clamps boxes to the video and settles their times on whole frames inside the trim', () => {
+  it('clamps boxes to the video and settles their times on whole frames inside the take', () => {
     const box = (id: unknown, rect: unknown, time: unknown) => ({ id, rect, time })
     const small = { x: 0, y: 0, w: 10, h: 10 }
     const doc = parsedRecording({
@@ -249,19 +286,38 @@ describe('draft manifest', () => {
         box('d', { x: 5000, y: 0, w: 10, h: 10 }, { start: 600, end: 900 }),
         box('e', small, { start: 8000, end: 1000 }),
         box('a', small, { start: 600, end: 900 }),
-        box(7, small, { start: 600, end: 900 })
+        box(7, small, { start: 600, end: 900 }),
+        box('before', small, { start: -500, end: 300 }),
+        box('after', small, { start: 9990, end: 12_000 })
       ]
     })
     const frameMs = 1000 / 60
-    const bounds = newBoxTime(0, editedRecording.trim, 60, 10_000)
     const onGrid = (ms: number) => Math.abs(ms / frameMs - Math.round(ms / frameMs)) < 1e-6
-    expect(doc.redactions.map((r) => r.id)).toEqual(['a'])
+    expect(doc.redactions.map((r) => r.id)).toEqual(['a', 'before', 'after'])
     expect(doc.redactions[0].rect).toEqual({ x: 0, y: 5, w: 1920, h: 40 })
-    const time = doc.redactions[0].time!
+    const [time, before, after] = doc.redactions.map((redaction) => redaction.time!)
     expect(onGrid(time.start) && onGrid(time.end)).toBe(true)
-    expect(time.start).toBeCloseTo(bounds.start, 6)
+    expect(time.start).toBeCloseTo(snapDownToFrame(100.5, 60), 6)
     expect(time.end).toBeGreaterThanOrEqual(2000.4)
     expect(time.end).toBeLessThan(2000.4 + frameMs)
+    expect(before).toEqual({ start: 0, end: 300 })
+    expect(after.start).toBeCloseTo(track.durationMs - frameMs, 6)
+    expect(after.end).toBe(track.durationMs)
+  })
+
+  it('brings back a box outside the trim and a zoom across the trim’s edge as they were', () => {
+    const outside: Redaction[] = [
+      { id: 'early', rect: { x: 10, y: 20, w: 300, h: 100 }, time: { start: 0, end: 1000 } },
+      { id: 'late', rect: { x: 10, y: 20, w: 300, h: 100 }, time: { start: 9500, end: 10_000 } }
+    ]
+    const acrossTheEnd = zoom('across', 8600, 9800)
+    const recording: RecordingDoc = { ...DEFAULT_RECORDING, trim: { start: 2000, end: 9000 }, pieces: wholeTake(10_000), zooms: [acrossTheEnd] }
+    const doc: Doc = { ...shots[2].doc, redactions: outside, recording }
+    const { manifest, keys } = buildDraftManifest([record('s', doc)], 's', style, '0.8.0', (r) => r.id)
+    const parsed = parseDraftManifest(manifest, new Map([[keys.take.get('take1')!, track]])).shots[0].doc
+    expect(parsed.redactions).toEqual(outside)
+    expect(parsed.recording!.zooms).toEqual([acrossTheEnd])
+    expect(parsed).toEqual({ ...doc, sourceId: keys.take.get('take1') })
   })
 
   it('reads screenshot boxes without times and clamps them to the decoded image', () => {
