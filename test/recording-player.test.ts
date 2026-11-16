@@ -85,3 +85,24 @@ describe('grabbing the frame on screen', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 })
+
+describe('seeking for a scrub', () => {
+  it('waits for the seek to land, or a second at most', async () => {
+    const player = new RecordingPlayer('cawmera-media://recording/take', 60)
+    const landing: { done?: boolean } = {}
+    void player.seekAndWait(1500).then(() => (landing.done = true))
+    expect(video.currentTime).toBe(1.5)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(landing.done).toBeUndefined()
+    video.dispatchEvent(new Event('seeked'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(landing.done).toBe(true)
+
+    const stuck: { done?: boolean } = {}
+    void player.seekAndWait(2500).then(() => (stuck.done = true))
+    await vi.advanceTimersByTimeAsync(999)
+    expect(stuck.done).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(stuck.done).toBe(true)
+  })
+})

@@ -92,6 +92,12 @@ export class RecordingPlayer {
     this.setVideoTime(clampToTrim(sourceMs, this.trim))
   }
 
+  /** Seeks, and resolves once the frame there is on screen, or once the seek is given up on as untilSeekSettles does. */
+  seekAndWait(sourceMs: number): Promise<void> {
+    this.seek(sourceMs)
+    return this.untilSeekSettles()
+  }
+
   private setVideoTime(sourceMs: number) {
     this.video.currentTime = sourceMs / MS_PER_SECOND
   }

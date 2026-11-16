@@ -99,6 +99,19 @@ export function timelineShows(s: Pick<AppState, 'viewport' | 'doc'>): boolean {
   return !isNarrow(s) && s.doc.recording !== null
 }
 
+const BAR_UNDER_TOOLBAR = { top: 56 }
+const BAR_ABOVE_TOOLBAR = { bottom: 58 }
+const BAR_ABOVE_TIMELINE = { bottom: 58 + TIMELINE_SPACE }
+
+/**
+ * The crop and selection bars float above the toolbar, which the timeline lifts when it shows; in the narrow layout they sit under
+ * it. Each place is one object, so a component can select it from the store.
+ */
+export function floatingBarPlace(s: Pick<AppState, 'viewport' | 'doc'>): { top: number } | { bottom: number } {
+  if (isNarrow(s)) return BAR_UNDER_TOOLBAR
+  return timelineShows(s) ? BAR_ABOVE_TIMELINE : BAR_ABOVE_TOOLBAR
+}
+
 /** The timeline edits the take only outside crop mode, where the canvas shows the frame the crop is drawn on. */
 export function timelineEditable(s: Pick<AppState, 'viewport' | 'doc' | 'mode'>): boolean {
   return timelineShows(s) && s.mode === 'compose'

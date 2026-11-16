@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { store, type AppState } from '../src/renderer/src/app/store'
 import { deleteAction, escapeAction } from '../src/renderer/src/app/selection-keys'
-import { TIMELINE_SPACE, timelineEditable, timelineShows, workspaceGeometry } from '../src/renderer/src/canvas/view'
+import { floatingBarPlace, TIMELINE_SPACE, timelineEditable, timelineShows, workspaceGeometry } from '../src/renderer/src/canvas/view'
 import { registerRecording } from '../src/renderer/src/recording/registry'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
@@ -35,6 +35,25 @@ describe('timeline space', () => {
     expect(timelineShows(narrowRecording)).toBe(false)
     const narrowScreenshot = workspaceGeometry(show(screenshotDoc, 700)).area.height
     expect(workspaceGeometry(narrowRecording).area.height).toBe(narrowScreenshot)
+  })
+})
+
+describe('the crop and selection bars', () => {
+  it('float above the toolbar, lifted over the timeline when it shows, crop mode included', () => {
+    expect(floatingBarPlace(show(screenshotDoc, 1200))).toEqual({ bottom: 58 })
+    expect(floatingBarPlace(show(recordingDoc, 1200))).toEqual({ bottom: 58 + TIMELINE_SPACE })
+    const cropping: AppState = { ...show(recordingDoc, 1200), mode: 'crop' }
+    expect(floatingBarPlace(cropping)).toEqual({ bottom: 58 + TIMELINE_SPACE })
+  })
+
+  it('sit under the toolbar in the narrow layout, where no timeline shows', () => {
+    expect(floatingBarPlace(show(recordingDoc, 700))).toEqual({ top: 56 })
+    expect(floatingBarPlace(show(screenshotDoc, 700))).toEqual({ top: 56 })
+  })
+
+  it('give the same place object each time, so the bars can select it from the store', () => {
+    const shown = show(recordingDoc, 1200)
+    expect(floatingBarPlace(shown)).toBe(floatingBarPlace({ ...shown }))
   })
 })
 
