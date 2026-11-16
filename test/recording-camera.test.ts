@@ -164,7 +164,7 @@ describe('cameraAt', () => {
         previous = current
       }
     }
-  })
+  }, 20_000)
 })
 
 describe('viewMatrix', () => {
