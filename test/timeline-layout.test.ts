@@ -6,6 +6,7 @@ import { floatingBarPlace, TIMELINE_SPACE, timelineEditable, timelineShows, work
 import { registerRecording } from '../src/renderer/src/recording/registry'
 import { DEFAULT_RECORDING } from '../src/renderer/src/recording/settings'
 import { wholeTake } from '../src/renderer/src/recording/timemap'
+import { timelineSurface } from '../src/renderer/src/timeline/layout'
 
 const recordingDoc = { ...DEFAULT_DOC, sourceId: 'rec', recording: { ...DEFAULT_RECORDING, trim: { start: 0, end: 1000 }, pieces: wholeTake(1000), zooms: null } }
 const screenshotDoc = { ...DEFAULT_DOC, sourceId: 'shot' }
@@ -88,5 +89,12 @@ describe('the timeline in crop mode', () => {
     expect(deleteAction({ ...selection, mode: 'crop' })).toBeNull()
     expect(deleteAction({ ...selection, timelineSelection: { kind: 'zoom', id: 'z' }, mode: 'crop' })).toBeNull()
     expect(escapeAction(selection)).toBe('clear-timeline')
+  })
+})
+
+describe('the timeline surface', () => {
+  it('never lets a drag select text, editable or not, and goes inert and dim while not editable', () => {
+    expect(timelineSurface(true).split(' ')).toEqual(['select-none'])
+    expect(timelineSurface(false).split(' ')).toEqual(['select-none', 'pointer-events-none', 'opacity-50'])
   })
 })

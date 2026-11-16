@@ -103,7 +103,7 @@ export function LightPad({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onKeyDown={onKeyDown}
-      className="relative w-full shrink-0 cursor-pointer touch-none overflow-hidden rounded-lg border border-(--tc-line) bg-(--tc-control) outline-none focus-visible:ring-2 focus-visible:ring-(--tc-accent)/60"
+      className="relative w-full shrink-0 cursor-pointer touch-none overflow-hidden rounded-lg border border-(--tc-line) bg-(--tc-control) outline-none select-none focus-visible:ring-2 focus-visible:ring-(--tc-accent)/60"
       style={{ height: HEIGHT }}
     >
       <svg width={width} height={HEIGHT} className="pointer-events-none absolute inset-0" aria-hidden>

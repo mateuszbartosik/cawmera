@@ -13,7 +13,7 @@ import { BlurRow } from './BlurRow'
 import { clickDots } from './click-dots'
 import { ClipRow } from './ClipRow'
 import { HeaderButton } from './HeaderButton'
-import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING } from './layout'
+import { BODY_PADDING, CLIP_HEIGHT, LABEL_WIDTH, RULER_HEIGHT, SIDE_PADDING, timelineSurface } from './layout'
 import { Playhead } from './Playhead'
 import { Ruler } from './Ruler'
 import { SpeedMenu } from './SpeedMenu'
@@ -112,7 +112,7 @@ function TimelinePanel() {
       data-testid="timeline"
       className={cn(
         'absolute flex flex-col rounded-xl border border-(--tc-line) bg-(--tc-panel) text-(--tc-fg) shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px] backdrop-saturate-150',
-        !editable && 'pointer-events-none opacity-50'
+        timelineSurface(editable)
       )}
       style={{ left: PANEL_GAP, right: PANEL_WIDTH + PANEL_GAP * 2, bottom: PANEL_BOTTOM, height: TIMELINE_SPACE - PANEL_BOTTOM }}
     >
