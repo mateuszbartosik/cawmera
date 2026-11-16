@@ -155,7 +155,7 @@ function TimelinePanel() {
       >
         <div className="grid" style={rowColumns}>
           <span />
-          <Ruler view={view} width={width} trim={trim} />
+          <Ruler view={view} width={width} trim={trim} duration={duration} />
         </div>
 
         <div className="grid" style={rowColumns}>
@@ -186,7 +186,7 @@ function TimelinePanel() {
         >
           <TrimHandle edge="start" trim={trim} duration={duration} view={view} width={width} />
           <TrimHandle edge="end" trim={trim} duration={duration} view={view} width={width} />
-          <Playhead time={time} trim={trim} view={view} width={width} />
+          <Playhead time={time} trim={trim} view={view} width={width} duration={duration} />
         </div>
       </div>
     </section>

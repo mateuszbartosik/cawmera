@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { store } from '../src/renderer/src/app/store'
-import { attachPlayer, currentPlayhead, scrubTo, setPlayhead } from '../src/renderer/src/recording/playback'
+import { attachPlayer, currentPlayhead, grabPlayheadFrame, scrubTo, setPlayhead } from '../src/renderer/src/recording/playback'
 import type { RecordingPlayer } from '../src/renderer/src/recording/player'
 
 const settle = async () => {
@@ -10,9 +10,9 @@ const settle = async () => {
 /**
  * Seeks as the real player does, but lands only when told: `land()` shows the frame the oldest seek asked for, as the canvas
  * would on `seeked`, then ends that seek's wait. `showsFrames: false` lands without showing a frame, like a player whose canvas
- * has gone.
+ * has gone, and `seekThrows` throws as setting the video's time to a non-finite one would.
  */
-function fakePlayer({ showsFrames = true } = {}) {
+function fakePlayer({ showsFrames = true, seekThrows = false } = {}) {
   const pending: { target: number; landed: () => void }[] = []
   const asked: number[] = []
   const player = {
@@ -23,7 +23,11 @@ function fakePlayer({ showsFrames = true } = {}) {
     },
     seekAndWait(target: number) {
       asked.push(target)
+      if (seekThrows) throw new TypeError('The provided double value is non-finite.')
       return new Promise<void>((landed) => pending.push({ target, landed }))
+    },
+    async grabFrame() {
+      return { shownAt: player.time } as unknown as ImageBitmap
     }
   }
   return {
@@ -126,5 +130,47 @@ describe('scrubbing', () => {
   it('moves the playhead and the store’s time together when there is no player', () => {
     scrubTo(250)
     expect([currentPlayhead(), storedTime()]).toEqual([250, 250])
+  })
+
+  it('lets frames move the playhead again after a seek throws, and reports the error', async () => {
+    const failed = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const fake = attached(fakePlayer({ seekThrows: true }))
+    scrubTo(100)
+    await settle()
+    expect(failed).toHaveBeenCalledWith('Scrubbing failed', expect.any(TypeError))
+    setPlayhead(140)
+    expect(currentPlayhead()).toBe(140)
+    scrubTo(200)
+    await settle()
+    expect(fake.asked).toEqual([100, 200])
+    failed.mockRestore()
+  })
+})
+
+describe('grabbing the frame at the playhead', () => {
+  const grabbing = () => {
+    const outcome: { frame?: ImageBitmap | null } = {}
+    void grabPlayheadFrame().then((frame) => (outcome.frame = frame))
+    return outcome
+  }
+
+  it('waits until the video has caught up with a scrub, so the frame is the one at the playhead', async () => {
+    const fake = attached(fakePlayer())
+    scrubTo(100)
+    scrubTo(300)
+    const grab = grabbing()
+    await fake.land()
+    expect(grab.frame).toBeUndefined()
+    await fake.land()
+    expect(grab.frame).toEqual({ shownAt: 300 })
+    expect(currentPlayhead()).toBe(300)
+  })
+
+  it('grabs at once when no scrub is ahead of the video', async () => {
+    const fake = attached(fakePlayer())
+    fake.player.time = 120
+    const grab = grabbing()
+    await settle()
+    expect(grab.frame).toEqual({ shownAt: 120 })
   })
 })

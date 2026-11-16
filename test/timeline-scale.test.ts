@@ -6,6 +6,7 @@ import {
   fitView,
   formatClock,
   formatRulerLabel,
+  playheadDrag,
   scrollView,
   tickStep,
   timeToX,
@@ -113,5 +114,68 @@ describe('timeline scale', () => {
   it('formats ruler labels as minutes and seconds', () => {
     expect(formatRulerLabel(5000)).toBe('0:05')
     expect(formatRulerLabel(60_000)).toBe('1:00')
+  })
+})
+
+describe('a playhead or ruler drag', () => {
+  const view = { start: 10_000, end: 20_000 }
+  const take = { start: 0, end: 60_000 }
+  const drag = (x: number, trim = take, from = view) => playheadDrag(x, from, 800, trim, 60_000)
+
+  it('puts the playhead under the pointer and leaves the view alone inside it, as a tap does', () => {
+    expect(drag(400)).toEqual({ time: 15_000, view })
+    expect(drag(400).view).toBe(view)
+    expect(drag(0).time).toBe(10_000)
+    expect(drag(800).time).toBe(20_000)
+  })
+
+  it('scrolls past the right edge by as far as the pointer went, keeping the playhead at that edge', () => {
+    const { time, view: shown } = drag(880)
+    expect(time).toBe(21_000)
+    expect(shown).toEqual({ start: 11_000, end: 21_000 })
+    expect(timeToX(time, shown, 800)).toBe(800)
+  })
+
+  it('scrolls past the left edge the same way', () => {
+    const { time, view: shown } = drag(-40)
+    expect(time).toBe(9500)
+    expect(shown).toEqual({ start: 9500, end: 19_500 })
+    expect(timeToX(time, shown, 800)).toBe(0)
+  })
+
+  it('scrolls back as the pointer comes back, and stops once it is inside again', () => {
+    expect(drag(840).view).toEqual({ start: 10_500, end: 20_500 })
+    expect(drag(801).view.end).toBeCloseTo(20_012.5, 9)
+    expect(drag(799).view).toBe(view)
+  })
+
+  it('stops scrolling where the trim ends', () => {
+    const trim = { start: 0, end: 20_500 }
+    expect(drag(900, trim)).toEqual({ time: 20_500, view: { start: 10_500, end: 20_500 } })
+    expect(drag(5000, trim)).toEqual({ time: 20_500, view: { start: 10_500, end: 20_500 } })
+    expect(drag(-500, { start: 9000, end: 60_000 })).toEqual({ time: 9000, view: { start: 9000, end: 19_000 } })
+  })
+
+  it('doesn’t scroll when the trim ends inside the view', () => {
+    const { time, view: shown } = drag(900, { start: 0, end: 18_000 })
+    expect(time).toBe(18_000)
+    expect(shown).toBe(view)
+  })
+
+  it('stays inside the take when the view already shows its start or end', () => {
+    const atStart = { start: 0, end: 10_000 }
+    expect(drag(-300, take, atStart)).toEqual({ time: 0, view: atStart })
+    const atEnd = { start: 50_000, end: 60_000 }
+    expect(drag(1200, take, atEnd)).toEqual({ time: 60_000, view: atEnd })
+  })
+
+  it('brings a playhead the trim holds outside the view to the nearest edge', () => {
+    const { time, view: shown } = drag(400, { start: 30_000, end: 60_000 })
+    expect(time).toBe(30_000)
+    expect(shown).toEqual({ start: 20_000, end: 30_000 })
+  })
+
+  it('has nowhere to move without a width', () => {
+    expect(playheadDrag(400, view, 0, take, 60_000)).toEqual({ time: 10_000, view })
   })
 })

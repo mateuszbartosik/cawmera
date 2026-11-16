@@ -20,6 +20,8 @@ interface Scrub {
 }
 
 let scrub: Scrub | null = null
+/** Settles once the video has caught up with the scrub in `scrub`, or once that scrub is dropped. */
+let catchingUp: Promise<void> = Promise.resolve()
 
 function movePlayhead(sourceMs: number) {
   playhead = sourceMs
@@ -87,22 +89,27 @@ export function scrubTo(sourceMs: number) {
     return
   }
   scrub = { player: activePlayer, target: sourceMs }
-  void followScrub(scrub)
+  catchingUp = followScrub(scrub).catch((error: unknown) => console.error('Scrubbing failed', error))
 }
 
 async function followScrub(current: Scrub) {
   let landedAt: number
-  do {
-    landedAt = current.target
-    await current.player.seekAndWait(landedAt)
-    if (scrub !== current) return
-  } while (current.target !== landedAt)
-  scrub = null
+  try {
+    do {
+      landedAt = current.target
+      await current.player.seekAndWait(landedAt)
+      if (scrub !== current) return
+    } while (current.target !== landedAt)
+  } finally {
+    if (scrub === current) scrub = null
+  }
   setPlayhead(current.player.time)
 }
 
 export const currentPlayhead = () => playhead
 
+/** The frame at the playhead: a scrub still ahead of the video is waited for first. */
 export async function grabPlayheadFrame(): Promise<ImageBitmap | null> {
+  while (scrub) await catchingUp
   return (await activePlayer?.grabFrame()) ?? null
 }

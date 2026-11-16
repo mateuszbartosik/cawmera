@@ -1,33 +1,24 @@
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import { scrubTo } from '../recording/playback'
-import { clamp } from '../render/geometry'
 import type { Trim } from '../recording/trim'
-import { formatRulerLabel, tickStep, timeToX, xToTime, type TimelineView } from './scale'
+import { usePlayheadDrag } from './playhead-drag'
+import { formatRulerLabel, tickStep, timeToX, type TimelineView } from './scale'
 
-interface RulerProps { view: TimelineView; width: number; trim: Trim }
+interface RulerProps { view: TimelineView; width: number; trim: Trim; duration: number }
 
-export function Ruler({ view, width, trim }: RulerProps) {
+export function Ruler({ view, width, trim, duration }: RulerProps) {
+  const drag = usePlayheadDrag(view, trim, duration, (ruler) => ruler)
   const step = tickStep(view, width)
   const firstTick = Math.ceil(view.start / step) * step
   const ticks = Array.from({ length: Math.max(0, Math.floor((view.end - firstTick) / step) + 1) }, (_, i) => firstTick + i * step)
-
-  const scrubToPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    scrubTo(clamp(xToTime(event.clientX - bounds.left, view, bounds.width), trim.start, trim.end))
-  }
 
   return (
     <div
       data-testid="timeline-ruler"
       className="relative cursor-pointer touch-none overflow-hidden border-b border-(--tc-divider)"
       onPointerDown={(event) => {
-        if (event.button !== 0) return
-        event.currentTarget.setPointerCapture(event.pointerId)
-        scrubToPointer(event)
+        if (event.button === 0) drag.begin(event)
       }}
-      onPointerMove={(event) => {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) scrubToPointer(event)
-      }}
+      onPointerMove={drag.move}
+      onLostPointerCapture={drag.end}
     >
       {ticks.map((tick) => (
         <span key={tick} className="pointer-events-none absolute bottom-0 h-1.5 border-l border-(--tc-line)" style={{ left: timeToX(tick, view, width) }}>

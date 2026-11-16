@@ -47,6 +47,23 @@ export function scrollView(view: TimelineView, deltaMs: number, durationMs: numb
   return viewAt(view.start + deltaMs, lengthOf(view), durationMs)
 }
 
+/** The time kept inside the view, so rounding never leaves the playhead a hair past its edge. */
+const keptIn = (view: TimelineView, time: number) => ({ time: Math.min(Math.max(time, view.start), view.end), view })
+
+/**
+ * Where a drag on the ruler or the playhead that began in view `from` puts the playhead, and the view that keeps it in sight.
+ * Inside the view the time is the one under the pointer; past an edge it runs on at the same scale, and the view scrolls so the
+ * playhead stays at that edge. The time stays inside the trim, so the view never scrolls past it.
+ */
+export function playheadDrag(x: number, from: TimelineView, width: number, trim: Trim, durationMs: number): { time: number; view: TimelineView } {
+  const length = lengthOf(from)
+  const pointed = width > 0 ? from.start + (x / width) * length : from.start
+  const time = Math.min(Math.max(pointed, trim.start), trim.end)
+  if (time > from.end) return keptIn(viewAt(time - length, length, durationMs), time)
+  if (time < from.start) return keptIn(viewAt(time, length, durationMs), time)
+  return { time, view: from }
+}
+
 /** The window as stored: the whole take when none was set, and always inside the take. */
 export function fitView(view: TimelineView | null, durationMs: number): TimelineView {
   return view ? viewAt(view.start, Math.min(lengthOf(view), durationMs), durationMs) : wholeView(durationMs)
