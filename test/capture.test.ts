@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import type { CaptureDelay } from '../src/renderer/src/app/store'
 import type { CaptureSource } from '../src/shared/types'
 
 const mocks = vi.hoisted(() => {
@@ -39,8 +40,9 @@ const { captureDelayNote, captureDialogTitle, screenshotButtonLabel } = await im
 const source: CaptureSource = { id: 'window:42:0', name: 'Notes', kind: 'window', thumbnail: '', appIcon: null, scaleFactor: 1, displayId: null }
 
 describe('the capture delay', () => {
-  it('offers 3, 5 and 10 s', () => {
+  it('offers 3, 5 and 10 s, which no caller can change', () => {
     expect(CAPTURE_DELAYS).toEqual([3, 5, 10])
+    expectTypeOf(CAPTURE_DELAYS).toEqualTypeOf<readonly CaptureDelay[]>()
   })
 
   it('loads a stored 0, or anything it doesn’t know, as 3 s, which is also where it starts', () => {

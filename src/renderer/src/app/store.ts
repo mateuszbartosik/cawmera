@@ -18,7 +18,7 @@ export const hasBox = (selection: Selection, box: BoxRef) => selection.some((can
 export type TimelineSelection = { kind: 'range'; start: number; end: number } | { kind: 'zoom'; id: string } | null
 export type Theme = 'dark' | 'light'
 export type CaptureDelay = 3 | 5 | 10
-export const CAPTURE_DELAYS: CaptureDelay[] = [3, 5, 10]
+export const CAPTURE_DELAYS: readonly CaptureDelay[] = [3, 5, 10]
 export type CaptureMode = 'screenshot' | 'recording'
 
 /** Every capture counts down, 3 s at the shortest: a stored 0, or anything unknown, loads as 3. */

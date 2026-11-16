@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { RecordingEntry } from '../src/renderer/src/recording/registry'
 
 const mocks = vi.hoisted(() => ({
@@ -67,7 +67,7 @@ describe('the word lists', () => {
   it('hold about a hundred short, plain, lowercase words each, none twice and none in two lists', () => {
     const { adjectives, animals, fruits } = SHOT_NAME_WORDS
     for (const words of [adjectives, animals, fruits]) {
-      expect(words.length).toBeGreaterThanOrEqual(100)
+      expect(words.length).toBeGreaterThanOrEqual(90)
       expect(words.length).toBeLessThanOrEqual(110)
       expect(new Set(words).size).toBe(words.length)
       for (const word of words) expect(word).toMatch(/^[a-z]{1,10}$/)
@@ -79,6 +79,21 @@ describe('the word lists', () => {
     expect(SHOT_NAME_WORDS.adjectives).toContain('diabolical')
     expect(SHOT_NAME_WORDS.animals).toContain('elephant')
     expect(SHOT_NAME_WORDS.fruits).toContain('strawberry')
+  })
+
+  it('leave out words that read badly side by side, and fruits few people know', () => {
+    const { adjectives, animals, fruits } = SHOT_NAME_WORDS
+    const words = [...adjectives, ...animals, ...fruits]
+    const leftOut = ['gorilla', 'gibbon', 'silky', 'velvety']
+    const littleKnown = ['salak', 'ackee', 'kiwano', 'pepino', 'quandong', 'lucuma', 'marula', 'mamey', 'haskap', 'pitanga', 'jostaberry', 'jabuticaba']
+    for (const word of [...leftOut, ...littleKnown]) expect(words).not.toContain(word)
+    expect(animals).toContain('raccoon')
+  })
+
+  it('can’t be changed by a caller', () => {
+    expectTypeOf(SHOT_NAME_WORDS.adjectives).toEqualTypeOf<readonly string[]>()
+    expectTypeOf(SHOT_NAME_WORDS.animals).toEqualTypeOf<readonly string[]>()
+    expectTypeOf(SHOT_NAME_WORDS.fruits).toEqualTypeOf<readonly string[]>()
   })
 })
 
