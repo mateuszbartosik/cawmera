@@ -29,7 +29,7 @@ import {
   shuffleLook,
   startCapture
 } from '../app/actions'
-import { getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
+import { CAPTURE_DELAYS, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
 import { exportPercent, exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
 import type { RecordingFps } from '../recording/settings'
@@ -38,6 +38,7 @@ import { computeLayout } from '../render/layout'
 import { useDragSession, type DragSession } from '../timeline/drag-session'
 import { ActionsRow, Button, ColorField, Field, IconButton, NumberField, percent, Section, Segmented, Slider, Switch, TextField } from '../ui/controls'
 import { BackdropField } from './BackdropField'
+import { screenshotButtonLabel } from './capture-labels'
 import { EdgePicker } from './EdgePicker'
 import { FileDrop } from './FileDrop'
 import { LightPad } from './LightPad'
@@ -46,12 +47,7 @@ import { SizeField } from './SizeField'
 import { useSection } from './useSection'
 import { isNarrow, PANEL_GAP, PANEL_WIDTH, SHEET_SHARE } from '../canvas/view'
 
-const DELAYS: { value: CaptureDelay; label: string }[] = [
-  { value: 0, label: 'Off' },
-  { value: 3, label: '3 s' },
-  { value: 5, label: '5 s' },
-  { value: 10, label: '10 s' }
-]
+const DELAYS: { value: CaptureDelay; label: string }[] = CAPTURE_DELAYS.map((value) => ({ value, label: `${value} s` }))
 const DENSITY_OPTIONS: { value: Density; label: string }[] = [
   { value: 1, label: '1×' },
   { value: 1.25, label: '1.25×' },
@@ -113,12 +109,10 @@ function ScreenshotSection() {
   const section = useSection('screenshot')
   const support = useRecordingSupport()
   const busy = capture.phase !== 'idle'
-  const captureLabel =
-    capture.phase === 'countdown' ? `In ${capture.remaining}…` : capture.phase === 'grabbing' ? 'Capturing…' : capture.phase === 'picking' ? 'Picking…' : 'Capture'
   const canRecord = !source && isDesktop
 
   return (
-    <Section title="Screenshot" testId="section-screenshot" {...section} onReset={source ? resetScreenshotSection : undefined}>
+    <Section title="Capture" testId="section-screenshot" {...section} onReset={source ? resetScreenshotSection : undefined}>
       <FileDrop source={source} dragOver={dragOver} onBrowse={openFilePicker} onClear={clearSource} />
       <ActionsRow>
         <Button
@@ -129,7 +123,7 @@ function ScreenshotSection() {
           className={source || canRecord ? undefined : 'col-span-2'}
           hint={isDesktop ? 'Pick a window or a screen (Ctrl+Shift+2)' : 'Pick the tab or window in the browser dialog'}
         >
-          {captureLabel}
+          {screenshotButtonLabel(capture)}
         </Button>
         {canRecord && (
           <Button
@@ -156,7 +150,7 @@ function ScreenshotSection() {
       </ActionsRow>
       <Segmented
         label="Capture delay"
-        help="Waits before capturing, so a menu or dropdown can be open in the shot. A countdown shows on the screen. Recordings always count down at least 3 s."
+        help="Waits before capturing, so a menu or dropdown can be open in the shot. A countdown shows on the screen."
         value={delay}
         options={DELAYS}
         onChange={(value) => store.set({ delay: value })}

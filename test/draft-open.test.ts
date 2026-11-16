@@ -92,7 +92,7 @@ vi.stubGlobal(
 const { applyOpenedDraft, draftAmong, openDraft, openDraftAmong, openDraftFile, saveDraft, saveDraftUnlessBusy, saveOrDiscardUnsaved } = await import(
   '../src/renderer/src/drafts/actions'
 )
-const { deleteShots, openFilePicker } = await import('../src/renderer/src/app/actions')
+const { deleteShots, loadFiles, openFilePicker } = await import('../src/renderer/src/app/actions')
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { DEFAULT_HOUSE_STYLE, serializeHouseStyle } = await import('../src/renderer/src/app/house-style')
 const { FIT_ALL, getSource, liveShots, registerSource, store, unsavedCount, updateDoc } = await import('../src/renderer/src/app/store')
@@ -638,5 +638,19 @@ describe('dropped and picked drafts', () => {
     await vi.waitFor(() => expect(mocks.bridge.openDraft).toHaveBeenCalledWith('C:\\Drafts\\Launch.cawmera'))
     await vi.waitFor(() => expect(toast.info).toHaveBeenCalledWith('Only the draft was opened, not the other files'))
     expect(getSource('previous')).toBeNull()
+  })
+
+  it('says it can’t open a file that is neither an image nor a draft, and that it opens both', async () => {
+    openFilePicker()
+    const input = createdOf('input').at(-1)!
+    input.files = [new File([''], 'Launch.cawmera.txt', { type: 'text/plain' })]
+    ;(input.onchange as () => void)()
+    await vi.waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Cawmera can’t open this file', { description: 'It opens images and Cawmera drafts (.cawmera).' })
+    )
+    expect(mocks.bridge.openDraft).not.toHaveBeenCalled()
+
+    await loadFiles([new File([''], 'notes.txt'), new File([''], 'clip.mov', { type: 'video/quicktime' })], 'drop')
+    expect(toast.error).toHaveBeenCalledWith('Cawmera can’t open these files', { description: 'It opens images and Cawmera drafts (.cawmera).' })
   })
 })

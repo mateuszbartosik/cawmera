@@ -32,7 +32,7 @@ Get the Windows zip from the [latest release](https://github.com/mateuszbartosik
 
 ## Use
 
-1. **Add a screenshot**: paste, drop, open, or **Capture** a window or screen, with an optional delay. Or open a [draft](#drafts) to pick up where you left off.
+1. **Add a screenshot**: paste, drop, open, or click **Screenshot** in **Capture** and pick a window or screen. A countdown runs first: 3 seconds, or 5 or 10 if you set **Capture delay**. Or open a [draft](#drafts) to pick up where you left off.
 2. **Size**: pick a preset in Export, like **Article (OG)** for 1200 × 630, or type a width and height. The screenshot keeps its scale, so a smaller image shows less of it.
 3. **Crop** (`C`) to choose what shows, and pick the **Edge** it comes in from.
 4. **Captured at** should match your screen's scaling. A smaller **UI zoom** shows more of the screenshot.
@@ -45,7 +45,7 @@ Shots sit side by side on the canvas. `Shift`- or `Ctrl`-click them, or drag a b
 
 ## Record
 
-**Record** a window or screen and Cawmera turns it into an MP4 with the same framing as a screenshot. A countdown of at least 3 seconds comes first, longer if your capture delay is. Cawmera zooms in on your clicks, redraws the cursor smoothly, adds click effects and motion blur, and trims the quiet ends. Check the result in the preview, edit it on the timeline, then export.
+**Record** a window or screen and Cawmera turns it into an MP4 with the same framing as a screenshot. The capture delay's countdown comes first, 3 seconds unless you set it longer. Cawmera zooms in on your clicks, redraws the cursor smoothly, adds click effects and motion blur, and trims the quiet ends. Check the result in the preview, edit it on the timeline, then export.
 
 Press `Ctrl+Shift+2` to stop, or click Cawmera on the taskbar. Clicking it during the countdown cancels the recording. If you close Cawmera while recording, it stops and keeps the take. Recordings live in your temp folder and are cleared when Cawmera quits, so export what you want to keep, or save a draft. Export is MP4 without sound.
 
@@ -77,7 +77,7 @@ The background, light, frame and scale come from a house style, and so does the 
 | --- | --- |
 | Open images or a draft | `Ctrl+O` |
 | Save draft | `Ctrl+Shift+D` |
-| Capture | `Ctrl+Shift+2` |
+| Screenshot | `Ctrl+Shift+2` |
 | Stop recording | `Ctrl+Shift+2` or click Cawmera on the taskbar |
 | New shot / next / previous | `Ctrl+N` / `Ctrl+PageDown` / `Ctrl+PageUp` |
 | Crop on / off | `C` or double-click the shot (`Enter` or `Esc` to finish) |

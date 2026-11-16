@@ -7,7 +7,7 @@ import { addShot, backdropReady, emptyDoc, liveShots, markSnapshotSaved, store, 
 import { revealActive } from '../canvas/view'
 import { bridge, saveVideo } from '../platform/bridge'
 import { getRecording, loadPoster, registerRecording } from './registry'
-import { recordingCountdownSeconds, runStartFlow } from './start-flow'
+import { runStartFlow } from './start-flow'
 import { RECORDING_SIZE, recordingDocFor, type RecordingDoc } from './settings'
 import { unavailableReason } from './support'
 import { parseTrack, stopClickOf, withoutStopClick } from './track'
@@ -51,8 +51,7 @@ let recordSourceRunning = false
 export async function recordSource(source: CaptureSource) {
   if (!bridge || recordSourceRunning) return
   const target = bridge
-  const { delay, doc, style } = store.get()
-  const seconds = recordingCountdownSeconds(delay)
+  const { delay: seconds, doc, style } = store.get()
   recordSourceRunning = true
   resetCancellation()
   recordingName = source.name

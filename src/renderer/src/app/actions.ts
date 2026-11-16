@@ -130,13 +130,17 @@ export async function loadBlob(blob: Blob, name: string, origin: SourceEntry['or
 
 const isStyleFile = (file: File) => file.type === 'application/json' || /\.json$/i.test(file.name)
 
+const WHAT_CAWMERA_OPENS = isDesktop ? 'It opens images and Cawmera drafts (.cawmera).' : 'It opens images.'
+
 /** Several files at once (drop or browse): one shot each, in order. A dropped .json is a house style. */
 export async function loadFiles(files: File[], origin: SourceEntry['origin']) {
   const style = files.find(isStyleFile)
   if (style) await importHouseStyleFile(style)
   const images = files.filter((file) => file.type.startsWith('image/'))
   if (images.length === 0) {
-    if (files.length && !style) toast.error('Those files are not images')
+    if (files.length && !style) {
+      toast.error(files.length === 1 ? 'Cawmera can’t open this file' : 'Cawmera can’t open these files', { description: WHAT_CAWMERA_OPENS })
+    }
     return
   }
   for (const file of images) await loadBlob(file, file.name, origin)
@@ -301,20 +305,17 @@ export async function captureSource(source: CaptureSource) {
       audio: false
     })
     await bridge.hideWindow()
-    if (delay > 0) {
-      countdownShown = true
-      const { doc, style } = store.get()
-      await bridge.showCountdown({ displayId: source.displayId, seconds: delay, color: doc.lightColor ?? style.glow })
-      const finished = await countdown(delay, (remaining) => {
-        bridge?.tickCountdown(remaining)
-        bridge?.setProgress((delay - remaining + 1) / (delay + 1))
-      })
-      // The countdown has to be off the screen before the frame is read.
-      await bridge.hideCountdown()
-      countdownShown = false
-      if (!finished) return
-    }
-    if (captureCancelled) return
+    countdownShown = true
+    const { doc, style } = store.get()
+    await bridge.showCountdown({ displayId: source.displayId, seconds: delay, color: doc.lightColor ?? style.glow })
+    const finished = await countdown(delay, (remaining) => {
+      bridge?.tickCountdown(remaining)
+      bridge?.setProgress((delay - remaining + 1) / (delay + 1))
+    })
+    // The countdown has to be off the screen before the frame is read.
+    await bridge.hideCountdown()
+    countdownShown = false
+    if (!finished || captureCancelled) return
     const bitmap = await grabFrame(stream)
     await loadBitmap(bitmap, { name: source.name, origin: 'capture', density: snapDensity(source.scaleFactor) })
   } catch (error) {

@@ -14,7 +14,7 @@ vi.stubGlobal('document', {
 })
 
 const { draftAmong, openDraft, openDraftAmong } = await import('../src/renderer/src/drafts/actions')
-const { openFilePicker } = await import('../src/renderer/src/app/actions')
+const { loadFiles, openFilePicker } = await import('../src/renderer/src/app/actions')
 const { isDesktop } = await import('../src/renderer/src/platform/bridge')
 
 describe('the browser build', () => {
@@ -30,6 +30,12 @@ describe('the browser build', () => {
     expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif,image/bmp')
     input.files = [draft]
     ;(input.onchange as () => void)()
-    expect(toast.error).toHaveBeenCalledWith('Those files are not images')
+    expect(toast.error).toHaveBeenCalledWith('Cawmera can’t open this file', { description: 'It opens images.' })
+  })
+
+  it('says it can’t open several files, and that it opens images', async () => {
+    vi.mocked(toast.error).mockClear()
+    await loadFiles([new File([''], 'notes.png.txt', { type: 'text/plain' }), new File([''], 'Launch.cawmera')], 'drop')
+    expect(toast.error).toHaveBeenCalledWith('Cawmera can’t open these files', { description: 'It opens images.' })
   })
 })

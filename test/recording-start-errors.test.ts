@@ -27,7 +27,7 @@ const source: CaptureSource = { id: 'window:42:0', name: 'Notes', kind: 'window'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  store.set({ delay: 0, capture: { phase: 'idle', remaining: 0 } })
+  store.set({ delay: 3, capture: { phase: 'idle', remaining: 0 } })
 })
 
 describe('a recording that cannot start', () => {
@@ -46,10 +46,13 @@ describe('a recording that cannot start', () => {
     expect(toast.error).toHaveBeenCalledWith('Recording isn’t available', { description: 'Windows can’t capture the screen on this PC' })
   })
 
-  it('counts down 3 s even with the capture delay off', async () => {
+  it('counts down the capture delay', async () => {
     bridge.startRecording.mockResolvedValue({ code: 'target-gone', message: 'gone' })
     await recordSource(source)
-    expect(bridge.showCountdown).toHaveBeenCalledWith(expect.objectContaining({ seconds: 3 }))
+    expect(bridge.showCountdown).toHaveBeenLastCalledWith(expect.objectContaining({ seconds: 3 }))
+    store.set({ delay: 10 })
+    await recordSource(source)
+    expect(bridge.showCountdown).toHaveBeenLastCalledWith(expect.objectContaining({ seconds: 10 }))
   })
 
   it('names the Windows page and switch word for word when access is denied', async () => {

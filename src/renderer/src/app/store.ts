@@ -16,8 +16,12 @@ export const hasBox = (selection: Selection, box: BoxRef) => selection.some((can
 /** What the recording timeline has selected: a stretch of the take, or a zoom (source ms). */
 export type TimelineSelection = { kind: 'range'; start: number; end: number } | { kind: 'zoom'; id: string } | null
 export type Theme = 'dark' | 'light'
-export type CaptureDelay = 0 | 3 | 5 | 10
+export type CaptureDelay = 3 | 5 | 10
+export const CAPTURE_DELAYS: CaptureDelay[] = [3, 5, 10]
 export type CaptureMode = 'screenshot' | 'recording'
+
+/** Every capture counts down, 3 s at the shortest: a stored 0, or anything unknown, loads as 3. */
+export const storedDelay = (value: unknown): CaptureDelay => (CAPTURE_DELAYS.includes(value as CaptureDelay) ? (value as CaptureDelay) : 3)
 
 /** Playback of the active recording shot: the playhead is in source time (ms). */
 export interface Playback {
@@ -166,7 +170,7 @@ function loadPrefs(): Prefs {
   const raw = (readJson(PREFS_KEY) ?? {}) as Partial<Prefs>
   return {
     theme: raw.theme === 'light' ? 'light' : 'dark',
-    delay: ([0, 3, 5, 10] as const).includes(raw.delay as CaptureDelay) ? (raw.delay as CaptureDelay) : 0,
+    delay: storedDelay(raw.delay),
     format: raw.format === 'png' ? 'png' : 'webp',
     collapsed: raw.collapsed && typeof raw.collapsed === 'object' ? raw.collapsed : {}
   }

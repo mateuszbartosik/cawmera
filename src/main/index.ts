@@ -88,7 +88,7 @@ function buildMenu() {
       submenu: [
         item('New shot', 'CmdOrCtrl+N', 'new-shot'),
         item('Open image…', 'CmdOrCtrl+O', 'open'),
-        item('Capture…', 'CmdOrCtrl+Shift+2', 'capture'),
+        item('Screenshot…', 'CmdOrCtrl+Shift+2', 'capture'),
         { type: 'separator' },
         { label: 'Open draft…', click: () => send('open-draft') },
         item('Save draft…', 'CmdOrCtrl+Shift+D', 'save-draft'),
