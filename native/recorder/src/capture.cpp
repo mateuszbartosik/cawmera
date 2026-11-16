@@ -7,6 +7,9 @@
 
 #include <winrt/Windows.Foundation.Metadata.h>
 
+#include <optional>
+
+#include "access.h"
 #include "clock.h"
 #include "failure.h"
 
@@ -14,6 +17,8 @@ namespace {
 
 using winrt::Windows::Foundation::Metadata::ApiInformation;
 using winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool;
+using winrt::Windows::Graphics::Capture::GraphicsCaptureAccess;
+using winrt::Windows::Graphics::Capture::GraphicsCaptureAccessKind;
 using winrt::Windows::Graphics::Capture::GraphicsCaptureItem;
 using winrt::Windows::Graphics::Capture::GraphicsCaptureSession;
 using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
@@ -67,6 +72,15 @@ winrt::com_ptr<ID3D11Texture2D> textureLike(ID3D11Device* device, const D3D11_TE
     throwIfFailed(device->CreateTexture2D(&desc, nullptr, texture.put()), FailureCode::internal,
                   "Keeping the latest frame");
     return texture;
+}
+
+std::optional<CaptureAccessStatus> programmaticCaptureAccess() {
+    try {
+        if (!ApiInformation::IsTypePresent(L"Windows.Graphics.Capture.GraphicsCaptureAccess")) return std::nullopt;
+        return GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Programmatic).get();
+    } catch (const winrt::hresult_error&) {
+        return std::nullopt;
+    }
 }
 
 }  // namespace
@@ -139,6 +153,10 @@ void MonitorCapture::requireSupport() {
     if (!ApiInformation::IsPropertyPresent(L"Windows.Graphics.Capture.GraphicsCaptureSession",
                                            L"IsCursorCaptureEnabled"))
         throw Failure(FailureCode::unsupported, "Recording needs Windows 10 version 2004 or later");
+}
+
+void MonitorCapture::requireAccess() {
+    requireCaptureAllowed(programmaticCaptureAccess());
 }
 
 MonitorCapture::MonitorCapture(ID3D11Device* device, HMONITOR monitor, FrameHandler onFrame,

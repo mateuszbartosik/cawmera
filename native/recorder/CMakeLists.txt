@@ -10,6 +10,7 @@ add_compile_options(/W4 /EHsc /utf-8)
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
 add_library(recorder_core STATIC
+    src/access.cpp
     src/args.cpp
     src/failure.cpp
     src/geometry.cpp

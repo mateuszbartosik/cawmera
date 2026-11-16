@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include "access.h"
 #include "args.h"
 #include "failure.h"
 #include "geometry.h"
@@ -255,6 +256,25 @@ void describesFailuresInUtf8() {
     }
 }
 
+bool refusesToRecord(std::optional<CaptureAccessStatus> status) {
+    try {
+        requireCaptureAllowed(status);
+        return false;
+    } catch (const Failure& failure) {
+        return failure.code() == FailureCode::accessDenied;
+    }
+}
+
+void refusesToRecordOnlyWhenWindowsSaysNo() {
+    CHECK(refusesToRecord(CaptureAccessStatus::DeniedByUser));
+    CHECK(refusesToRecord(CaptureAccessStatus::DeniedBySystem));
+    CHECK(!refusesToRecord(CaptureAccessStatus::Allowed));
+    CHECK(!refusesToRecord(CaptureAccessStatus::UserPromptRequired));
+    CHECK(!refusesToRecord(CaptureAccessStatus::NotDeclaredByApp));
+    CHECK(!refusesToRecord(static_cast<CaptureAccessStatus>(99)));
+    CHECK(!refusesToRecord(std::nullopt));
+}
+
 void writesTheTrackWithAReleasedClick() {
     TrackWriter track;
     track.addCursor(0, 812.5, 400.25, track.shapeIndex("arrow"));
@@ -340,6 +360,7 @@ int main() {
     readsCommandLines();
     namesFailureCodesLikeTheProtocol();
     describesFailuresInUtf8();
+    refusesToRecordOnlyWhenWindowsSaysNo();
     writesTheTrackWithAReleasedClick();
     writesTheHeaderHiddenCursorAndHeldButton();
     writesNullForNumbersThatAreNotFinite();

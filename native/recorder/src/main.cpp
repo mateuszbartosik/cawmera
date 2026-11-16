@@ -172,6 +172,7 @@ Recorded recordVideo(const Args& args, RecordingTarget& target, TrackWriter& tra
 void record(const Args& args) {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     MonitorCapture::requireSupport();
+    MonitorCapture::requireAccess();
     RecordingTarget target(args);
     std::filesystem::create_directories(args.outDir);
     TrackWriter track;

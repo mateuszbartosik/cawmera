@@ -23,6 +23,7 @@ public:
     using ClosedHandler = std::function<void()>;
 
     static void requireSupport();
+    static void requireAccess();
 
     MonitorCapture(ID3D11Device* device, HMONITOR monitor, FrameHandler onFrame, FailureHandler onFailure,
                    ClosedHandler onClosed);

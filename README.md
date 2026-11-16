@@ -108,7 +108,7 @@ npm run dist:win     # Windows .exe and zip in release/
 npm run build:web    # the same UI as a single HTML file
 ```
 
-`npm run build:recorder` needs Visual Studio Build Tools with the C++ workload and Windows SDK 10.0.19041 or newer. `npm run dist:win` runs it first.
+`npm run build:recorder` needs Visual Studio Build Tools with the C++ workload and Windows SDK 10.0.20348 or newer. `npm run dist:win` runs it first.
 
 ## License
 
