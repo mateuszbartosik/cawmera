@@ -120,62 +120,97 @@ describe('timeline scale', () => {
 describe('a playhead or ruler drag', () => {
   const view = { start: 10_000, end: 20_000 }
   const take = { start: 0, end: 60_000 }
-  const drag = (x: number, trim = take, from = view) => playheadDrag(x, from, 800, trim, 60_000)
+  /** A move from `lastX` to `x` on an 800 px track, 12.5 ms per px in `shown`. */
+  const move = (lastX: number, x: number, shown = view, trim = take) => playheadDrag(x, lastX, shown, 800, trim, 60_000)
 
-  it('puts the playhead under the pointer and leaves the view alone inside it, as a tap does', () => {
-    expect(drag(400)).toEqual({ time: 15_000, view })
-    expect(drag(400).view).toBe(view)
-    expect(drag(0).time).toBe(10_000)
-    expect(drag(800).time).toBe(20_000)
+  it('puts the playhead under the pointer, and a press on a visible spot never scrolls', () => {
+    expect(move(400, 400)).toEqual({ time: 15_000, view })
+    expect(move(400, 400).view).toBe(view)
+    expect(move(0, 0).time).toBe(10_000)
+    expect(move(800, 800).time).toBe(20_000)
   })
 
-  it('scrolls past the right edge by as far as the pointer went, keeping the playhead at that edge', () => {
-    const { time, view: shown } = drag(880)
-    expect(time).toBe(21_000)
+  it('doesn’t scroll for a press just past an edge, only for a move further past it', () => {
+    expect(move(-3, -3)).toEqual({ time: 10_000, view })
+    expect(move(805, 805)).toEqual({ time: 20_000, view })
+  })
+
+  it('scrolls past the right edge by the part of a move that lies past it, keeping the playhead at that edge', () => {
+    const { time, view: shown } = move(790, 880)
     expect(shown).toEqual({ start: 11_000, end: 21_000 })
+    expect(time).toBe(21_000)
     expect(timeToX(time, shown, 800)).toBe(800)
   })
 
   it('scrolls past the left edge the same way', () => {
-    const { time, view: shown } = drag(-40)
-    expect(time).toBe(9500)
+    const { time, view: shown } = move(10, -40)
     expect(shown).toEqual({ start: 9500, end: 19_500 })
+    expect(time).toBe(9500)
     expect(timeToX(time, shown, 800)).toBe(0)
   })
 
-  it('scrolls back as the pointer comes back, and stops once it is inside again', () => {
-    expect(drag(840).view).toEqual({ start: 10_500, end: 20_500 })
-    expect(drag(801).view.end).toBeCloseTo(20_012.5, 9)
-    expect(drag(799).view).toBe(view)
+  it('leaves the view where it is when the pointer comes back, past the edge or inside', () => {
+    const scrolled = { start: 11_000, end: 21_000 }
+    expect(move(880, 850, scrolled)).toEqual({ time: 21_000, view: scrolled })
+    expect(move(850, 700, scrolled).view).toBe(scrolled)
+    expect(move(850, 700, scrolled).time).toBe(19_750)
+  })
+
+  it('reaches further with every push past the edge, and not at all while the pointer is held still', () => {
+    const first = move(790, 880).view
+    const back = move(880, 700, first).view
+    const second = move(700, 880, back).view
+    expect([first, back, second]).toEqual([
+      { start: 11_000, end: 21_000 },
+      { start: 11_000, end: 21_000 },
+      { start: 12_000, end: 22_000 }
+    ])
+    expect(move(880, 880, second).view).toBe(second)
+  })
+
+  it('maps every move through the view as it is now, so a wheel scroll made mid-drag stays', () => {
+    const wheeled = { start: 30_000, end: 40_000 }
+    expect(move(380, 400, wheeled)).toEqual({ time: 35_000, view: wheeled })
   })
 
   it('stops scrolling where the trim ends', () => {
-    const trim = { start: 0, end: 20_500 }
-    expect(drag(900, trim)).toEqual({ time: 20_500, view: { start: 10_500, end: 20_500 } })
-    expect(drag(5000, trim)).toEqual({ time: 20_500, view: { start: 10_500, end: 20_500 } })
-    expect(drag(-500, { start: 9000, end: 60_000 })).toEqual({ time: 9000, view: { start: 9000, end: 19_000 } })
+    const trim = { start: 9000, end: 20_500 }
+    const right = move(790, 900, view, trim)
+    expect(right).toEqual({ time: 20_500, view: { start: 10_500, end: 20_500 } })
+    expect(move(900, 1000, right.view, trim)).toEqual({ time: 20_500, view: right.view })
+    expect(move(10, -500, view, trim)).toEqual({ time: 9000, view: { start: 9000, end: 19_000 } })
   })
 
   it('doesn’t scroll when the trim ends inside the view', () => {
-    const { time, view: shown } = drag(900, { start: 0, end: 18_000 })
+    const { time, view: shown } = move(790, 900, view, { start: 0, end: 18_000 })
     expect(time).toBe(18_000)
     expect(shown).toBe(view)
   })
 
-  it('stays inside the take when the view already shows its start or end', () => {
+  it('stays inside the take at either end', () => {
     const atStart = { start: 0, end: 10_000 }
-    expect(drag(-300, take, atStart)).toEqual({ time: 0, view: atStart })
+    expect(move(10, -300, atStart)).toEqual({ time: 0, view: atStart })
     const atEnd = { start: 50_000, end: 60_000 }
-    expect(drag(1200, take, atEnd)).toEqual({ time: 60_000, view: atEnd })
+    expect(move(790, 1200, atEnd)).toEqual({ time: 60_000, view: atEnd })
   })
 
-  it('brings a playhead the trim holds outside the view to the nearest edge', () => {
-    const { time, view: shown } = drag(400, { start: 30_000, end: 60_000 })
-    expect(time).toBe(30_000)
-    expect(shown).toEqual({ start: 20_000, end: 30_000 })
+  it('brings the trim’s edge into view when the pointer is over a time the trim leaves out', () => {
+    expect(move(400, 400, view, { start: 30_000, end: 60_000 })).toEqual({ time: 30_000, view: { start: 20_000, end: 30_000 } })
+  })
+
+  it('keeps a fractional trim start inside both the trim and the view it scrolls to', () => {
+    const from = { start: 49855.374396699925, end: 53951.37429669993 }
+    const trim = { start: 121463.23520301476, end: 1234568.5552834491 }
+    const durationMs = 1234568.5552834491
+    const { time, view: shown } = playheadDrag(600, 600, from, 1213, trim, durationMs)
+    expect(time).toBe(trim.start)
+    expect(shown.start).toBeLessThanOrEqual(time)
+    expect(shown.end).toBeGreaterThanOrEqual(time)
+    expect(timeToX(time, shown, 1213)).toBeLessThanOrEqual(1213)
+    expect(timeToX(time, fitView(shown, durationMs), 1213)).toBeLessThanOrEqual(1213.5)
   })
 
   it('has nowhere to move without a width', () => {
-    expect(playheadDrag(400, view, 0, take, 60_000)).toEqual({ time: 10_000, view })
+    expect(playheadDrag(400, 400, view, 0, take, 60_000)).toEqual({ time: 10_000, view })
   })
 })

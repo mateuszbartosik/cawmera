@@ -47,21 +47,33 @@ export function scrollView(view: TimelineView, deltaMs: number, durationMs: numb
   return viewAt(view.start + deltaMs, lengthOf(view), durationMs)
 }
 
-/** The time kept inside the view, so rounding never leaves the playhead a hair past its edge. */
-const keptIn = (view: TimelineView, time: number) => ({ time: Math.min(Math.max(time, view.start), view.end), view })
+/** The view, widened by the rounding of its edges where that left `time` a hair outside it. */
+const holding = (view: TimelineView, time: number): TimelineView =>
+  time < view.start || time > view.end ? { start: Math.min(view.start, time), end: Math.max(view.end, time) } : view
+
+/** How much further past an edge a move from `lastX` to `x` went, in px: positive past the right edge, negative past the left. */
+function furtherPastEdge(x: number, lastX: number, width: number): number {
+  if (x > width) return Math.max(0, x - Math.max(lastX, width))
+  if (x < 0) return Math.min(0, x - Math.min(lastX, 0))
+  return 0
+}
 
 /**
- * Where a drag on the ruler or the playhead that began in view `from` puts the playhead, and the view that keeps it in sight.
- * Inside the view the time is the one under the pointer; past an edge it runs on at the same scale, and the view scrolls so the
- * playhead stays at that edge. The time stays inside the trim, so the view never scrolls past it.
+ * Where one move of a drag on the ruler or the playhead, from `lastX` to `x`, puts the playhead, and the view that keeps it in
+ * sight. The time is the one under the pointer in the view as it is now, held at the edge while the pointer is past it. Only the
+ * part of a move that goes further past an edge scrolls, by as far as it went and never past the trim: coming back leaves the view
+ * where it is, and every push reaches further. The time stays inside the trim, and in sight.
  */
-export function playheadDrag(x: number, from: TimelineView, width: number, trim: Trim, durationMs: number): { time: number; view: TimelineView } {
-  const length = lengthOf(from)
-  const pointed = width > 0 ? from.start + (x / width) * length : from.start
+export function playheadDrag(x: number, lastX: number, view: TimelineView, width: number, trim: Trim, durationMs: number): { time: number; view: TimelineView } {
+  const length = lengthOf(view)
+  const msPerPx = width > 0 ? length / width : 0
+  const further = furtherPastEdge(x, lastX, width) * msPerPx
+  const scroll = further > 0 ? Math.min(further, Math.max(0, trim.end - view.end)) : Math.max(further, Math.min(0, trim.start - view.start))
+  const scrolled = scroll === 0 ? view : viewAt(view.start + scroll, length, durationMs)
+  const pointed = Math.min(Math.max(scrolled.start + x * msPerPx, scrolled.start), scrolled.end)
   const time = Math.min(Math.max(pointed, trim.start), trim.end)
-  if (time > from.end) return keptIn(viewAt(time - length, length, durationMs), time)
-  if (time < from.start) return keptIn(viewAt(time, length, durationMs), time)
-  return { time, view: from }
+  const shown = time > scrolled.end ? viewAt(time - length, length, durationMs) : time < scrolled.start ? viewAt(time, length, durationMs) : scrolled
+  return { time, view: holding(shown, time) }
 }
 
 /** The window as stored: the whole take when none was set, and always inside the take. */

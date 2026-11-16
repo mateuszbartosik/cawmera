@@ -1,7 +1,7 @@
 import type { Trim } from '../recording/trim'
 import { clamp } from '../render/geometry'
 import { RULER_HEIGHT } from './layout'
-import { usePlayheadDrag } from './playhead-drag'
+import { playheadLineX, usePlayheadDrag } from './playhead-drag'
 import { timeToX, type TimelineView } from './scale'
 
 /** The grab area reaches this far either side of the line, and down the ruler only: below it, the rows take every press. */
@@ -12,8 +12,9 @@ interface PlayheadProps { time: number; trim: Trim; view: TimelineView; width: n
 
 export function Playhead({ time, trim, view, width, duration }: PlayheadProps) {
   const drag = usePlayheadDrag(view, trim, duration, (grab) => grab.parentElement!.parentElement!)
-  const x = timeToX(clamp(time, trim.start, trim.end), view, width)
-  if (x < 0 || x > width) return null
+  const shownTime = clamp(time, trim.start, trim.end)
+  const x = playheadLineX(timeToX(shownTime, view, width), width, drag.held)
+  if (x === null) return null
 
   return (
     <div className="pointer-events-none absolute inset-y-0 w-px bg-(--tc-accent)" style={{ left: x }} data-testid="timeline-playhead">
@@ -24,7 +25,7 @@ export function Playhead({ time, trim, view, width, duration }: PlayheadProps) {
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.stopPropagation()
-          drag.begin(event)
+          drag.begin(event, shownTime)
         }}
         onPointerMove={drag.move}
         onLostPointerCapture={drag.end}
