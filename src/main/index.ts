@@ -10,13 +10,13 @@ import {
   nativeTheme,
   screen,
   session,
-  shell,
-  type MenuItemConstructorOptions
+  shell
 } from 'electron'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import type { CaptureSource, CountdownRequest, DiscardAnswer, DiscardPurpose, ImageFormat, MenuCommand } from '../shared/types'
+import { nativeMenuTemplate } from './app-menu'
 import { registerDrafts } from './drafts'
 import { registerMediaProtocol, registerMediaScheme } from './media-protocol'
 import { connectDirectly, disableProxyResolution } from './no-network'
@@ -66,73 +66,15 @@ async function writePrefs(prefs: Prefs) {
 }
 
 // ---------------------------------------------------------------------------
-// Menu. Shortcuts are handled by the renderer (so they also work in the browser build);
-// the menu only shows them and forwards clicks.
+// Menu. Only macOS has a native one; Windows and Linux draw theirs in the renderer.
 
 function send(command: MenuCommand) {
   win?.webContents.send('menu-command', command)
 }
 
 function buildMenu() {
-  const isMac = process.platform === 'darwin'
-  const item = (label: string, accelerator: string, command: MenuCommand): MenuItemConstructorOptions => ({
-    label,
-    accelerator,
-    registerAccelerator: false,
-    click: () => send(command)
-  })
-  const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' as const }] : []),
-    {
-      label: 'File',
-      submenu: [
-        item('New shot', 'CmdOrCtrl+N', 'new-shot'),
-        item('Open image…', 'CmdOrCtrl+O', 'open'),
-        item('Screenshot…', 'CmdOrCtrl+Shift+2', 'capture'),
-        { type: 'separator' },
-        { label: 'Open draft…', click: () => send('open-draft') },
-        item('Save draft…', 'CmdOrCtrl+Shift+D', 'save-draft'),
-        { type: 'separator' },
-        item('Copy image', 'CmdOrCtrl+Shift+C', 'copy'),
-        item('Export…', 'CmdOrCtrl+S', 'export'),
-        item('Export all…', 'CmdOrCtrl+Shift+S', 'export-all'),
-        { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' }
-      ]
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        item('Undo', 'CmdOrCtrl+Z', 'undo'),
-        item('Redo', 'CmdOrCtrl+Shift+Z', 'redo'),
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' }
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        item('Zoom to fit all', 'Shift+1', 'fit'),
-        item('Zoom to shot', 'Shift+2', 'fit-shot'),
-        item('Zoom to 100%', 'CmdOrCtrl+0', 'zoom-100'),
-        item('Zoom in', 'CmdOrCtrl+=', 'zoom-in'),
-        item('Zoom out', 'CmdOrCtrl+-', 'zoom-out'),
-        { type: 'separator' },
-        item('Previous shot', 'CmdOrCtrl+PageUp', 'previous-shot'),
-        item('Next shot', 'CmdOrCtrl+PageDown', 'next-shot'),
-        { type: 'separator' },
-        item('Light / dark', 'CmdOrCtrl+Shift+L', 'toggle-theme'),
-        item('House style', 'CmdOrCtrl+Alt+H', 'toggle-house-style'),
-        { type: 'separator' },
-        { role: 'toggleDevTools' }
-      ]
-    },
-    { role: 'help', submenu: [{ label: 'About Cawmera', click: () => send('about') }] }
-  ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  const template = nativeMenuTemplate(process.platform, send)
+  Menu.setApplicationMenu(template ? Menu.buildFromTemplate(template) : null)
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +362,10 @@ function registerIpc() {
     })
     return DISCARD_ANSWERS[response] ?? 'keep'
   })
+
+  ipcMain.on('app:quit', () => app.quit())
+
+  ipcMain.on('window:toggle-dev-tools', () => win?.webContents.toggleDevTools())
 
   ipcMain.on('window:close', () => {
     clearCloseFallback()

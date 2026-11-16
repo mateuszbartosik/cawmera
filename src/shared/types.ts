@@ -50,6 +50,9 @@ export type MenuCommand =
   | 'toggle-theme'
   | 'toggle-house-style'
   | 'about'
+  | 'record'
+  | 'quit'
+  | 'toggle-dev-tools'
 
 export type RecordingUnavailableReason = 'platform' | 'windows-version' | 'helper-missing'
 
@@ -145,4 +148,7 @@ export interface CawmeraBridge {
   /** Native "unsaved shots" dialog: save a draft first, discard the work, or keep working. */
   confirmDiscard(unsavedCount: number, purpose: DiscardPurpose): Promise<DiscardAnswer>
   closeWindow(): void
+  /** Quits the app the usual way, so the close and unsaved-work check runs. */
+  quit(): void
+  toggleDevTools(): void
 }

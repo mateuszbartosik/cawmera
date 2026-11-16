@@ -9,7 +9,7 @@ import { openDraft, openDraftAmong, saveDraftUnlessBusy, saveOrDiscardUnsaved } 
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge, isDesktop } from '../platform/bridge'
-import { exportRecording, finishRecording, recordingFailed } from '../recording/actions'
+import { exportRecording, finishRecording, recordingFailed, startRecordingPicker } from '../recording/actions'
 import { Timeline } from '../timeline/Timeline'
 import { Toolbar } from '../toolbar/Toolbar'
 import {
@@ -77,6 +77,12 @@ function runCommand(command: MenuCommand) {
       return store.set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' }))
     case 'toggle-house-style':
       return store.set((s) => ({ houseStyleOpen: !s.houseStyleOpen }))
+    case 'record':
+      return startRecordingPicker()
+    case 'quit':
+      return bridge?.quit()
+    case 'toggle-dev-tools':
+      return bridge?.toggleDevTools()
     case 'about':
       void (bridge?.getVersion() ?? Promise.resolve('web')).then((version) =>
         toast('Cawmera', { description: `Version ${version}. Puts a screenshot into a frame.` })

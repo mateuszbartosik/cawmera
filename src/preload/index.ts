@@ -56,7 +56,9 @@ const bridge: CawmeraBridge = {
   },
   onCloseRequest: (listener) => subscribe('close-request', listener),
   confirmDiscard: (unsavedCount, purpose) => ipcRenderer.invoke('window:confirm-discard', unsavedCount, purpose),
-  closeWindow: () => ipcRenderer.send('window:close')
+  closeWindow: () => ipcRenderer.send('window:close'),
+  quit: () => ipcRenderer.send('app:quit'),
+  toggleDevTools: () => ipcRenderer.send('window:toggle-dev-tools')
 }
 
 contextBridge.exposeInMainWorld('cawmera', bridge)
