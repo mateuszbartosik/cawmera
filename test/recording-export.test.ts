@@ -25,7 +25,7 @@ describe('export frame times', () => {
 
 describe('video file names', () => {
   it('names exports .mp4', () => {
-    expect(exportFileName('Support contract.mp4', 'mp4')).toBe('support-contract.mp4')
+    expect(exportFileName('Support contract.mp4', 'mp4', 'brave-otter-fig')).toBe('support-contract.mp4')
   })
 
   it('still strips image extensions', () => {

@@ -110,8 +110,10 @@ const zooms = (count: number): ZoomEdit[] =>
   Array.from({ length: count }, (_, i) => ({ id: `zoom-${i}`, start: i * 4, end: i * 4 + 2, depth: 2, aim: 'manual', focus: { x: 0, y: 0 } }))
 const splitInto = (count: number): Piece[] => Array.from({ length: count }, (_, i) => ({ start: (i * 4000) / count, end: ((i + 1) * 4000) / count, rate: 1, cut: false }))
 
+const NAMES = ['brave-otter-fig', 'calm-owl-date', 'quick-fox-lime', 'merry-lynx-plum']
+
 function setCanvas(docs: Doc[], active = 0) {
-  const shots: ShotRecord[] = docs.map((doc, index) => ({ id: `shot-${index}`, doc, past: [], future: [], savedDoc: null, draftDoc: null }))
+  const shots: ShotRecord[] = docs.map((doc, index) => ({ id: `shot-${index}`, defaultName: NAMES[index], doc, past: [], future: [], savedDoc: null, draftDoc: null }))
   const { id, doc } = shots[active]
   store.set({ shots, activeId: id, doc, past: [], future: [], savedDoc: null, draftDoc: null, selection: [], shotSelection: [], timelineSelection: null })
 }
@@ -126,7 +128,7 @@ beforeEach(() => {
 
 describe('saved state', () => {
   it('counts a shot saved in a draft as saved until it changes', () => {
-    const shot: ShotRecord = { id: 'shot', doc: screenshot, past: [], future: [], savedDoc: null, draftDoc: null }
+    const shot: ShotRecord = { id: 'shot', defaultName: 'brave-otter-fig', doc: screenshot, past: [], future: [], savedDoc: null, draftDoc: null }
     const record = { ...shot, savedDoc: null, draftDoc: shot.doc }
     expect(isUnsaved(record)).toBe(false)
     expect(isUnsaved({ ...record, doc: { ...record.doc, angle: 10 } })).toBe(true)
@@ -146,9 +148,16 @@ describe('saveDraft', () => {
       ['screenshot', 'image1']
     ])
     expect(manifest.shots[2].name).toBe('Billing')
+    expect(manifest.shots.map((shot: { defaultName: string }) => shot.defaultName)).toEqual(NAMES)
     expect(files.screenshots.map(({ key, bytes }) => [key, text(bytes)])).toEqual([['image1', 'image/png of image-a drawn at 0, 0, 800 × 600 on 800 × 600']])
     expect(files.recordings).toEqual([{ key: 'take1', id: 'take-1', track: serializeTrack(track) }])
     expect(suggestedName).toBe('billing-costs.cawmera')
+  })
+
+  it('suggests the active shot’s name when it has no file name', async () => {
+    setCanvas([empty, screenshot, recording, screenshot], 1)
+    await saveDraft()
+    expect(handedOver()[1]).toBe('calm-owl-date.cawmera')
   })
 
   it('files a screenshot and a take that share an id under keys of their own kind', async () => {

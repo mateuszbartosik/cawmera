@@ -25,7 +25,7 @@ type SaveResult = { path: string } | { error: string } | null
 const withExtension = (path: string) => (extname(path).toLowerCase() === EXTENSION ? path : `${path}${EXTENSION}`)
 
 const fileNameFor = (suggestedName: unknown) =>
-  withExtension(typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : 'whats-new-draft')
+  withExtension(typeof suggestedName === 'string' && suggestedName.trim() ? basename(suggestedName.trim()) : 'cawmera-draft')
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 

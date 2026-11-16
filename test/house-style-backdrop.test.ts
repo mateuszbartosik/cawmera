@@ -131,7 +131,7 @@ describe('a house style’s background image', () => {
   })
 
   it('is dropped from the style of an opened draft when it’s too large', async () => {
-    const shot = { id: 'opened', doc: DEFAULT_DOC, past: [], future: [], savedDoc: null, draftDoc: null }
+    const shot = { id: 'opened', defaultName: 'brave-otter-fig', doc: DEFAULT_DOC, past: [], future: [], savedDoc: null, draftDoc: null }
     replaceCanvas([shot], 0, { ...brand, backgroundImage: pngUrl(16_000, 9000) })
     await backdropReady()
     expect(store.get().style).toEqual(withoutImage(brand))

@@ -400,9 +400,9 @@ describe('naming and house style', () => {
     expect(slugify('Café Überblick')).toBe('cafe-uberblick')
     expect(slugify('login-page-enterprise-sso.png')).toBe('login-page-enterprise-sso')
     expect(slugify('alerts.webp')).toBe('alerts')
-    expect(exportFileName('')).toBe('whats-new-shot.webp')
-    expect(exportFileName('', 'png', 'whats-new-shot-3')).toBe('whats-new-shot-3.png')
-    expect(exportFileName('Edit Storage', 'webp')).toBe('edit-storage.webp')
+    expect(exportFileName('', 'png', 'brave-otter-fig')).toBe('brave-otter-fig.png')
+    expect(exportFileName('Edit Storage', 'webp', 'brave-otter-fig')).toBe('edit-storage.webp')
+    expect(exportFileName('Launch', 'mp4', 'brave-otter-fig')).toBe('launch.mp4')
   })
 
   it('rejects broken values in an imported house style', () => {

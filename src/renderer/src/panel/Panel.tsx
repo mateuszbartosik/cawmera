@@ -1,5 +1,5 @@
 import { ArrowCounterClockwise, Camera, Copy, Crop, Plus, Record, Shuffle, Stack, UploadSimple } from '@phosphor-icons/react'
-import { EDGE_NAMES, FORMAT_LABEL, REDACT_LABEL, shotFallbackName, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
+import { EDGE_NAMES, FORMAT_LABEL, REDACT_LABEL, type Density, type Doc, type ExportFormat, type Fill, type RedactStyle, type UiZoom } from '../app/doc'
 import type { HouseStyle } from '../app/house-style'
 import {
   addRedaction,
@@ -29,7 +29,7 @@ import {
   shuffleLook,
   startCapture
 } from '../app/actions'
-import { CAPTURE_DELAYS, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
+import { activeShotName, CAPTURE_DELAYS, getSource, store, updateDoc, useApp, type CaptureDelay } from '../app/store'
 import { isDesktop } from '../platform/bridge'
 import { exportPercent, exportRecording, setRecording, startRecordingPicker } from '../recording/actions'
 import type { RecordingFps } from '../recording/settings'
@@ -384,9 +384,8 @@ function ExportSection() {
   const fileName = useApp((s) => s.doc.fileName)
   const format = useApp((s) => s.format)
   const fps = useApp((s) => s.doc.recording?.fps)
-  const index = useApp((s) => s.shots.findIndex((record) => record.id === s.activeId))
+  const placeholder = useApp(activeShotName)
   const section = useSection('export')
-  const fallback = shotFallbackName(index)
   return (
     <Section title="Export" testId="section-export" {...section}>
       <SizeField size={size} onChange={setSize} />
@@ -394,7 +393,7 @@ function ExportSection() {
         label="File name"
         help="Name it after the page and the feature, like billing-cost-breakdown."
         value={fileName}
-        placeholder={fallback}
+        placeholder={placeholder}
         suffix={fps === undefined ? `.${format}` : '.mp4'}
         testId="file-name"
         onChange={(value) => setFileName(value)}

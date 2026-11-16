@@ -8,7 +8,6 @@ import {
   normalizeAngle,
   randomAngle,
   snapDensity,
-  shotFallbackName,
   slugify,
   type Density,
   type Doc,
@@ -23,6 +22,7 @@ import { evenSize } from './size'
 import { DEFAULT_HOUSE_STYLE, houseStyleImported, loadHouseStyle, serializeHouseStyle } from './house-style'
 import { shuffledLook } from './shuffle'
 import {
+  activeShotName,
   addShot,
   backdropReady,
   canvasGeneration,
@@ -234,9 +234,9 @@ export function deletePickedShots() {
   deleteShots(store.get().shotSelection)
 }
 
-/** File name a shot exports under (empty names get a numbered default). */
-export function shotFileName(record: ShotRecord, index: number) {
-  return exportFileName(record.doc.fileName, store.get().format, shotFallbackName(index))
+/** The file a shot exports under: its file name, or its own random name while that's empty. */
+export function shotFileName(record: ShotRecord) {
+  return exportFileName(record.doc.fileName, record.doc.recording ? 'mp4' : store.get().format, record.defaultName)
 }
 
 // ---------------------------------------------------------------------------
@@ -382,8 +382,7 @@ export async function exportImage() {
     return
   }
   leaveCrop()
-  const index = liveShots().findIndex((record) => record.id === activeId)
-  const name = exportFileName(doc.fileName, format, shotFallbackName(index))
+  const name = exportFileName(doc.fileName, format, activeShotName())
   try {
     const saved = await saveImage(await renderImage(scene, format), name, format)
     if (!saved) return
@@ -399,16 +398,14 @@ export async function exportAll() {
   const { format } = store.get()
   leaveCrop()
   const shots = liveShots()
-    .map((record, index) => ({ record, index, scene: record.doc.recording ? null : sceneFor(record.doc) }))
+    .map((record) => ({ record, scene: record.doc.recording ? null : sceneFor(record.doc) }))
     .filter((item) => item.scene)
   if (shots.length === 0) {
     toast('Add a screenshot first', { description: 'Paste, drop, browse or capture one.' })
     return
   }
   try {
-    const images = await Promise.all(
-      shots.map(async ({ record, index, scene }) => ({ name: shotFileName(record, index), blob: await renderImage(scene!, format) }))
-    )
+    const images = await Promise.all(shots.map(async ({ record, scene }) => ({ name: shotFileName(record), blob: await renderImage(scene!, format) })))
     const saved = await saveImages(images)
     if (!saved) return
     markSaved(shots.map(({ record }) => record.id))

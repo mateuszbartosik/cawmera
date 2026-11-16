@@ -13,6 +13,7 @@ import {
   type Spotlight
 } from '../app/doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from '../app/house-style'
+import { isShotName } from '../app/shot-names'
 import { clampSide, evenSize } from '../app/size'
 import { DRAFT_KEY } from '@shared/draft-key'
 import { getSource, type ShotRecord, type SourceEntry } from '../app/store'
@@ -46,10 +47,12 @@ export class DraftError extends Error {
   }
 }
 
-export type DraftShot =
+/** `defaultName` is the shot's random name, or null when the draft has none Cawmera would make. */
+export type DraftShot = { defaultName: string | null } & (
   | { kind: 'empty'; doc: Doc }
   | { kind: 'screenshot'; key: string; doc: Doc; source: { name: string; origin: SourceEntry['origin']; detected: Density } }
   | { kind: 'recording'; key: string; doc: Doc; name: string }
+)
 
 /** `doc.sourceId` holds the key. */
 export interface DraftContents {
@@ -242,7 +245,8 @@ function keyOf(value: unknown): string {
 
 function shotFrom(value: unknown, tracks: DraftTracks, sizes: Map<string, Size>, kindsByKey: Map<string, string>): DraftShot {
   const raw = fieldsOf(value)
-  if (raw.kind === 'empty') return { kind: 'empty', doc: docFrom(raw.doc, { key: null, bounds: null, track: null }) }
+  const defaultName = isShotName(raw.defaultName) ? raw.defaultName : null
+  if (raw.kind === 'empty') return { kind: 'empty', defaultName, doc: docFrom(raw.doc, { key: null, bounds: null, track: null }) }
   if (raw.kind !== 'screenshot' && raw.kind !== 'recording') throw new DraftError('damaged')
   const key = keyOf(raw.key)
   if ((kindsByKey.get(key) ?? raw.kind) !== raw.kind) throw new DraftError('damaged')
@@ -251,13 +255,19 @@ function shotFrom(value: unknown, tracks: DraftTracks, sizes: Map<string, Size>,
     const track = tracks.get(key)
     if (!track) throw new DraftError('damaged')
     const doc = docFrom(raw.doc, { key, bounds: { width: track.width, height: track.height }, track })
-    return { kind: 'recording', key, doc, name: text(raw.name, '') }
+    return { kind: 'recording', key, defaultName, doc, name: text(raw.name, '') }
   }
   const bounds = sizes.get(key)
   if (!bounds) throw new DraftError('damaged')
   const source = fieldsOf(raw.source)
   const doc = docFrom(raw.doc, { key, bounds, track: null })
-  return { kind: 'screenshot', key, doc, source: { name: text(source.name, ''), origin: oneOf(ORIGINS, source.origin, 'file'), detected: snapDensity(Number(source.detected)) } }
+  return {
+    kind: 'screenshot',
+    key,
+    defaultName,
+    doc,
+    source: { name: text(source.name, ''), origin: oneOf(ORIGINS, source.origin, 'file'), detected: snapDensity(Number(source.detected)) }
+  }
 }
 
 /** A take's track.json as parseTrack reads it, within the bounds a draft allows. */
@@ -326,17 +336,18 @@ function keyFor(keysByKind: Record<KeyKind, Map<string, string>>, kind: KeyKind,
 }
 
 function shotEntry(record: ShotRecord, keys: Record<KeyKind, Map<string, string>>, nameOf: (record: ShotRecord) => string): object {
-  const { doc } = record
-  if (doc.sourceId === null) return { kind: 'empty', doc }
+  const { doc, defaultName } = record
+  if (doc.sourceId === null) return { kind: 'empty', defaultName, doc }
   if (doc.recording) {
     const key = keyFor(keys, 'take', doc.sourceId)
-    return { kind: 'recording', key, name: nameOf(record), doc: { ...doc, sourceId: key } }
+    return { kind: 'recording', key, defaultName, name: nameOf(record), doc: { ...doc, sourceId: key } }
   }
   const key = keyFor(keys, 'image', doc.sourceId)
   const source = getSource(doc.sourceId)
   return {
     kind: 'screenshot',
     key,
+    defaultName,
     source: { name: source?.name ?? nameOf(record), origin: source?.origin ?? 'file', detected: source?.detected ?? doc.capturedAt },
     doc: { ...doc, sourceId: key }
   }

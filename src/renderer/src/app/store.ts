@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { decodeBackdrop } from './backdrop'
 import { DEFAULT_DOC, randomAngle, type Density, type Doc, type ExportFormat } from './doc'
 import { DEFAULT_HOUSE_STYLE, loadHouseStyle, serializeHouseStyle, type HouseStyle } from './house-style'
+import { uniqueShotName } from './shot-names'
 import { releaseRecordingsExcept } from '../recording/registry'
 import { isAutomaticZoomId } from '../recording/zoom-edits'
 import type { TimelineView } from '../timeline/scale'
@@ -59,6 +60,8 @@ export interface SourceEntry {
 /** One image being prepared. Each keeps its own undo history. */
 export interface ShotRecord {
   id: string
+  /** A random name, kept for good: the shot exports under it while its file name is empty. */
+  defaultName: string
   doc: Doc
   past: Doc[]
   future: Doc[]
@@ -190,8 +193,17 @@ export function emptyDoc(previous?: Doc): Doc {
   }
 }
 
+/** Every name drawn on this canvas, deleted shots' included, so a shot an undo brings back never finds its name taken. */
+let drawnNames = new Set<string>()
+
+function drawShotName(): string {
+  const name = uniqueShotName(drawnNames)
+  drawnNames.add(name)
+  return name
+}
+
 const prefs = loadPrefs()
-const firstShot: ShotRecord = { id: newId(), doc: emptyDoc(), past: [], future: [], savedDoc: null, draftDoc: null }
+const firstShot: ShotRecord = { id: newId(), defaultName: drawShotName(), doc: emptyDoc(), past: [], future: [], savedDoc: null, draftDoc: null }
 
 let state: AppState = {
   activeId: firstShot.id,
@@ -319,6 +331,9 @@ export function selectLiveShots(s: AppState): ShotRecord[] {
 
 export const isUnsaved = (record: ShotRecord) => record.doc.sourceId !== null && record.doc !== record.savedDoc && record.doc !== record.draftDoc
 
+/** The name the active shot exports under while its file name is empty: the File name placeholder. */
+export const activeShotName = (s: AppState = state): string => s.shots.find((record) => record.id === s.activeId)?.defaultName ?? ''
+
 export const unsavedCount = () => liveShots().filter(isUnsaved).length
 
 function activate(shots: ShotRecord[], id: string): Partial<AppState> {
@@ -402,11 +417,12 @@ export function clearPickedShots() {
 /** Adds a shot at the end of the row and makes it active. */
 export function addShot(doc?: Doc): string {
   const id = newId()
+  const defaultName = drawShotName()
   flushGesture()
   store.set((s) => {
     const shots = liveShots(s)
     const last = shots.at(-1)?.doc
-    const record: ShotRecord = { id, doc: doc ?? emptyDoc(last), past: [], future: [], savedDoc: null, draftDoc: null }
+    const record: ShotRecord = { id, defaultName, doc: doc ?? emptyDoc(last), past: [], future: [], savedDoc: null, draftDoc: null }
     return activate([...shots, record], id)
   })
   return id
@@ -436,7 +452,7 @@ export function removeShots(ids: string[]): RemovedShots | null {
   let placeholder: string | null = null
   if (rest.length === 0) {
     placeholder = newId()
-    rest = [{ id: placeholder, doc: emptyDoc(removed.at(-1)!.record.doc), past: [], future: [], savedDoc: null, draftDoc: null }]
+    rest = [{ id: placeholder, defaultName: drawShotName(), doc: emptyDoc(removed.at(-1)!.record.doc), past: [], future: [], savedDoc: null, draftDoc: null }]
   }
   const nextActive = ids.includes(state.activeId) ? rest[Math.min(removed[0].index, rest.length - 1)].id : state.activeId
   store.set(() => activate(rest, nextActive))
@@ -505,6 +521,7 @@ export function markDraftSaved(written: ShotRecord[]) {
 export function replaceCanvas(shots: ShotRecord[], activeIndex: number, style: HouseStyle) {
   flushGesture()
   generation += 1
+  drawnNames = new Set(shots.map((record) => record.defaultName))
   const opened = shots.map((record): ShotRecord => ({ ...record, past: [], future: [], savedDoc: null, draftDoc: record.doc }))
   store.set({ ...activate(opened, opened[activeIndex]?.id ?? opened[0].id), style, view: FIT_ALL, cropView: FIT_ALL })
   releaseUnshownSources()

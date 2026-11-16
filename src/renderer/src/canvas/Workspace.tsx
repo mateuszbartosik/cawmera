@@ -822,7 +822,7 @@ export function Workspace() {
               data-testid="shot-label"
               data-shot={record.id}
               data-picked={isPicked || undefined}
-              aria-label={`${empty ? 'Empty shot' : shotFileName(record, index)}${isActive ? ', active' : ''}${isPicked ? ', selected' : ''}`}
+              aria-label={`${empty ? 'Empty shot' : shotFileName(record)}${isActive ? ', active' : ''}${isPicked ? ', selected' : ''}`}
               className={cn(
                 'group absolute flex h-5 items-center gap-1.5 text-[11px] leading-4 select-none',
                 (marquee || picked.size > 0 ? picked.has(record.id) : isActive) ? 'text-(--tc-accent)' : 'text-(--tc-label) hover:text-(--tc-fg)'
@@ -833,7 +833,7 @@ export function Workspace() {
               onPointerUp={onLabelPointerUp}
               onPointerCancel={onLabelPointerUp}
             >
-              <span className="min-w-0 truncate font-medium">{empty ? 'Empty shot' : shotFileName(record, index)}</span>
+              <span className="min-w-0 truncate font-medium">{empty ? 'Empty shot' : shotFileName(record)}</span>
               {unsaved && <span className="size-1.5 shrink-0 rounded-full bg-(--tc-accent)" title="Not exported yet" aria-label="not exported" />}
               {box.width > 150 && (
                 <span className="shrink-0 text-(--tc-value) tabular-nums" data-testid="shot-size">

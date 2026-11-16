@@ -6,7 +6,7 @@ import { basename, dirname, extname, isAbsolute, resolve } from 'node:path'
 export const isUncOrDevicePath = (path: string) => /^[\\/]{2}/.test(path)
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.webp'])
-const FALLBACK_IMAGE_STEM = 'whats-new-shot'
+const FALLBACK_IMAGE_STEM = 'cawmera-shot'
 
 /** The path's root, each folder below it, then the path itself. */
 function stepsDownTo(path: string): string[] {

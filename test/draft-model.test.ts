@@ -59,11 +59,11 @@ const editedRecording: RecordingDoc = {
 const blurBox: Redaction = { id: 'r1', rect: { x: 10, y: 20, w: 300, h: 100 }, time: { start: 600, end: 2000 } }
 const shotBox: Redaction = { id: 'r2', rect: { x: 5, y: 5, w: 50, h: 50 }, time: null }
 
-const record = (id: string, doc: Doc): ShotRecord => ({ id, doc, past: [], future: [], savedDoc: null, draftDoc: null })
+const record = (id: string, doc: Doc, defaultName = 'calm-owl-date'): ShotRecord => ({ id, defaultName, doc, past: [], future: [], savedDoc: null, draftDoc: null })
 const shots: ShotRecord[] = [
-  record('s0', { ...DEFAULT_DOC, angle: 100 }),
-  record('s1', { ...DEFAULT_DOC, sourceId: 'img1', capturedAt: 2, angle: 200, redactions: [shotBox], crop: { x: 0, y: 0, w: 400, h: 300 }, fileName: 'billing' }),
-  record('s2', { ...DEFAULT_DOC, sourceId: 'take1', size: { width: 1920, height: 1080 }, redactions: [blurBox], crop: { x: 100, y: 50, w: 800, h: 600 }, recording: editedRecording })
+  record('s0', { ...DEFAULT_DOC, angle: 100 }, 'brave-otter-fig'),
+  record('s1', { ...DEFAULT_DOC, sourceId: 'img1', capturedAt: 2, angle: 200, redactions: [shotBox], crop: { x: 0, y: 0, w: 400, h: 300 }, fileName: 'billing' }, 'calm-owl-date'),
+  record('s2', { ...DEFAULT_DOC, sourceId: 'take1', size: { width: 1920, height: 1080 }, redactions: [blurBox], crop: { x: 100, y: 50, w: 800, h: 600 }, recording: editedRecording }, 'quick-fox-lime')
 ]
 const imageSize = { width: 800, height: 600 }
 
@@ -226,8 +226,16 @@ describe('draft manifest', () => {
     expect(parsed.shots[0].doc).toEqual(shots[0].doc)
     expect(parsed.shots[1].doc).toEqual({ ...shots[1].doc, sourceId: keys.image.get('img1') })
     expect(parsed.shots[2].doc).toEqual({ ...shots[2].doc, sourceId: keys.take.get('take1') })
+    expect(parsed.shots.map((s) => s.defaultName)).toEqual(['brave-otter-fig', 'calm-owl-date', 'quick-fox-lime'])
     expect(parsed.style).toEqual(style)
     expect(parsed.active).toBe(2)
+  })
+
+  it('reads a shot’s name only when it is three short lowercase words', () => {
+    const named = (defaultName: unknown) =>
+      parseDraftManifest(JSON.stringify({ format: DRAFT_FORMAT, version: 1, shots: [{ kind: 'empty', defaultName, doc: {} }] }), new Map()).shots[0].defaultName
+    expect(named('merry-lynx-plum')).toBe('merry-lynx-plum')
+    for (const bad of [undefined, null, 7, '', 'Merry-Lynx-Plum', '../../evil-name-x', 'merry-lynx', 'merry-lynx-plum-pie']) expect(named(bad)).toBeNull()
   })
 
   it('writes the format, version, app version and a key per source', () => {
@@ -276,7 +284,7 @@ describe('draft manifest', () => {
     const text = JSON.stringify({ format: DRAFT_FORMAT, version: 1, extra: 1, style: 7, shots: [{ kind: 'empty', doc: { colour: 'red' }, more: true }] })
     const parsed = parseDraftManifest(text, new Map())
     expect(parsed.style).toEqual(DEFAULT_HOUSE_STYLE)
-    expect(parsed.shots).toEqual([{ kind: 'empty', doc: DEFAULT_DOC }])
+    expect(parsed.shots).toEqual([{ kind: 'empty', defaultName: null, doc: DEFAULT_DOC }])
     expect(parsed.active).toBe(0)
   })
 

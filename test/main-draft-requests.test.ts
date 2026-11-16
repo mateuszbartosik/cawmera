@@ -65,7 +65,7 @@ describe('draft requests from the renderer', ON_DISK, () => {
     expect(existsSync(t.saved)).toBe(true)
     expect(progress.at(-1)).toBe(1)
     await t.requests.save(t.files, '   ', noop)
-    expect(t.host.chooseSaveTarget).toHaveBeenLastCalledWith('whats-new-draft.cawmera')
+    expect(t.host.chooseSaveTarget).toHaveBeenLastCalledWith('cawmera-draft.cawmera')
   })
 
   it('refuses a save it couldn’t open again, or one whose take is unknown, before asking where to save', async () => {

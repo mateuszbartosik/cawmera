@@ -362,7 +362,7 @@ function registerIpc() {
       filter: FILTERS[kind],
       title: `Export ${kind.toUpperCase()}`,
       defaultFolder: app.getPath('pictures'),
-      fallbackName: `whats-new-shot.${kind}`
+      fallbackName: `cawmera-shot.${kind}`
     })
   })
 
@@ -372,7 +372,7 @@ function registerIpc() {
       filter: { name: 'MP4 video', extensions: ['mp4'] },
       title: 'Export MP4',
       defaultFolder: app.getPath('videos'),
-      fallbackName: 'whats-new-recording.mp4'
+      fallbackName: 'cawmera-recording.mp4'
     })
   )
 

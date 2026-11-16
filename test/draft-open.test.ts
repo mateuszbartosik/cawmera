@@ -96,6 +96,7 @@ const { deleteShots, loadFiles, openFilePicker } = await import('../src/renderer
 const { DEFAULT_DOC } = await import('../src/renderer/src/app/doc')
 const { DEFAULT_HOUSE_STYLE, serializeHouseStyle } = await import('../src/renderer/src/app/house-style')
 const { FIT_ALL, getSource, liveShots, registerSource, store, unsavedCount, updateDoc } = await import('../src/renderer/src/app/store')
+const { isShotName } = await import('../src/renderer/src/app/shot-names')
 const { getRecording, registerRecording } = await import('../src/renderer/src/recording/registry')
 const { DEFAULT_RECORDING } = await import('../src/renderer/src/recording/settings')
 const { serializeTrack } = await import('../src/renderer/src/recording/track')
@@ -215,9 +216,9 @@ function openedParts(): { contents: DraftContents; sources: Map<string, SourceEn
     style,
     active: 2,
     shots: [
-      { kind: 'empty', doc: emptyDoc },
-      { kind: 'screenshot', key: 'image1', doc: screenshotDoc, source: { name: 'billing.png', origin: 'paste', detected: 2 } },
-      { kind: 'recording', key: 'take1', doc: recordingDoc, name: 'Billing' }
+      { kind: 'empty', defaultName: 'brave-otter-fig', doc: emptyDoc },
+      { kind: 'screenshot', key: 'image1', defaultName: 'calm-owl-date', doc: screenshotDoc, source: { name: 'billing.png', origin: 'paste', detected: 2 } },
+      { kind: 'recording', key: 'take1', defaultName: 'quick-fox-lime', doc: recordingDoc, name: 'Billing' }
     ]
   }
   const bitmap = { width: 800, height: 600, close: vi.fn() } as unknown as ImageBitmap
@@ -243,6 +244,7 @@ function setPreviousCanvas() {
   registerSource({ id: 'previous', bitmap: previousBitmap as unknown as ImageBitmap, width: 400, height: 300, name: 'old.png', origin: 'file', detected: 1 })
   const shots: ShotRecord[] = [{ ...DEFAULT_DOC, sourceId: 'previous' }, { ...DEFAULT_DOC }].map((doc, index) => ({
     id: `shot-${index}`,
+    defaultName: ['merry-lynx-plum', 'quick-fox-lime'][index],
     doc,
     past: [],
     future: [],
@@ -292,6 +294,18 @@ describe('applyOpenedDraft', () => {
     expect(store.get()).toMatchObject({ mode: 'compose', selection: [], shotSelection: [], timelineSelection: null, view: FIT_ALL })
   })
 
+  it('gives each shot the name it was saved with, and a fresh one to a shot without one or repeating one, still saved', () => {
+    const { contents, sources, recordings } = openedParts()
+    const [empty, screenshot, recording] = contents.shots
+    applyOpenedDraft({ ...contents, shots: [empty, { ...screenshot, defaultName: null }, { ...recording, defaultName: 'brave-otter-fig' }] }, sources, recordings)
+    const names = liveShots().map((record) => record.defaultName)
+    expect(names[0]).toBe('brave-otter-fig')
+    expect(names.every(isShotName)).toBe(true)
+    expect(new Set(names).size).toBe(3)
+    expect(unsavedCount()).toBe(0)
+    expect([store.get().past, store.get().future]).toEqual([[], []])
+  })
+
   it('lets go of the takes no opened shot shows, posters included, and keeps the opened ones', () => {
     const oldPoster = { width: 1280, height: 720, close: vi.fn() }
     registerRecording({ id: 'old-take', name: 'Old', track, poster: oldPoster as unknown as ImageBitmap })
@@ -327,6 +341,14 @@ describe('applyOpenedDraft', () => {
 })
 
 describe('openDraft', () => {
+  it('opens each shot under the name it was saved with', async () => {
+    const names = ['brave-otter-fig', 'calm-owl-date', 'quick-fox-lime']
+    const shots = JSON.parse(manifest()).shots.map((shot: object, index: number) => ({ ...shot, defaultName: names[index] }))
+    mocks.bridge.openDraft.mockResolvedValue(opened({ manifest: manifest({ shots }) }))
+    expect(await openDraft(null)).toBe(true)
+    expect(liveShots().map((record) => record.defaultName)).toEqual(names)
+  })
+
   it('leaves the canvas alone when a draft can’t be opened', async () => {
     const before = store.get().shots
     mocks.bridge.openDraft.mockResolvedValue({ ok: false, reason: 'damaged', message: 'Unexpected end' })

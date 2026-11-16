@@ -1,9 +1,11 @@
 import { toast, type ExternalToast } from 'sonner'
 import { DRAFT_BUSY, type CawmeraBridge, type DiscardPurpose, type DraftFiles, type DraftOpenFailure } from '@shared/types'
-import { slugify, type Doc } from '../app/doc'
+import { slugify } from '../app/doc'
 import { houseStyleImported } from '../app/house-style'
 import { savedFile } from '../app/save-toast'
+import { settledShotNames } from '../app/shot-names'
 import {
+  activeShotName,
   getSource,
   liveShots,
   markDraftSaved,
@@ -35,7 +37,6 @@ import {
 } from './model'
 
 export const DRAFT_EXTENSION = '.cawmera'
-const FALLBACK_NAME = 'whats-new-draft'
 const SAVE_FAILED = 'The draft couldn’t be saved'
 const OPEN_FAILED = 'The draft couldn’t be opened'
 const OPEN_FAILURES: Record<DraftFailure | DraftOpenFailure, string> = {
@@ -58,8 +59,6 @@ const PNG_IHDR = 0x49484452
 const IHDR_LENGTH = 13
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
-
-const draftName = (doc: Doc) => `${slugify(doc.fileName) || FALLBACK_NAME}${DRAFT_EXTENSION}`
 
 const sourceName = ({ doc }: ShotRecord) => (doc.recording ? getRecording(doc.sourceId)?.name : getSource(doc.sourceId)?.name) ?? ''
 
@@ -158,6 +157,7 @@ function tooBigForADraft(shots: ShotRecord[], { keys }: BuiltManifest): string |
 async function saveCanvas(target: CawmeraBridge): Promise<boolean> {
   const shots = liveShots()
   const { activeId, style, doc } = store.get()
+  const suggestedName = `${slugify(doc.fileName) || activeShotName()}${DRAFT_EXTENSION}`
   const status = draftToast('Saving draft…')
   status.started()
   const refuse = (description: string) => {
@@ -171,7 +171,7 @@ async function saveCanvas(target: CawmeraBridge): Promise<boolean> {
     const recordings = draftRecordings(built)
     if (!fitsShownTracksBudget(recordings.map(({ track }) => track))) return refuse(TOO_MUCH_RECORDING_TO_SAVE)
     const files: DraftFiles = { manifest: built.manifest, screenshots: await draftScreenshots(built), recordings }
-    const result = await withProgress(target, status.progress, () => target.saveDraft(files, draftName(doc)))
+    const result = await withProgress(target, status.progress, () => target.saveDraft(files, suggestedName))
     if (!result) {
       status.dismiss()
       return false
@@ -371,8 +371,17 @@ async function loadPosters(takeIds: string[]) {
 
 /** `sources` and `recordings` hold the draft's screenshots and takes by key. Each take gets its poster, as a finished take does. */
 export function applyOpenedDraft(contents: DraftContents, sources: Map<string, SourceEntry>, recordings: Map<string, RecordingEntry>): void {
+  const names = settledShotNames(contents.shots.map((shot) => shot.defaultName))
   const shots = contents.shots.map(
-    (shot): ShotRecord => ({ id: newId(), doc: { ...shot.doc, sourceId: sourceIdOf(shot, sources, recordings) }, past: [], future: [], savedDoc: null, draftDoc: null })
+    (shot, index): ShotRecord => ({
+      id: newId(),
+      defaultName: names[index],
+      doc: { ...shot.doc, sourceId: sourceIdOf(shot, sources, recordings) },
+      past: [],
+      future: [],
+      savedDoc: null,
+      draftDoc: null
+    })
   )
   replaceCanvas(shots, contents.active, contents.style)
   for (const source of sources.values()) registerSource(source)

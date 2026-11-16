@@ -20,7 +20,7 @@ const empty = (): Doc => ({ ...DEFAULT_DOC })
 
 /** Fresh shots named A, B, C… (null: an empty shot), the first one active. */
 function setShots(...names: (string | null)[]) {
-  const shots: ShotRecord[] = names.map((name, i) => ({ id: name ?? `empty-${i}`, doc: name ? framed(name) : empty(), past: [], future: [], savedDoc: null, draftDoc: null }))
+  const shots: ShotRecord[] = names.map((name, i) => ({ id: name ?? `empty-${i}`, defaultName: `calm-owl-${'abcdefghij'[i]}`, doc: name ? framed(name) : empty(), past: [], future: [], savedDoc: null, draftDoc: null }))
   store.set({ shots, activeId: shots[0].id, doc: shots[0].doc, past: [], future: [], savedDoc: null, selection: [], shotSelection: [], mode: 'compose' })
 }
 const order = () => liveShots().map((record) => record.id)

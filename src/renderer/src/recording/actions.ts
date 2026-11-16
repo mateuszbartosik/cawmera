@@ -1,9 +1,9 @@
 import { toast } from 'sonner'
 import type { CaptureSource, RecordingError, RecordingFinished } from '@shared/types'
 import { countdown, interruptCountdown, resetCancellation } from '../app/actions'
-import { exportFileName, shotFallbackName, type Doc } from '../app/doc'
+import { exportFileName, type Doc } from '../app/doc'
 import { toastExportFailed, toastSaved } from '../app/save-toast'
-import { addShot, backdropReady, emptyDoc, liveShots, markSnapshotSaved, store, updateDoc } from '../app/store'
+import { activeShotName, addShot, backdropReady, emptyDoc, liveShots, markSnapshotSaved, store, updateDoc } from '../app/store'
 import { revealActive } from '../canvas/view'
 import { bridge, saveVideo } from '../platform/bridge'
 import { getRecording, loadPoster, registerRecording } from './registry'
@@ -146,7 +146,7 @@ export async function exportRecording() {
     return
   }
   const snapshotWithRecording = { ...snapshot, recording: snapshot.recording }
-  const name = exportFileName(snapshot.fileName, 'mp4', shotFallbackName(liveShots().findIndex((record) => record.id === activeId)))
+  const name = exportFileName(snapshot.fileName, 'mp4', activeShotName())
   store.set({ exportProgress: 0 })
   try {
     const [{ exportRecordingVideo }] = await Promise.all([import('./export'), backdropReady()])
