@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -19,6 +20,9 @@
 #include "json.h"
 #include "shapes.h"
 #include "track.h"
+
+using winrt::Windows::Foundation::AsyncStatus;
+using winrt::Windows::Foundation::TimeSpan;
 
 static int failures = 0;
 
@@ -275,6 +279,35 @@ void refusesToRecordOnlyWhenWindowsSaysNo() {
     CHECK(!refusesToRecord(std::nullopt));
 }
 
+struct FakeAccessRequest {
+    AsyncStatus status;
+    mutable TimeSpan waited{};
+    mutable bool resultsRead = false;
+
+    AsyncStatus wait_for(TimeSpan limit) const {
+        waited = limit;
+        return status;
+    }
+
+    CaptureAccessStatus GetResults() const {
+        resultsRead = true;
+        return CaptureAccessStatus::DeniedByUser;
+    }
+};
+
+void waitsTwoSecondsAtMostForWindowsToAnswer() {
+    const FakeAccessRequest answered{AsyncStatus::Completed};
+    CHECK(answerInTime(answered) == CaptureAccessStatus::DeniedByUser);
+    CHECK(answered.waited == std::chrono::seconds(2));
+
+    for (const AsyncStatus status : {AsyncStatus::Started, AsyncStatus::Canceled, AsyncStatus::Error}) {
+        const FakeAccessRequest unanswered{status};
+        CHECK(!answerInTime(unanswered));
+        CHECK(!unanswered.resultsRead);
+        CHECK(!refusesToRecord(answerInTime(unanswered)));
+    }
+}
+
 void writesTheTrackWithAReleasedClick() {
     TrackWriter track;
     track.addCursor(0, 812.5, 400.25, track.shapeIndex("arrow"));
@@ -361,6 +394,7 @@ int main() {
     namesFailureCodesLikeTheProtocol();
     describesFailuresInUtf8();
     refusesToRecordOnlyWhenWindowsSaysNo();
+    waitsTwoSecondsAtMostForWindowsToAnswer();
     writesTheTrackWithAReleasedClick();
     writesTheHeaderHiddenCursorAndHeldButton();
     writesNullForNumbersThatAreNotFinite();

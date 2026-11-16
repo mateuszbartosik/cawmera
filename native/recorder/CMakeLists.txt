@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(cawmera_recorder LANGUAGES CXX)
 
+# GraphicsCaptureAccess, which asks Windows whether desktop apps may record the screen, first came in this SDK.
+if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION AND CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION VERSION_LESS 10.0.20348)
+    message(FATAL_ERROR "The recorder needs Windows SDK 10.0.20348 or newer")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # The helper ships on its own inside Cawmera, so it carries the C++ runtime instead of needing the VC++ redistributable.

@@ -77,7 +77,7 @@ winrt::com_ptr<ID3D11Texture2D> textureLike(ID3D11Device* device, const D3D11_TE
 std::optional<CaptureAccessStatus> programmaticCaptureAccess() {
     try {
         if (!ApiInformation::IsTypePresent(L"Windows.Graphics.Capture.GraphicsCaptureAccess")) return std::nullopt;
-        return GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Programmatic).get();
+        return answerInTime(GraphicsCaptureAccess::RequestAccessAsync(GraphicsCaptureAccessKind::Programmatic));
     } catch (const winrt::hresult_error&) {
         return std::nullopt;
     }

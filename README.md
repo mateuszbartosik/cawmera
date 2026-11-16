@@ -60,6 +60,8 @@ Press `Ctrl+Shift+2` to stop, or click Cawmera on the taskbar. Clicking it durin
 
 Recording limits: monitors wider than 4096 px may fail to record, because of H.264 encoder limits. Windows N editions need the Media Feature Pack.
 
+Recording follows Windows' "Let desktop apps take screenshots and record the screen" switch, in Settings › Privacy & security › Screenshots and screen recording: while it's off, Record says Windows blocked the recording.
+
 ## Drafts
 
 A draft is a `.cawmera` file that keeps your shots and recordings with their edits, so you can come back later. **Save draft** (`Ctrl+Shift+D`, the toolbar button, or when you close Cawmera with unsaved work) writes one. Open it with **Open draft…** in the File menu, with **Open image…** (`Ctrl+O`), whose picker also takes drafts, or by dropping it onto Cawmera. Nothing is kept unless you save a draft.
