@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { appMenu } from '../src/renderer/src/menu/menu-model'
-import { menuNavKey } from '../src/renderer/src/menu/menu-nav'
+import { menuNavKey, passesThroughOpenMenu } from '../src/renderer/src/menu/menu-nav'
 
 const sections = appMenu({ platform: 'win32', recording: true })
 const focusAt = (section: number, item: number | null) => ({ kind: 'focus', focus: { section, item } })
@@ -54,5 +54,37 @@ describe('menuNavKey closing and unused keys', () => {
       expect(menuNavKey(key, firstLevel(0), sections)).toBeNull()
       expect(menuNavKey(key, inFile(3), sections)).toBeNull()
     }
+  })
+})
+
+describe('passesThroughOpenMenu', () => {
+  const keyDown = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }> = {}) => ({
+    key,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...mods
+  })
+
+  it('lets Ctrl and Meta shortcuts through to the window', () => {
+    expect(passesThroughOpenMenu(keyDown('L', { ctrlKey: true, shiftKey: true }))).toBe(true)
+    expect(passesThroughOpenMenu(keyDown('s', { ctrlKey: true }))).toBe(true)
+    expect(passesThroughOpenMenu(keyDown('z', { ctrlKey: true }))).toBe(true)
+    expect(passesThroughOpenMenu(keyDown('k', { metaKey: true }))).toBe(true)
+  })
+
+  it('keeps bare modifiers in the menu, even with Ctrl or Meta held', () => {
+    expect(passesThroughOpenMenu(keyDown('Control', { ctrlKey: true }))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('Shift', { shiftKey: true }))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('Shift', { ctrlKey: true, shiftKey: true }))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('Meta', { metaKey: true }))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('Alt', { ctrlKey: true, altKey: true }))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('AltGraph', { ctrlKey: true, altKey: true }))).toBe(false)
+  })
+
+  it('keeps plain keys and Alt letters in the menu', () => {
+    for (const key of [' ', 's', 'Delete', 'Enter']) expect(passesThroughOpenMenu(keyDown(key))).toBe(false)
+    expect(passesThroughOpenMenu(keyDown('f', { altKey: true }))).toBe(false)
   })
 })

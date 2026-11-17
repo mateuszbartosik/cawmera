@@ -7,7 +7,7 @@ import { useRecordingSupport } from '../recording/support'
 import type { Point } from '../render/geometry'
 import { cn, IconButton } from '../ui/controls'
 import { appMenu, showsMenuButton, type MenuSection } from './menu-model'
-import { menuNavKey, type MenuFocus } from './menu-nav'
+import { menuNavKey, passesThroughOpenMenu, type MenuFocus } from './menu-nav'
 import { closeAppMenu, getAppMenu, setAppMenuFocus, toggleAppMenu, useAppMenu } from './menu-state'
 
 interface AppMenuProps {
@@ -164,13 +164,21 @@ function MenuPanels({ sections, focus, onRun }: MenuPanelsProps) {
     aim.current = null
   }
 
-  const run = (command: MenuCommand) => {
+  const closeAndReturnFocus = () => {
     closeAppMenu()
     returnFocus()
+  }
+
+  const run = (command: MenuCommand) => {
+    closeAndReturnFocus()
     onRun(command)
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (passesThroughOpenMenu(event)) {
+      closeAndReturnFocus()
+      return
+    }
     event.stopPropagation()
     if (event.repeat && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault()

@@ -10,6 +10,11 @@ export interface MenuFocus {
 export type MenuNavAction = { kind: 'focus'; focus: MenuFocus } | { kind: 'run'; command: MenuCommand } | { kind: 'close' }
 
 const focusAction = (section: number, item: number | null): MenuNavAction => ({ kind: 'focus', focus: { section, item } })
+const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph'])
+
+export function passesThroughOpenMenu(event: { key: string; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return (event.ctrlKey || event.metaKey) && !MODIFIER_KEYS.has(event.key)
+}
 
 export function menuNavKey(key: string, focus: MenuFocus, sections: readonly MenuSection[]): MenuNavAction | null {
   if (key === 'Tab') return { kind: 'close' }
