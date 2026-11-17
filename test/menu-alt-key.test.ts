@@ -15,6 +15,8 @@ const altDown = () => press('Alt', 'AltLeft', { altKey: true })
 const altUp = () => press('Alt', 'AltLeft')
 const shiftDown = () => press('Shift', 'ShiftLeft', { shiftKey: true })
 const altDownWithShift = () => press('Alt', 'AltLeft', { altKey: true, shiftKey: true })
+const rightAltDown = () => press('Alt', 'AltRight', { altKey: true })
+const rightAltUp = () => press('Alt', 'AltRight')
 
 describe('altTracker', () => {
   it('toggles on Alt pressed and released alone', () => {
@@ -116,6 +118,70 @@ describe('altTracker', () => {
     tracker.keyDown(altDown())
     tracker.keyDown(press('Tab', 'Tab', { altKey: true }))
     tracker.keyUp(altUp())
+    tracker.keyDown(altDown())
+    expect(tracker.keyUp(altUp())).toEqual({ kind: 'toggle' })
+  })
+
+  it('ignores the release after a key that reports only its release, like Print Screen', () => {
+    const tracker = altTracker()
+    tracker.keyDown(altDown())
+    expect(tracker.keyUp(press('PrintScreen', 'PrintScreen', { altKey: true }))).toBeNull()
+    expect(tracker.keyUp(altUp())).toBeNull()
+  })
+
+  it('disarms on an Alt keydown with Ctrl, Meta or Shift', () => {
+    const modifiers: Partial<AltKeyEvent>[] = [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]
+    for (const modifier of modifiers) {
+      const tracker = altTracker()
+      tracker.keyDown(altDown())
+      expect(tracker.keyDown(press('Alt', 'AltLeft', { altKey: true, ...modifier }))).toBeNull()
+      expect(tracker.keyUp(altUp())).toBeNull()
+    }
+  })
+
+  it('arms only on the left Alt', () => {
+    const tracker = altTracker()
+    expect(tracker.keyDown(rightAltDown())).toBeNull()
+    expect(tracker.keyUp(rightAltUp())).toBeNull()
+    tracker.keyDown(altDown())
+    expect(tracker.keyUp(altUp())).toEqual({ kind: 'toggle' })
+  })
+
+  it('opens no section on right Alt with a letter', () => {
+    const tracker = altTracker()
+    tracker.keyDown(rightAltDown())
+    expect(tracker.keyDown(press('f', 'KeyF', { altKey: true }))).toBeNull()
+    expect(tracker.keyUp(press('f', 'KeyF', { altKey: true }))).toBeNull()
+    expect(tracker.keyUp(rightAltUp())).toBeNull()
+  })
+
+  it('ignores the release after a pointer press, as in Alt + drag', () => {
+    const tracker = altTracker()
+    tracker.keyDown(altDown())
+    tracker.pointerDown()
+    tracker.pointerUp()
+    expect(tracker.keyUp(altUp())).toBeNull()
+  })
+
+  it('ignores Alt pressed while a pointer is held', () => {
+    const tracker = altTracker()
+    tracker.pointerDown()
+    expect(tracker.keyDown(altDown())).toBeNull()
+    expect(tracker.keyUp(altUp())).toBeNull()
+  })
+
+  it('toggles on Alt once the pointer is released', () => {
+    const tracker = altTracker()
+    tracker.pointerDown()
+    tracker.pointerUp()
+    tracker.keyDown(altDown())
+    expect(tracker.keyUp(altUp())).toEqual({ kind: 'toggle' })
+  })
+
+  it('toggles on Alt after an interrupt clears a held pointer', () => {
+    const tracker = altTracker()
+    tracker.pointerDown()
+    tracker.interrupt()
     tracker.keyDown(altDown())
     expect(tracker.keyUp(altUp())).toEqual({ kind: 'toggle' })
   })

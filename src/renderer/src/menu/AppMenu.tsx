@@ -39,7 +39,8 @@ export function AppMenu({ onRun }: AppMenuProps) {
 
 function MenuButton({ platform, onRun }: AppMenuProps & { platform: string }) {
   const { open, focus } = useAppMenu()
-  const sections = appMenu({ platform, recording: useRecordingSupport()?.ok === true })
+  const recordingSupport = useRecordingSupport()
+  const sections = appMenu({ platform, recording: recordingSupport?.ok === true })
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -171,6 +172,10 @@ function MenuPanels({ sections, focus, onRun }: MenuPanelsProps) {
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation()
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault()
+      return
+    }
     const current = getAppMenu().focus
     if (event.key === 'Escape' && current.item === null && pointerOpened === current.section) {
       event.preventDefault()

@@ -407,7 +407,6 @@ function createWindow() {
     show: false,
     title: 'Cawmera',
     backgroundColor: '#0a0a0a',
-    autoHideMenuBar: true,
     ...(!app.isPackaged && existsSync(devIcon) ? { icon: devIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

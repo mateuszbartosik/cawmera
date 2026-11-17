@@ -32,7 +32,7 @@ Get the Windows zip from the [latest release](https://github.com/mateuszbartosik
 
 ## Use
 
-The ≡ button at the top-left, or `Alt`, opens Cawmera's menu with File, Edit, View and Help.
+On Windows and Linux, the ≡ button at the top-left, or `Alt`, opens Cawmera's menu with File, Edit, View and Help.
 
 1. **Add a screenshot**: paste, drop, open, or click **Screenshot** in **Capture** and pick a window or screen. A countdown runs first: 3 seconds, or 5 or 10 if you set **Capture delay**. Or open a [draft](#drafts) to pick up where you left off.
 2. **Size**: pick a preset in Export, like **Article (OG)** for 1200 × 630, or type a width and height. The screenshot keeps its scale, so a smaller image shows less of it.

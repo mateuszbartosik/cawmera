@@ -1,7 +1,6 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import type { MenuCommand } from '../shared/types'
 
-/** Windows and Linux draw their menu in the renderer, so only macOS has a native one. Shortcuts are handled by the renderer; the menu only shows them and forwards clicks. */
 export function nativeMenuTemplate(platform: NodeJS.Platform, send: (command: MenuCommand) => void): MenuItemConstructorOptions[] | null {
   if (platform !== 'darwin') return null
   const item = (label: string, accelerator: string, command: MenuCommand): MenuItemConstructorOptions => ({

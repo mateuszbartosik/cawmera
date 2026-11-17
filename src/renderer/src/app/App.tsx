@@ -109,13 +109,15 @@ function onKeyDown(event: KeyboardEvent) {
   const key = event.key.toLowerCase()
   const typing = isTyping(event.target)
   const s = store.get()
-
-  if (s.capture.phase === 'picking') return // the dialog owns the keyboard
-
   const run = (command: MenuCommand) => {
     event.preventDefault()
     runCommand(command)
   }
+  if (hasMenuButton && mod && event.shiftKey && key === 'i') return run('toggle-dev-tools')
+  if (platform === 'linux' && mod && key === 'q') return run('quit')
+
+  if (s.capture.phase === 'picking') return // the dialog owns the keyboard
+
   if (mod && event.shiftKey && key === 's') return run('export-all')
   if (mod && key === 's') return run('export')
   if (isDesktop && mod && event.shiftKey && key === 'd') return run('save-draft')
@@ -127,8 +129,6 @@ function onKeyDown(event: KeyboardEvent) {
   if (mod && event.shiftKey && event.code === 'Digit2') return run('capture')
   if (mod && event.shiftKey && key === 'l') return run('toggle-theme')
   if (mod && event.altKey && event.code === 'KeyH') return run('toggle-house-style')
-  if (hasMenuButton && mod && event.shiftKey && key === 'i') return run('toggle-dev-tools')
-  if (platform === 'linux' && mod && key === 'q') return run('quit')
   if (mod && (key === '=' || key === '+')) return run('zoom-in')
   if (mod && (key === '-' || key === '_')) return run('zoom-out')
   if (mod && key === '0') return run('zoom-100')
@@ -178,18 +178,24 @@ function listenForMenuAlt(): () => void {
   }
   const keyDown = (event: KeyboardEvent) => answer(event, tracker.keyDown(event))
   const keyUp = (event: KeyboardEvent) => answer(event, tracker.keyUp(event))
+  const pointerDown = () => tracker.pointerDown()
+  const pointerUp = () => tracker.pointerUp()
   const interrupt = () => tracker.interrupt()
   window.addEventListener('keydown', keyDown, true)
   window.addEventListener('keyup', keyUp, true)
-  window.addEventListener('pointerdown', interrupt, true)
+  window.addEventListener('pointerdown', pointerDown, true)
+  window.addEventListener('pointerup', pointerUp, true)
+  window.addEventListener('pointercancel', pointerUp, true)
   window.addEventListener('wheel', interrupt, { capture: true, passive: true })
-  window.addEventListener('blur', interrupt, true)
+  window.addEventListener('blur', interrupt)
   return () => {
     window.removeEventListener('keydown', keyDown, true)
     window.removeEventListener('keyup', keyUp, true)
-    window.removeEventListener('pointerdown', interrupt, true)
+    window.removeEventListener('pointerdown', pointerDown, true)
+    window.removeEventListener('pointerup', pointerUp, true)
+    window.removeEventListener('pointercancel', pointerUp, true)
     window.removeEventListener('wheel', interrupt, true)
-    window.removeEventListener('blur', interrupt, true)
+    window.removeEventListener('blur', interrupt)
   }
 }
 
