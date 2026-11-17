@@ -22,10 +22,12 @@ export const percent = (value: number) => `${Math.round(value * 100)}%`
 export function Tooltip({
   text,
   side = 'top',
+  disabled = false,
   children
 }: {
   text: ReactNode
   side?: 'top' | 'bottom' | 'left'
+  disabled?: boolean
   children: (props: { ref: (el: HTMLElement | null) => void; 'aria-describedby'?: string }) => ReactElement
 }) {
   const id = useId()
@@ -33,6 +35,7 @@ export function Tooltip({
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  const shown = open && !disabled
 
   useEffect(() => {
     if (!anchor) return
@@ -60,7 +63,7 @@ export function Tooltip({
   }, [anchor])
 
   useLayoutEffect(() => {
-    if (!open || !anchor || !tipRef.current) return
+    if (!shown || !anchor || !tipRef.current) return
     const a = anchor.getBoundingClientRect()
     const t = tipRef.current.getBoundingClientRect()
     const gap = 6
@@ -69,12 +72,12 @@ export function Tooltip({
     left = Math.max(8, Math.min(left, window.innerWidth - t.width - 8))
     top = Math.max(8, Math.min(top, window.innerHeight - t.height - 8))
     setPosition({ left, top })
-  }, [open, anchor, side])
+  }, [shown, anchor, side])
 
   return (
     <>
-      {children({ ref: setAnchor, 'aria-describedby': open ? id : undefined })}
-      {open &&
+      {children({ ref: setAnchor, 'aria-describedby': shown ? id : undefined })}
+      {shown &&
         createPortal(
           <div
             ref={tipRef}
@@ -98,14 +101,22 @@ export function IconButton({
   label,
   shortcut,
   active,
+  tooltipDisabled,
   className,
   children,
   side = 'top',
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; shortcut?: string; active?: boolean; side?: 'top' | 'bottom' | 'left' }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string
+  shortcut?: string
+  active?: boolean
+  tooltipDisabled?: boolean
+  side?: 'top' | 'bottom' | 'left'
+}) {
   return (
     <Tooltip
       side={side}
+      disabled={tooltipDisabled}
       text={
         <span className="flex items-center gap-2">
           {label}

@@ -23,7 +23,7 @@ export function altTracker(): AltTracker {
   return {
     keyDown(event) {
       if (event.key === 'Alt') {
-        if (!event.repeat && !event.ctrlKey && !event.metaKey) armed = true
+        if (!event.repeat && !event.ctrlKey && !event.metaKey && !event.shiftKey) armed = true
         return null
       }
       if (!armed) return null

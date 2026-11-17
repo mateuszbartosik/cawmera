@@ -13,6 +13,8 @@ const press = (key: string, code: string, mods: Partial<AltKeyEvent> = {}): AltK
 })
 const altDown = () => press('Alt', 'AltLeft', { altKey: true })
 const altUp = () => press('Alt', 'AltLeft')
+const shiftDown = () => press('Shift', 'ShiftLeft', { shiftKey: true })
+const altDownWithShift = () => press('Alt', 'AltLeft', { altKey: true, shiftKey: true })
 
 describe('altTracker', () => {
   it('toggles on Alt pressed and released alone', () => {
@@ -50,6 +52,32 @@ describe('altTracker', () => {
     tracker.keyDown(press('Shift', 'ShiftLeft', { altKey: true, shiftKey: true }))
     tracker.keyUp(press('Shift', 'ShiftLeft', { altKey: true }))
     expect(tracker.keyUp(altUp())).toBeNull()
+  })
+
+  it('leaves Shift then Alt to Windows when Alt is released first', () => {
+    const tracker = altTracker()
+    expect(tracker.keyDown(shiftDown())).toBeNull()
+    expect(tracker.keyDown(altDownWithShift())).toBeNull()
+    expect(tracker.keyUp(press('Alt', 'AltLeft', { shiftKey: true }))).toBeNull()
+    expect(tracker.keyUp(press('Shift', 'ShiftLeft'))).toBeNull()
+  })
+
+  it('leaves Shift then Alt to Windows when Shift is released first', () => {
+    const tracker = altTracker()
+    tracker.keyDown(shiftDown())
+    tracker.keyDown(altDownWithShift())
+    expect(tracker.keyUp(press('Shift', 'ShiftLeft', { altKey: true }))).toBeNull()
+    expect(tracker.keyUp(altUp())).toBeNull()
+  })
+
+  it('toggles on a clean Alt after Shift then Alt', () => {
+    const tracker = altTracker()
+    tracker.keyDown(shiftDown())
+    tracker.keyDown(altDownWithShift())
+    tracker.keyUp(press('Alt', 'AltLeft', { shiftKey: true }))
+    tracker.keyUp(press('Shift', 'ShiftLeft'))
+    tracker.keyDown(altDown())
+    expect(tracker.keyUp(altUp())).toEqual({ kind: 'toggle' })
   })
 
   it('ignores AltGr', () => {

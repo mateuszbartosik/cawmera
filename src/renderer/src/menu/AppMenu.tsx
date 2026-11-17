@@ -61,7 +61,16 @@ function MenuButton({ platform, onRun }: AppMenuProps & { platform: string }) {
         className="flex items-center justify-center rounded-lg border border-(--tc-line) bg-(--tc-panel) text-(--tc-fg) shadow-[var(--tc-panel-shadow)] backdrop-blur-[40px] backdrop-saturate-150"
         style={{ width: MENU_BUTTON_SIZE, height: MENU_BUTTON_SIZE }}
       >
-        <IconButton label="Menu" shortcut="Alt" side="bottom" active={open} aria-haspopup="menu" aria-expanded={open} onClick={toggleAppMenu}>
+        <IconButton
+          label="Menu"
+          shortcut="Alt"
+          side="bottom"
+          tooltipDisabled={open}
+          active={open}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={toggleAppMenu}
+        >
           <List size={15} />
         </IconButton>
       </div>
