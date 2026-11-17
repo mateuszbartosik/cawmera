@@ -92,7 +92,7 @@ function runCommand(command: MenuCommand) {
       return bridge?.toggleDevTools()
     case 'about':
       void (bridge?.getVersion() ?? Promise.resolve('web')).then((version) =>
-        toast('Cawmera', { description: `Version ${version}. Puts a screenshot into a frame.` })
+        toast('Cawmera', { description: `Version ${version}. Puts screenshots and screen recordings into a frame.` })
       )
       return
   }

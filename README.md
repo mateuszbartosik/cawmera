@@ -4,8 +4,8 @@
 
 # Cawmera
 
-**Puts a screenshot into a frame.**<br>
-Every image gets the same background and shows the UI at the same scale, at 1600 × 1000 or any size you pick.
+**Puts screenshots and screen recordings into a frame.**<br>
+Every image and video gets the same background and shows the UI at the same scale, at any size you pick.
 
 [![Download for Windows](https://img.shields.io/github/v/release/mateuszbartosik/cawmera?style=for-the-badge&label=Download%20for%20Windows&labelColor=26262F&color=66DCC2)](https://github.com/mateuszbartosik/cawmera/releases/latest)
 [![MIT license](https://img.shields.io/badge/license-MIT-66DCC2?style=for-the-badge&labelColor=26262F)](LICENSE)
@@ -23,6 +23,7 @@ Every image gets the same background and shows the UI at the same scale, at 1600
 
 - **One scale for the UI.** Cawmera never shrinks a screenshot to fit. Its scale comes from how it was captured, so text reads the same in every image.
 - **One look for a product.** Background, light, frame and shadow come from a house style that a team shares as a single file.
+- **Recordings too.** Record a window or a screen and get an MP4 in the same frame. Cawmera zooms in on your clicks and redraws the cursor smoothly. On the timeline you can trim, cut, speed up and blur.
 - **Any size.** 1600 × 1000 by default, Article (OG) for link previews, presets for slides and social posts, or your own width and height.
 - **Private.** Screenshots and recordings stay on your computer, and Cawmera makes no network requests. It never persists them unless you save a draft.
 

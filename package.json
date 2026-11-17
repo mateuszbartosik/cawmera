@@ -3,7 +3,7 @@
   "productName": "Cawmera",
   "version": "0.8.0",
   "private": true,
-  "description": "Puts a screenshot into a frame",
+  "description": "Puts screenshots and screen recordings into a frame",
   "author": "Mateusz Bartosik",
   "license": "MIT",
   "repository": "github:mateuszbartosik/cawmera",
