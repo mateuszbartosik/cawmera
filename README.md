@@ -15,7 +15,7 @@ Every image and video gets the same background and shows the UI at the same scal
 <br>
 
 <p align="center">
-  <img src=".github/assets/hero.webp" alt="Cawmera's own window, framed by Cawmera on a graphite background with a mint light. On its canvas, a dashboard screenshot is being made into an Article (OG) image with a background image.">
+  <img src=".github/assets/hero.webp" alt="Cawmera's own window, framed by Cawmera on a dark background with a soft grey light. On its canvas, a dashboard screenshot named quick-gazelle-blueberry is being framed at 1600 × 1000, with the Capture and Background sections open beside it.">
 </p>
 <p align="center"><sub>Cawmera, framed by Cawmera.</sub></p>
 
