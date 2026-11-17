@@ -6,6 +6,7 @@ import type { Point, Rect, Size } from '../render/geometry'
 
 export const PANEL_WIDTH = 300
 export const PANEL_GAP = 10
+export const MENU_BUTTON_SIZE = 36
 const TOOLBAR_SPACE = 64
 /** Height the recording timeline takes at the bottom of the canvas. */
 export const TIMELINE_SPACE = 212
@@ -38,6 +39,11 @@ export function cropSubject(s: Pick<AppState, 'doc'>): (Size & { density: number
 
 export function isNarrow(s: Pick<AppState, 'viewport'>): boolean {
   return s.viewport.width > 0 && s.viewport.width < NARROW_WIDTH
+}
+
+/** The least `left` a toast may have so it never covers the menu button. */
+export function toastClearance(showsMenuButton: boolean): number {
+  return showsMenuButton ? PANEL_GAP * 2 + MENU_BUTTON_SIZE : PANEL_GAP
 }
 
 export interface WorkspaceGeometry {

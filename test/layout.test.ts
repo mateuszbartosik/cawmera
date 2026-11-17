@@ -20,7 +20,7 @@ import {
   sourceToOutput,
   visibleSource
 } from '../src/renderer/src/render/layout'
-import { shotAt, shotRects, slotAt, slotX } from '../src/renderer/src/canvas/view'
+import { shotAt, shotRects, slotAt, slotX, toastClearance } from '../src/renderer/src/canvas/view'
 import { emptyDoc } from '../src/renderer/src/app/store'
 import { DEFAULT_DOC } from '../src/renderer/src/app/doc'
 import { fakeContext } from './fake-canvas'
@@ -342,6 +342,13 @@ describe('shots on the canvas', () => {
     expect(slotX(rects, 0)).toBe(-80)
     expect(slotX(rects, 1)).toBe(1680)
     expect(slotX(rects, 3)).toBe(4280)
+  })
+})
+
+describe('toasts', () => {
+  it('stay clear of the menu button', () => {
+    expect(toastClearance(false)).toBe(10)
+    expect(toastClearance(true)).toBe(56)
   })
 })
 

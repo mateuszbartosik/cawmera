@@ -4,8 +4,12 @@ import type { MenuCommand } from '@shared/types'
 import { CropBar } from '../canvas/CropBar'
 import { SelectionBar } from '../canvas/SelectionBar'
 import { Workspace } from '../canvas/Workspace'
-import { isNarrow, PANEL_GAP, timelineEditable, shotAt, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
+import { isNarrow, timelineEditable, shotAt, toastClearance, toWorld, workspaceGeometry, zoomFit, zoomStep, zoomTo, zoomToActive } from '../canvas/view'
 import { openDraft, openDraftAmong, saveDraftUnlessBusy, saveOrDiscardUnsaved } from '../drafts/actions'
+import { altTracker, type AltAction } from '../menu/alt-key'
+import { AppMenu } from '../menu/AppMenu'
+import { showsMenuButton } from '../menu/menu-model'
+import { appMenuAllowed, openAppMenu, toggleAppMenu } from '../menu/menu-state'
 import { CaptureDialog } from '../panel/CaptureDialog'
 import { Panel } from '../panel/Panel'
 import { bridge, isDesktop } from '../platform/bridge'
@@ -35,6 +39,9 @@ import { cutSelection, splitAtPlayhead } from '../recording/edit-actions'
 import { deleteSelectedZoom } from '../recording/zoom-actions'
 import { deleteAction, escapeAction } from './selection-keys'
 import { clearPickedShots, liveShots, pickAllShots, redo, selectShot, store, undo, unsavedCount, useApp } from './store'
+
+const platform = bridge?.platform ?? null
+const hasMenuButton = showsMenuButton(platform)
 
 function runCommand(command: MenuCommand) {
   switch (command) {
@@ -120,6 +127,8 @@ function onKeyDown(event: KeyboardEvent) {
   if (mod && event.shiftKey && event.code === 'Digit2') return run('capture')
   if (mod && event.shiftKey && key === 'l') return run('toggle-theme')
   if (mod && event.altKey && event.code === 'KeyH') return run('toggle-house-style')
+  if (hasMenuButton && mod && event.shiftKey && key === 'i') return run('toggle-dev-tools')
+  if (platform === 'linux' && mod && key === 'q') return run('quit')
   if (mod && (key === '=' || key === '+')) return run('zoom-in')
   if (mod && (key === '-' || key === '_')) return run('zoom-out')
   if (mod && key === '0') return run('zoom-100')
@@ -158,6 +167,32 @@ function onKeyDown(event: KeyboardEvent) {
   }
 }
 
+/** Alt alone toggles the menu and Alt+F, E, V or H open it. Heard in the capture phase, because the open menu keeps every key from the window. */
+function listenForMenuAlt(): () => void {
+  const tracker = altTracker()
+  const answer = (event: KeyboardEvent, action: AltAction | null) => {
+    if (!action || !appMenuAllowed(store.get())) return
+    event.preventDefault()
+    if (action.kind === 'toggle') toggleAppMenu()
+    else openAppMenu(action.section)
+  }
+  const keyDown = (event: KeyboardEvent) => answer(event, tracker.keyDown(event))
+  const keyUp = (event: KeyboardEvent) => answer(event, tracker.keyUp(event))
+  const interrupt = () => tracker.interrupt()
+  window.addEventListener('keydown', keyDown, true)
+  window.addEventListener('keyup', keyUp, true)
+  window.addEventListener('pointerdown', interrupt, true)
+  window.addEventListener('wheel', interrupt, { capture: true, passive: true })
+  window.addEventListener('blur', interrupt, true)
+  return () => {
+    window.removeEventListener('keydown', keyDown, true)
+    window.removeEventListener('keyup', keyUp, true)
+    window.removeEventListener('pointerdown', interrupt, true)
+    window.removeEventListener('wheel', interrupt, true)
+    window.removeEventListener('blur', interrupt, true)
+  }
+}
+
 const TOAST_WIDTH = 320
 
 export function App() {
@@ -165,7 +200,7 @@ export function App() {
   const narrow = useApp((s) => isNarrow(s))
   const toastLeft = useApp((s) => {
     const { area } = workspaceGeometry(s)
-    return Math.max(PANEL_GAP, Math.round(area.x + area.width / 2 - TOAST_WIDTH / 2))
+    return Math.max(toastClearance(hasMenuButton), Math.round(area.x + area.width / 2 - TOAST_WIDTH / 2))
   })
   // Narrow layout: the toolbar (and crop bar) sit at the top, so toasts go just below them.
   const cropping = useApp((s) => s.mode === 'crop')
@@ -231,6 +266,7 @@ export function App() {
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('drop', onDrop)
     window.addEventListener('beforeunload', onBeforeUnload)
+    const offMenuAlt = hasMenuButton ? listenForMenuAlt() : undefined
     const offMenu = bridge?.onMenuCommand(runCommand)
     const offCancel = bridge?.onCaptureCancel(cancelCapture)
     const offFinished = bridge?.onRecordingFinished((result) => void finishRecording(result))
@@ -248,6 +284,7 @@ export function App() {
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('drop', onDrop)
       window.removeEventListener('beforeunload', onBeforeUnload)
+      offMenuAlt?.()
       offMenu?.()
       offCancel?.()
       offFinished?.()
@@ -262,6 +299,7 @@ export function App() {
       <CropBar />
       <SelectionBar />
       <Toolbar />
+      <AppMenu onRun={runCommand} />
       <Timeline />
       <Panel />
       <CaptureDialog />
