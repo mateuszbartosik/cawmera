@@ -1,7 +1,7 @@
 {
   "name": "cawmera",
   "productName": "Cawmera",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "Puts a screenshot into a frame",
   "author": "Mateusz Bartosik",
