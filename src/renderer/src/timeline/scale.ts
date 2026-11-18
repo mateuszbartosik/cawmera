@@ -124,6 +124,13 @@ export function formatClock(ms: number): string {
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}.${tenths % 10}`
 }
 
+export function formatLength(ms: number): string {
+  const tenths = Math.floor(Math.max(0, ms) / 100)
+  const seconds = Math.floor(tenths / 10)
+  if (seconds < 60) return `${seconds}.${tenths % 10} s`
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
 export function formatRulerLabel(ms: number): string {
   const seconds = Math.round(ms / 1000)
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`

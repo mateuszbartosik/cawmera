@@ -13,6 +13,7 @@ import { takeViewFor } from '../recording/take-view'
 import { autoAimAvailable, deleteSelectedZoom, resetZooms, setSelectedZoom, zoomHint } from '../recording/zoom-actions'
 import { clicksCovered, ZOOM_DEPTH_RANGE, type ZoomAim } from '../recording/zoom-edits'
 import { useDragSession } from '../timeline/drag-session'
+import { formatLength } from '../timeline/scale'
 import { ActionsRow, Button, IconButton, percent, Section, Segmented, Slider, Switch } from '../ui/controls'
 import { useSection } from './useSection'
 
@@ -39,13 +40,6 @@ const AIM_OPTIONS: { value: ZoomAim; label: string; disabled?: boolean }[] = [
 ]
 
 const times = (value: number) => `${value.toFixed(1)}×`
-
-function formatLength(ms: number) {
-  const seconds = ms / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)} s`
-  const whole = Math.round(seconds)
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
-}
 
 /** One undo step per slider drag, like the light controls. */
 function useSliderDrag() {

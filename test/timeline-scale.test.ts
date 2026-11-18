@@ -5,6 +5,7 @@ import {
   dragTrim,
   fitView,
   formatClock,
+  formatLength,
   formatRulerLabel,
   playheadDrag,
   scrollView,
@@ -109,6 +110,14 @@ describe('timeline scale', () => {
     expect(formatClock(0)).toBe('0:00.0')
     expect(formatClock(-40)).toBe('0:00.0')
     expect(formatClock(75_000)).toBe('1:15.0')
+  })
+
+  it('formats the Length readout as the clock shows the same length, never rounded up', () => {
+    expect(formatLength(13_772.7)).toBe('13.7 s')
+    expect(formatLength(16_516.7)).toBe('16.5 s')
+    expect(formatLength(59_960)).toBe('59.9 s')
+    expect(formatLength(75_600)).toBe('1:15')
+    expect(formatLength(0)).toBe('0.0 s')
   })
 
   it('formats ruler labels as minutes and seconds', () => {
